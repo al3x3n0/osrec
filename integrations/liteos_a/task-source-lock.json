@@ -1,0 +1,37 @@
+{
+  "repository": "https://github.com/openharmony/kernel_liteos_a",
+  "revision": "4ac7f3aed67000b47bc14d6fe79d63ada708d780",
+  "source": "syscall/process_syscall.c",
+  "source_sha256": "36a5c34f9fd5c38e4f0011e4ae207e8b22c74ecffccdce8700470f53e1ace10d",
+  "functions": {
+    "SysGetPPID": {
+      "signature": "void",
+      "sha256": "9e4db568ecf348d8ab2e096c99ae01fda712555558cd34d64c4071d9cd4ef62a"
+    },
+    "SysGetTid": {
+      "signature": "void",
+      "sha256": "cc52451cb1b9348a44a773473fe9e5a7fe23ffe261adb392932d62a9f1bd8768"
+    }
+  },
+  "headers": {
+    "syscall/syscall_lookup.h": "468a2f8c8ab28c8a78c988aed2a56ad4396cd5bb11287520e98e1661d65fea5e",
+    "kernel/base/include/los_process_pri.h": "6cb70287391cd820eba9d51c43958cac671679414fb870cb21f1713f515c467f",
+    "kernel/base/include/los_task_pri.h": "1f73f9bdf6e20f3d834295f337868229865caa32b3e59175a97f52d834009c19"
+  },
+  "syscalls": [
+    {
+      "number": 64,
+      "name": "getppid",
+      "root": "SysGetPPID"
+    },
+    {
+      "number": 224,
+      "name": "gettid",
+      "root": "SysGetTid"
+    }
+  ],
+  "configuration": {
+    "LOSCFG_PID_CONTAINER": false
+  },
+  "dependency_contract": "semantic process parent link and task ID; scheduler/container internals are not replayed"
+}

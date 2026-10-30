@@ -1,0 +1,742 @@
+[    0.000000] Booting Linux on physical CPU 0x0000000000 [0x410fd034]
+[    0.000000] Linux version 6.10.14-linuxkit (root@buildkitsandbox) (gcc (Alpine 13.2.1_git20240309) 13.2.1 20240309, GNU ld (GNU Binutils) 2.42) #1 SMP Thu Oct 24 19:28:55 UTC 2024
+[    0.000000] random: crng init done
+[    0.000000] Machine model: linux,dummy-virt
+[    0.000000] Zone ranges:
+[    0.000000]   DMA      [mem 0x0000000040000000-0x000000005fffffff]
+[    0.000000]   DMA32    empty
+[    0.000000]   Normal   empty
+[    0.000000] Movable zone start for each node
+[    0.000000] Early memory node ranges
+[    0.000000]   node   0: [mem 0x0000000040000000-0x000000005fffffff]
+[    0.000000] Initmem setup node 0 [mem 0x0000000040000000-0x000000005fffffff]
+[    0.000000] psci: probing for conduit method from DT.
+[    0.000000] psci: PSCIv1.1 detected in firmware.
+[    0.000000] psci: Using standard PSCI v0.2 function IDs
+[    0.000000] psci: Trusted OS migration not required
+[    0.000000] psci: SMC Calling Convention v1.0
+[    0.000000] percpu: Embedded 34 pages/cpu s99240 r8192 d31832 u139264
+[    0.000000] Detected VIPT I-cache on CPU0
+[    0.000000] alternatives: applying boot alternatives
+[    0.000000] Kernel command line: console=ttyAMA0 root=/dev/vda rootfstype=ext4 ro rootwait init=/init panic=-1
+[    0.000000] Dentry cache hash table entries: 65536 (order: 7, 524288 bytes, linear)
+[    0.000000] Inode-cache hash table entries: 32768 (order: 6, 262144 bytes, linear)
+[    0.000000] Built 1 zonelists, mobility grouping on.  Total pages: 131072
+[    0.000000] mem auto-init: stack:all(zero), heap alloc:off, heap free:off
+[    0.000000] software IO TLB: SWIOTLB bounce buffer size adjusted to 0MB
+[    0.000000] software IO TLB: area num 1.
+[    0.000000] software IO TLB: mapped [mem 0x000000005f580000-0x000000005f600000] (0MB)
+[    0.000000] Memory: 472668K/524288K available (19136K kernel code, 2822K rwdata, 10692K rodata, 6336K init, 748K bss, 51620K reserved, 0K cma-reserved)
+[    0.000000] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=1, Nodes=1
+[    0.000000] ftrace: allocating 57269 entries in 224 pages
+[    0.000000] ftrace: allocated 224 pages with 3 groups
+[    0.000000] trace event string verifier disabled
+[    0.000000] rcu: Hierarchical RCU implementation.
+[    0.000000] rcu: 	RCU restricting CPUs from NR_CPUS=24 to nr_cpu_ids=1.
+[    0.000000] 	Rude variant of Tasks RCU enabled.
+[    0.000000] 	Tracing variant of Tasks RCU enabled.
+[    0.000000] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.000000] rcu: Adjusting geometry for rcu_fanout_leaf=16, nr_cpu_ids=1
+[    0.000000] RCU Tasks Rude: Setting shift to 0 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=1.
+[    0.000000] RCU Tasks Trace: Setting shift to 0 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=1.
+[    0.000000] NR_IRQS: 64, nr_irqs: 64, preallocated irqs: 0
+[    0.000000] Root IRQ handler: gic_handle_irq
+[    0.000000] GICv2m: range[mem 0x08020000-0x08020fff], SPI[80:143]
+[    0.000000] rcu: 	Offload RCU callbacks from CPUs: 0.
+[    0.000000] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    0.000000] arch_timer: cp15 timer(s) running at 62.50MHz (virt).
+[    0.000000] clocksource: arch_sys_counter: mask: 0x1ffffffffffffff max_cycles: 0x1cd42e208c, max_idle_ns: 881590405314 ns
+[    0.000054] sched_clock: 57 bits at 63MHz, resolution 16ns, wraps every 4398046511096ns
+[    0.003685] Console: colour dummy device 80x25
+[    0.010528] Calibrating delay loop (skipped), value calculated using timer frequency.. 125.00 BogoMIPS (lpj=62500)
+[    0.010870] pid_max: default: 32768 minimum: 301
+[    0.011966] LSM: initializing lsm=capability,bpf
+[    0.012230] LSM support for eBPF active
+[    0.013519] Mount-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    0.013618] Mountpoint-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    0.059270] cacheinfo: Unable to detect cache hierarchy for CPU 0
+[    0.083405] rcu: Hierarchical SRCU implementation.
+[    0.087111] rcu: 	Max phase no-delay instances is 400.
+[    0.098371] smp: Bringing up secondary CPUs ...
+[    0.098624] smp: Brought up 1 node, 1 CPU
+[    0.098683] SMP: Total of 1 processors activated.
+[    0.099680] CPU: All CPU(s) started at EL1
+[    0.099861] CPU features: detected: 32-bit EL0 Support
+[    0.100076] CPU features: detected: CRC32 instructions
+[    0.108401] alternatives: applying system-wide alternatives
+[    0.182024] devtmpfs: initialized
+[    0.216559] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1911260446275000 ns
+[    0.217388] futex hash table entries: 256 (order: 2, 16384 bytes, linear)
+[    0.218141] 22784 pages in range for non-PLT usage
+[    0.218273] 514304 pages in range for PLT usage
+[    0.250459] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    0.261509] DMA: preallocated 128 KiB GFP_KERNEL pool for atomic allocations
+[    0.261811] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA pool for atomic allocations
+[    0.261898] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA32 pool for atomic allocations
+[    0.262244] audit: initializing netlink subsys (disabled)
+[    0.273536] audit: type=2000 audit(0.062:1): state=initialized audit_enabled=0 res=1
+[    0.277203] cpuidle: using governor menu
+[    0.278430] hw-breakpoint: found 6 breakpoint and 4 watchpoint registers.
+[    0.279178] ASID allocator initialised with 65536 entries
+[    0.280069] Serial: AMBA PL011 UART driver
+[    0.335940] 9000000.pl011: ttyAMA0 at MMIO 0x9000000 (irq = 13, base_baud = 0) is a PL011 rev1
+[    0.338706] printk: legacy console [ttyAMA0] enabled
+[    0.388247] HugeTLB: registered 1.00 GiB page size, pre-allocated 0 pages
+[    0.388511] HugeTLB: 0 KiB vmemmap can be freed for a 1.00 GiB page
+[    0.388688] HugeTLB: registered 32.0 MiB page size, pre-allocated 0 pages
+[    0.388845] HugeTLB: 0 KiB vmemmap can be freed for a 32.0 MiB page
+[    0.388989] HugeTLB: registered 2.00 MiB page size, pre-allocated 0 pages
+[    0.389145] HugeTLB: 0 KiB vmemmap can be freed for a 2.00 MiB page
+[    0.389288] HugeTLB: registered 64.0 KiB page size, pre-allocated 0 pages
+[    0.389444] HugeTLB: 0 KiB vmemmap can be freed for a 64.0 KiB page
+[    0.429765] raid6: skipped pq benchmark and selected neonx8
+[    0.430460] raid6: using neon recovery algorithm
+[    0.442211] SCSI subsystem initialized
+[    0.446018] usbcore: registered new interface driver usbfs
+[    0.446356] usbcore: registered new interface driver hub
+[    0.446655] usbcore: registered new device driver usb
+[    0.447162] pps_core: LinuxPPS API ver. 1 registered
+[    0.447287] pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+[    0.473410] vgaarb: loaded
+[    0.474527] clocksource: Switched to clocksource arch_sys_counter
+[    0.477160] VFS: Disk quotas dquot_6.6.0
+[    0.477461] VFS: Dquot-cache hash table entries: 512 (order 0, 4096 bytes)
+[    0.478801] netfs: FS-Cache loaded
+[    0.489676] CacheFiles: Loaded
+[    0.580387] NET: Registered PF_INET protocol family
+[    0.584577] IP idents hash table entries: 8192 (order: 4, 65536 bytes, linear)
+[    0.956163] tcp_listen_portaddr_hash hash table entries: 256 (order: 0, 4096 bytes, linear)
+[    0.956892] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[    0.957411] TCP established hash table entries: 4096 (order: 3, 32768 bytes, linear)
+[    0.958686] TCP bind hash table entries: 4096 (order: 5, 131072 bytes, linear)
+[    0.960148] TCP: Hash tables configured (established 4096 bind 4096)
+[    0.963179] UDP hash table entries: 256 (order: 1, 8192 bytes, linear)
+[    0.966635] UDP-Lite hash table entries: 256 (order: 1, 8192 bytes, linear)
+[    0.971007] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    0.991057] RPC: Registered named UNIX socket transport module.
+[    0.991982] RPC: Registered udp transport module.
+[    0.992453] RPC: Registered tcp transport module.
+[    0.993284] RPC: Registered tcp-with-tls transport module.
+[    0.993644] RPC: Registered tcp NFSv4.1 backchannel transport module.
+[    0.994872] NET: Registered PF_XDP protocol family
+[    0.995543] PCI: CLS 0 bytes, default 64
+[    1.027186] workingset: timestamp_bits=46 max_order=17 bucket_order=0
+[    1.028126] zbud: loaded
+[    1.040494] squashfs: version 4.0 (2009/01/31) Phillip Lougher
+[    1.066885] NFS: Registering the id_resolver key type
+[    1.069762] Key type id_resolver registered
+[    1.070255] Key type id_legacy registered
+[    1.071287] nfs4filelayout_init: NFSv4 File Layout Driver Registering...
+[    1.073415] nfs4flexfilelayout_init: NFSv4 Flexfile Layout Driver Registering...
+[    1.103425] Key type cifs.idmap registered
+[    1.106628] fuse: init (API version 7.40)
+[    1.124270] SGI XFS with security attributes, no debug enabled
+[    1.152444] 9p: Installing v9fs 9p2000 file system support
+[    1.246510] NET: Registered PF_ALG protocol family
+[    1.246965] xor: measuring software checksum speed
+[    1.251345]    8regs           :   795 MB/sec
+[    1.259297]    32regs          :   456 MB/sec
+[    1.267079]    arm64_neon      :  1488 MB/sec
+[    1.267294] xor: using function: arm64_neon (1488 MB/sec)
+[    1.267488] Key type asymmetric registered
+[    1.267645] Asymmetric key parser 'x509' registered
+[    1.269589] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 251)
+[    1.279306] io scheduler mq-deadline registered
+[    1.279572] io scheduler kyber registered
+[    1.309959] pl061_gpio 9030000.pl061: PL061 GPIO chip registered
+[    1.312670] pci-host-generic 4010000000.pcie: host bridge /pcie@10000000 ranges:
+[    1.315082] pci-host-generic 4010000000.pcie:       IO 0x003eff0000..0x003effffff -> 0x0000000000
+[    1.317052] pci-host-generic 4010000000.pcie:      MEM 0x0010000000..0x003efeffff -> 0x0010000000
+[    1.317397] pci-host-generic 4010000000.pcie:      MEM 0x8000000000..0xffffffffff -> 0x8000000000
+[    1.318119] pci-host-generic 4010000000.pcie: Memory resource size exceeds max for 32 bits
+[    1.318860] pci-host-generic 4010000000.pcie: ECAM at [mem 0x4010000000-0x401fffffff] for [bus 00-ff]
+[    1.320199] pci-host-generic 4010000000.pcie: PCI host bridge to bus 0000:00
+[    1.320566] pci_bus 0000:00: root bus resource [bus 00-ff]
+[    1.320768] pci_bus 0000:00: root bus resource [io  0x0000-0xffff]
+[    1.320949] pci_bus 0000:00: root bus resource [mem 0x10000000-0x3efeffff]
+[    1.321120] pci_bus 0000:00: root bus resource [mem 0x8000000000-0xffffffffff]
+[    1.323860] pci 0000:00:00.0: [1b36:0008] type 00 class 0x060000 conventional PCI endpoint
+[    1.429667] Serial: 8250/16550 driver, 4 ports, IRQ sharing enabled
+[    1.730237] brd: module loaded
+[    1.900186] loop: module loaded
+[    2.295186] virtio_blk virtio0: 1/0/0 default/read/poll queues
+[    2.335185] virtio_blk virtio0: [vda] 4096 512-byte logical blocks (2.10 MB/2.00 MiB)
+[    2.445955] wireguard: WireGuard 1.0.0 loaded. See www.wireguard.com for information.
+[    2.446274] wireguard: Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
+[    2.451188] tun: Universal TUN/TAP device driver, 1.6
+[    2.474346] PPP generic driver version 2.4.2
+[    2.475217] PPP BSD Compression module registered
+[    2.475391] PPP Deflate Compression module registered
+[    2.475661] PPP MPPE Compression module registered
+[    2.475806] NET: Registered PF_PPPOX protocol family
+[    2.476095] PPTP driver version 0.8.5
+[    2.478098] usbcore: registered new interface driver cdc_acm
+[    2.478274] cdc_acm: USB Abstract Control Model driver for USB modems and ISDN adapters
+[    2.478487] usbcore: registered new interface driver usblp
+[    2.478643] usbcore: registered new interface driver cdc_wdm
+[    2.478815] usbcore: registered new interface driver usbtmc
+[    2.481502] usbcore: registered new interface driver uas
+[    2.482380] usbcore: registered new interface driver usb-storage
+[    2.482862] usbcore: registered new interface driver ums-alauda
+[    2.483215] usbcore: registered new interface driver ums-cypress
+[    2.483589] usbcore: registered new interface driver ums-datafab
+[    2.484039] usbcore: registered new interface driver ums_eneub6250
+[    2.484409] usbcore: registered new interface driver ums-freecom
+[    2.484741] usbcore: registered new interface driver ums-isd200
+[    2.486323] usbcore: registered new interface driver ums-jumpshot
+[    2.486582] usbcore: registered new interface driver ums-karma
+[    2.486770] usbcore: registered new interface driver ums-onetouch
+[    2.487017] usbcore: registered new interface driver ums-realtek
+[    2.487260] usbcore: registered new interface driver ums-sddr09
+[    2.487477] usbcore: registered new interface driver ums-sddr55
+[    2.487644] usbcore: registered new interface driver ums-usbat
+[    2.488616] usbcore: registered new interface driver usbserial_generic
+[    2.488959] usbserial: USB Serial support registered for generic
+[    2.489167] usbcore: registered new interface driver aircable
+[    2.489387] usbserial: USB Serial support registered for aircable
+[    2.489588] usbcore: registered new interface driver ark3116
+[    2.489759] usbserial: USB Serial support registered for ark3116
+[    2.489971] usbcore: registered new interface driver belkin_sa
+[    2.490126] usbserial: USB Serial support registered for Belkin / Peracom / GoHubs USB Serial Adapter
+[    2.490371] usbcore: registered new interface driver ch341
+[    2.490518] usbserial: USB Serial support registered for ch341-uart
+[    2.490700] usbcore: registered new interface driver cp210x
+[    2.490910] usbserial: USB Serial support registered for cp210x
+[    2.491389] usbcore: registered new interface driver cyberjack
+[    2.492517] usbserial: USB Serial support registered for Reiner SCT Cyberjack USB card reader
+[    2.495428] usbcore: registered new interface driver cypress_m8
+[    2.496057] usbserial: USB Serial support registered for DeLorme Earthmate USB
+[    2.497224] usbserial: USB Serial support registered for HID->COM RS232 Adapter
+[    2.497487] usbserial: USB Serial support registered for Nokia CA-42 V2 Adapter
+[    2.497766] usbcore: registered new interface driver usb_debug
+[    2.497926] usbserial: USB Serial support registered for debug
+[    2.498276] usbserial: USB Serial support registered for xhci_dbc
+[    2.498491] usbcore: registered new interface driver digi_acceleport
+[    2.498658] usbserial: USB Serial support registered for Digi 2 port USB adapter
+[    2.498881] usbserial: USB Serial support registered for Digi 4 port USB adapter
+[    2.499106] usbcore: registered new interface driver io_edgeport
+[    2.499285] usbserial: USB Serial support registered for Edgeport 2 port adapter
+[    2.499476] usbserial: USB Serial support registered for Edgeport 4 port adapter
+[    2.499662] usbserial: USB Serial support registered for Edgeport 8 port adapter
+[    2.499848] usbserial: USB Serial support registered for EPiC device
+[    2.500038] usbcore: registered new interface driver io_ti
+[    2.500196] usbserial: USB Serial support registered for Edgeport TI 1 port adapter
+[    2.500408] usbserial: USB Serial support registered for Edgeport TI 2 port adapter
+[    2.500620] usbcore: registered new interface driver empeg
+[    2.500769] usbserial: USB Serial support registered for empeg
+[    2.501129] usbcore: registered new interface driver f81534a_ctrl
+[    2.501328] usbcore: registered new interface driver f81232
+[    2.501484] usbserial: USB Serial support registered for f81232
+[    2.501642] usbserial: USB Serial support registered for f81534a
+[    2.501852] usbcore: registered new interface driver f81534
+[    2.502010] usbserial: USB Serial support registered for Fintek F81532/F81534
+[    2.502250] usbcore: registered new interface driver ftdi_sio
+[    2.502427] usbserial: USB Serial support registered for FTDI USB Serial Device
+[    2.502675] usbcore: registered new interface driver garmin_gps
+[    2.503004] usbserial: USB Serial support registered for Garmin GPS usb/tty
+[    2.503400] usbcore: registered new interface driver ipaq
+[    2.503707] usbserial: USB Serial support registered for PocketPC PDA
+[    2.503932] usbcore: registered new interface driver ipw
+[    2.504599] usbserial: USB Serial support registered for IPWireless converter
+[    2.505194] usbcore: registered new interface driver ir_usb
+[    2.505725] usbserial: USB Serial support registered for IR Dongle
+[    2.506141] usbcore: registered new interface driver iuu_phoenix
+[    2.506454] usbserial: USB Serial support registered for iuu_phoenix
+[    2.506699] usbcore: registered new interface driver keyspan
+[    2.506868] usbserial: USB Serial support registered for Keyspan - (without firmware)
+[    2.507072] usbserial: USB Serial support registered for Keyspan 1 port adapter
+[    2.507452] usbserial: USB Serial support registered for Keyspan 2 port adapter
+[    2.507674] usbserial: USB Serial support registered for Keyspan 4 port adapter
+[    2.507913] usbcore: registered new interface driver keyspan_pda
+[    2.508073] usbserial: USB Serial support registered for Keyspan PDA
+[    2.508282] usbserial: USB Serial support registered for Keyspan PDA - (prerenumeration)
+[    2.508519] usbcore: registered new interface driver kl5kusb105
+[    2.508680] usbserial: USB Serial support registered for KL5KUSB105D / PalmConnect
+[    2.509008] usbcore: registered new interface driver kobil_sct
+[    2.509191] usbserial: USB Serial support registered for KOBIL USB smart card terminal
+[    2.509421] usbcore: registered new interface driver mct_u232
+[    2.509586] usbserial: USB Serial support registered for MCT U232
+[    2.509758] usbcore: registered new interface driver metro_usb
+[    2.509913] usbserial: USB Serial support registered for Metrologic USB to Serial
+[    2.510168] usbcore: registered new interface driver mos7720
+[    2.510350] usbserial: USB Serial support registered for Moschip 2 port adapter
+[    2.510655] usbcore: registered new interface driver mos7840
+[    2.510812] usbserial: USB Serial support registered for Moschip 7840/7820 USB Serial Driver
+[    2.511072] usbcore: registered new interface driver mxuport
+[    2.511335] usbserial: USB Serial support registered for MOXA UPort
+[    2.511542] usbcore: registered new interface driver navman
+[    2.511697] usbserial: USB Serial support registered for navman
+[    2.511874] usbcore: registered new interface driver omninet
+[    2.512144] usbserial: USB Serial support registered for ZyXEL - omni.net usb
+[    2.512389] usbcore: registered new interface driver opticon
+[    2.512563] usbserial: USB Serial support registered for opticon
+[    2.512973] usbcore: registered new interface driver option
+[    2.513645] usbserial: USB Serial support registered for GSM modem (1-port)
+[    2.514283] usbcore: registered new interface driver oti6858
+[    2.514752] usbserial: USB Serial support registered for oti6858
+[    2.515535] usbcore: registered new interface driver pl2303
+[    2.515906] usbserial: USB Serial support registered for pl2303
+[    2.516986] usbcore: registered new interface driver qcaux
+[    2.517436] usbserial: USB Serial support registered for qcaux
+[    2.517947] usbcore: registered new interface driver qcserial
+[    2.518121] usbserial: USB Serial support registered for Qualcomm USB modem
+[    2.518327] usbcore: registered new interface driver quatech2
+[    2.518504] usbserial: USB Serial support registered for Quatech 2nd gen USB to Serial Driver
+[    2.518730] usbcore: registered new interface driver safe_serial
+[    2.518888] usbserial: USB Serial support registered for safe_serial
+[    2.519073] usbcore: registered new interface driver sierra
+[    2.519223] usbserial: USB Serial support registered for Sierra USB modem
+[    2.519411] usbcore: registered new interface driver usb_serial_simple
+[    2.519582] usbserial: USB Serial support registered for carelink
+[    2.519745] usbserial: USB Serial support registered for flashloader
+[    2.519907] usbserial: USB Serial support registered for funsoft
+[    2.520542] usbserial: USB Serial support registered for google
+[    2.520702] usbserial: USB Serial support registered for hp4x
+[    2.521403] usbserial: USB Serial support registered for kaufmann
+[    2.521768] usbserial: USB Serial support registered for libtransistor
+[    2.521939] usbserial: USB Serial support registered for moto_modem
+[    2.522099] usbserial: USB Serial support registered for motorola_tetra
+[    2.522267] usbserial: USB Serial support registered for nokia
+[    2.522417] usbserial: USB Serial support registered for novatel_gps
+[    2.522580] usbserial: USB Serial support registered for siemens_mpi
+[    2.522746] usbserial: USB Serial support registered for suunto
+[    2.522922] usbserial: USB Serial support registered for vivopay
+[    2.523077] usbserial: USB Serial support registered for zio
+[    2.523269] usbcore: registered new interface driver spcp8x5
+[    2.523420] usbserial: USB Serial support registered for SPCP8x5
+[    2.523692] usbcore: registered new interface driver ssu100
+[    2.523847] usbserial: USB Serial support registered for Quatech SSU-100 USB to Serial Driver
+[    2.524070] usbcore: registered new interface driver symbolserial
+[    2.524251] usbserial: USB Serial support registered for symbol
+[    2.525211] usbcore: registered new interface driver ti_usb_3410_5052
+[    2.526021] usbserial: USB Serial support registered for TI USB 3410 1 port adapter
+[    2.526802] usbserial: USB Serial support registered for TI USB 5052 2 port adapter
+[    2.527295] usbcore: registered new interface driver upd78f0730
+[    2.528566] usbserial: USB Serial support registered for upd78f0730
+[    2.528804] usbcore: registered new interface driver visor
+[    2.528960] usbserial: USB Serial support registered for Handspring Visor / Palm OS
+[    2.529156] usbserial: USB Serial support registered for Sony Clie 5.0
+[    2.530489] usbserial: USB Serial support registered for Sony Clie 3.5
+[    2.530731] usbcore: registered new interface driver wishbone_serial
+[    2.530900] usbserial: USB Serial support registered for wishbone_serial
+[    2.531090] usbcore: registered new interface driver whiteheat
+[    2.531267] usbserial: USB Serial support registered for Connect Tech - WhiteHEAT - (prerenumeration)
+[    2.531496] usbserial: USB Serial support registered for Connect Tech - WhiteHEAT
+[    2.531711] usbcore: registered new interface driver xr_serial
+[    2.532351] usbserial: USB Serial support registered for xr_serial
+[    2.532939] usbcore: registered new interface driver xsens_mt
+[    2.533357] usbserial: USB Serial support registered for xsens_mt
+[    2.590361] vhci_hcd vhci_hcd.0: USB/IP Virtual Host Controller
+[    2.635508] vhci_hcd vhci_hcd.0: new USB bus registered, assigned bus number 1
+[    2.637709] vhci_hcd: created sysfs vhci_hcd.0
+[    2.646242] usb usb1: New USB device found, idVendor=1d6b, idProduct=0002, bcdDevice= 6.10
+[    2.646558] usb usb1: New USB device strings: Mfr=3, Product=2, SerialNumber=1
+[    2.646770] usb usb1: Product: USB/IP Virtual Host Controller
+[    2.646927] usb usb1: Manufacturer: Linux 6.10.14-linuxkit vhci_hcd
+[    2.647096] usb usb1: SerialNumber: vhci_hcd.0
+[    2.650139] hub 1-0:1.0: USB hub found
+[    2.670976] hub 1-0:1.0: 8 ports detected
+[    2.677147] vhci_hcd vhci_hcd.0: USB/IP Virtual Host Controller
+[    2.692560] vhci_hcd vhci_hcd.0: new USB bus registered, assigned bus number 2
+[    2.693500] usb usb2: We don't know the algorithms for LPM for this host, disabling LPM.
+[    2.694018] usb usb2: New USB device found, idVendor=1d6b, idProduct=0003, bcdDevice= 6.10
+[    2.694227] usb usb2: New USB device strings: Mfr=3, Product=2, SerialNumber=1
+[    2.694394] usb usb2: Product: USB/IP Virtual Host Controller
+[    2.694529] usb usb2: Manufacturer: Linux 6.10.14-linuxkit vhci_hcd
+[    2.694680] usb usb2: SerialNumber: vhci_hcd.0
+[    2.700898] hub 2-0:1.0: USB hub found
+[    2.705329] hub 2-0:1.0: 8 ports detected
+[    2.707442] mousedev: PS/2 mouse device common for all mice
+[    2.732656] rtc-pl031 9010000.pl031: registered as rtc0
+[    2.743668] rtc-pl031 9010000.pl031: setting system clock to 2026-10-19T10:34:46 UTC (1792406086)
+[    2.744840] i2c_dev: i2c /dev entries driver
+[    2.800876] device-mapper: ioctl: 4.48.0-ioctl (2023-03-01) initialised: dm-devel@lists.linux.dev
+[    2.817166] usbcore: registered new interface driver usbhid
+[    2.818641] usbhid: USB HID core driver
+[    2.915699] hw perfevents: enabled with armv8_pmuv3 PMU driver, 7 counters available
+[    2.918448] GACT probability on
+[    2.918832] Mirror/redirect action on
+[    2.919147] Simple TC action Loaded
+[    2.921814] netem: version 1.3
+[    2.922210] u32 classifier
+[    2.922595]     Performance counters on
+[    2.922733]     input device check on
+[    2.923198]     Actions configured
+[    2.937561] xt_time: kernel timezone is -0000
+[    2.938208] IPVS: Registered protocols (TCP, UDP)
+[    2.938455] IPVS: Connection hash table configured (size=4096, memory=32Kbytes)
+[    2.941550] IPVS: ipvs loaded.
+[    2.941869] IPVS: [rr] scheduler registered.
+[    2.942031] IPVS: [wrr] scheduler registered.
+[    2.942149] IPVS: [sh] scheduler registered.
+[    2.942444] ipip: IPv4 and MPLS over IPv4 tunneling driver
+[    2.944121] gre: GRE over IPv4 demultiplexor driver
+[    2.944286] ip_gre: GRE over IPv4 tunneling driver
+[    2.950019] IPv4 over IPsec tunneling driver
+[    2.952828] Initializing XFRM netlink socket
+[    2.953401] NET: Registered PF_INET6 protocol family
+[    2.997858] Segment Routing with IPv6
+[    2.998234] In-situ OAM (IOAM) with IPv6
+[    2.999153] mip6: Mobile IPv6
+[    3.001702] sit: IPv6, IPv4 and MPLS over IPv4 tunneling driver
+[    3.003693] ip6_gre: GRE over IPv6 tunneling driver
+[    3.020417] NET: Registered PF_PACKET protocol family
+[    3.021369] NET: Registered PF_KEY protocol family
+[    3.023557] Bridge firewalling registered
+[    3.028178] l2tp_core: L2TP core driver, V2.0
+[    3.028793] l2tp_ppp: PPPoL2TP kernel driver, V2.0
+[    3.029160] 8021q: 802.1Q VLAN Support v1.8
+[    3.034899] sctp: Hash tables configured (bind 256/256)
+[    3.037842] 9pnet: Installing 9P2000 support
+[    3.038372] Key type dns_resolver registered
+[    3.038529] openvswitch: Open vSwitch switching datapath
+[    3.078816] NET: Registered PF_VSOCK protocol family
+[    3.079486] mpls_gso: MPLS GSO support
+[    3.140017] registered taskstats version 1
+[    3.173348] Key type .fscrypt registered
+[    3.173580] Key type fscrypt-provisioning registered
+[    3.185975] Btrfs loaded, zoned=no, fsverity=no
+[    3.190251] Key type encrypted registered
+[    3.206194] gtp: GTP module loaded (pdp ctx size 128 bytes)
+[    4.277884] clk: Disabling unused clocks
+[    4.352599] EXT4-fs (vda): mounted filesystem 6f737265-632d-6c69-6e75-782d726f6f74 ro without journal. Quota mode: none.
+[    4.353387] VFS: Mounted root (ext4 filesystem) readonly on device 254:0.
+[    4.355370] devtmpfs: mounted
+[    4.460104] Freeing unused kernel memory: 6336K
+[    4.461814] Run /init as init process
+OSREC_LINUX_IRQ_PROBES_BEGIN
+p:osrec/osrec_task_dequeue dequeue_task_fair task=p:x64 pid=p->pid:s32 state=p->__state:u32 saved=p->saved_state:u32 on_rq=p->on_rq:u32 on_cpu=p->on_cpu:u32
+p:osrec/osrec_task_wake wake_up_process task=p:x64 pid=p->pid:s32 state=p->__state:u32 saved=p->saved_state:u32 on_rq=p->on_rq:u32 on_cpu=p->on_cpu:u32
+p:osrec/osrec_task_activate activate_task task=p:x64 pid=p->pid:s32 state=p->__state:u32 saved=p->saved_state:u32 on_rq=p->on_rq:u32 on_cpu=p->on_cpu:u32
+p:osrec/osrec_task_preempt wakeup_preempt task=p:x64 pid=p->pid:s32 state=p->__state:u32 saved=p->saved_state:u32 on_rq=p->on_rq:u32 on_cpu=p->on_cpu:u32
+
+OSREC_LINUX_IRQ_PROBES_END
+OSREC_LINUX_IRQ_FORMAT_BEGIN syscalls/sys_enter_nanosleep
+name: sys_enter_nanosleep
+ID: 274
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:struct __kernel_timespec * rqtp;	offset:16;	size:8;	signed:0;
+	field:struct __kernel_timespec * rmtp;	offset:24;	size:8;	signed:0;
+
+print fmt: "rqtp: 0x%08lx, rmtp: 0x%08lx", ((unsigned long)(REC->rqtp)), ((unsigned long)(REC->rmtp))
+
+OSREC_LINUX_IRQ_FORMAT_END syscalls/sys_enter_nanosleep
+OSREC_LINUX_IRQ_FORMAT_BEGIN syscalls/sys_exit_nanosleep
+name: sys_exit_nanosleep
+ID: 273
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+OSREC_LINUX_IRQ_FORMAT_END syscalls/sys_exit_nanosleep
+OSREC_LINUX_IRQ_FORMAT_BEGIN sched/sched_switch
+name: sched_switch
+ID: 225
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:char prev_comm[16];	offset:8;	size:16;	signed:0;
+	field:pid_t prev_pid;	offset:24;	size:4;	signed:1;
+	field:int prev_prio;	offset:28;	size:4;	signed:1;
+	field:long prev_state;	offset:32;	size:8;	signed:1;
+	field:char next_comm[16];	offset:40;	size:16;	signed:0;
+	field:pid_t next_pid;	offset:56;	size:4;	signed:1;
+	field:int next_prio;	offset:60;	size:4;	signed:1;
+
+print fmt: "prev_comm=%s prev_pid=%d prev_prio=%d prev_state=%s%s ==> next_comm=%s next_pid=%d next_prio=%d", REC->prev_comm, REC->prev_pid, REC->prev_prio, (REC->prev_state & ((((0x00000000 | 0x00000001 | 0x00000002 | 0x00000004 | 0x00000008 | 0x00000010 | 0x00000020 | 0x00000040) + 1) << 1) - 1)) ? __print_flags(REC->prev_state & ((((0x00000000 | 0x00000001 | 0x00000002 | 0x00000004 | 0x00000008 | 0x00000010 | 0x00000020 | 0x00000040) + 1) << 1) - 1), "|", { 0x00000001, "S" }, { 0x00000002, "D" }, { 0x00000004, "T" }, { 0x00000008, "t" }, { 0x00000010, "X" }, { 0x00000020, "Z" }, { 0x00000040, "P" }, { 0x00000080, "I" }) : "R", REC->prev_state & (((0x00000000 | 0x00000001 | 0x00000002 | 0x00000004 | 0x00000008 | 0x00000010 | 0x00000020 | 0x00000040) + 1) << 1) ? "+" : "", REC->next_comm, REC->next_pid, REC->next_prio
+
+OSREC_LINUX_IRQ_FORMAT_END sched/sched_switch
+OSREC_LINUX_IRQ_FORMAT_BEGIN sched/sched_waking
+name: sched_waking
+ID: 228
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:char comm[16];	offset:8;	size:16;	signed:0;
+	field:pid_t pid;	offset:24;	size:4;	signed:1;
+	field:int prio;	offset:28;	size:4;	signed:1;
+	field:int target_cpu;	offset:32;	size:4;	signed:1;
+
+print fmt: "comm=%s pid=%d prio=%d target_cpu=%03d", REC->comm, REC->pid, REC->prio, REC->target_cpu
+
+OSREC_LINUX_IRQ_FORMAT_END sched/sched_waking
+OSREC_LINUX_IRQ_FORMAT_BEGIN sched/sched_wakeup
+name: sched_wakeup
+ID: 227
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:char comm[16];	offset:8;	size:16;	signed:0;
+	field:pid_t pid;	offset:24;	size:4;	signed:1;
+	field:int prio;	offset:28;	size:4;	signed:1;
+	field:int target_cpu;	offset:32;	size:4;	signed:1;
+
+print fmt: "comm=%s pid=%d prio=%d target_cpu=%03d", REC->comm, REC->pid, REC->prio, REC->target_cpu
+
+OSREC_LINUX_IRQ_FORMAT_END sched/sched_wakeup
+OSREC_LINUX_IRQ_FORMAT_BEGIN timer/hrtimer_init
+name: hrtimer_init
+ID: 266
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:void * hrtimer;	offset:8;	size:8;	signed:0;
+	field:clockid_t clockid;	offset:16;	size:4;	signed:1;
+	field:enum hrtimer_mode mode;	offset:20;	size:4;	signed:0;
+
+print fmt: "hrtimer=%p clockid=%s mode=%s", REC->hrtimer, __print_symbolic(REC->clockid, { 0, "CLOCK_REALTIME" }, { 1, "CLOCK_MONOTONIC" }, { 7, "CLOCK_BOOTTIME" }, { 11, "CLOCK_TAI" }), __print_symbolic(REC->mode, { HRTIMER_MODE_ABS, "ABS" }, { HRTIMER_MODE_REL, "REL" }, { HRTIMER_MODE_ABS_PINNED, "ABS|PINNED" }, { HRTIMER_MODE_REL_PINNED, "REL|PINNED" }, { HRTIMER_MODE_ABS_SOFT, "ABS|SOFT" }, { HRTIMER_MODE_REL_SOFT, "REL|SOFT" }, { HRTIMER_MODE_ABS_PINNED_SOFT, "ABS|PINNED|SOFT" }, { HRTIMER_MODE_REL_PINNED_SOFT, "REL|PINNED|SOFT" }, { HRTIMER_MODE_ABS_HARD, "ABS|HARD" }, { HRTIMER_MODE_REL_HARD, "REL|HARD" }, { HRTIMER_MODE_ABS_PINNED_HARD, "ABS|PINNED|HARD" }, { HRTIMER_MODE_REL_PINNED_HARD, "REL|PINNED|HARD" })
+
+OSREC_LINUX_IRQ_FORMAT_END timer/hrtimer_init
+OSREC_LINUX_IRQ_FORMAT_BEGIN timer/hrtimer_start
+name: hrtimer_start
+ID: 265
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:void * hrtimer;	offset:8;	size:8;	signed:0;
+	field:void * function;	offset:16;	size:8;	signed:0;
+	field:s64 expires;	offset:24;	size:8;	signed:1;
+	field:s64 softexpires;	offset:32;	size:8;	signed:1;
+	field:enum hrtimer_mode mode;	offset:40;	size:4;	signed:0;
+
+print fmt: "hrtimer=%p function=%ps expires=%llu softexpires=%llu mode=%s", REC->hrtimer, REC->function, (unsigned long long) REC->expires, (unsigned long long) REC->softexpires, __print_symbolic(REC->mode, { HRTIMER_MODE_ABS, "ABS" }, { HRTIMER_MODE_REL, "REL" }, { HRTIMER_MODE_ABS_PINNED, "ABS|PINNED" }, { HRTIMER_MODE_REL_PINNED, "REL|PINNED" }, { HRTIMER_MODE_ABS_SOFT, "ABS|SOFT" }, { HRTIMER_MODE_REL_SOFT, "REL|SOFT" }, { HRTIMER_MODE_ABS_PINNED_SOFT, "ABS|PINNED|SOFT" }, { HRTIMER_MODE_REL_PINNED_SOFT, "REL|PINNED|SOFT" }, { HRTIMER_MODE_ABS_HARD, "ABS|HARD" }, { HRTIMER_MODE_REL_HARD, "REL|HARD" }, { HRTIMER_MODE_ABS_PINNED_HARD, "ABS|PINNED|HARD" }, { HRTIMER_MODE_REL_PINNED_HARD, "REL|PINNED|HARD" })
+
+OSREC_LINUX_IRQ_FORMAT_END timer/hrtimer_start
+OSREC_LINUX_IRQ_FORMAT_BEGIN timer/hrtimer_expire_entry
+name: hrtimer_expire_entry
+ID: 264
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:void * hrtimer;	offset:8;	size:8;	signed:0;
+	field:s64 now;	offset:16;	size:8;	signed:1;
+	field:void * function;	offset:24;	size:8;	signed:0;
+
+print fmt: "hrtimer=%p function=%ps now=%llu", REC->hrtimer, REC->function, (unsigned long long) REC->now
+
+OSREC_LINUX_IRQ_FORMAT_END timer/hrtimer_expire_entry
+OSREC_LINUX_IRQ_FORMAT_BEGIN timer/hrtimer_expire_exit
+name: hrtimer_expire_exit
+ID: 263
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:void * hrtimer;	offset:8;	size:8;	signed:0;
+
+print fmt: "hrtimer=%p", REC->hrtimer
+
+OSREC_LINUX_IRQ_FORMAT_END timer/hrtimer_expire_exit
+OSREC_LINUX_IRQ_FORMAT_BEGIN timer/hrtimer_cancel
+name: hrtimer_cancel
+ID: 262
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:void * hrtimer;	offset:8;	size:8;	signed:0;
+
+print fmt: "hrtimer=%p", REC->hrtimer
+
+OSREC_LINUX_IRQ_FORMAT_END timer/hrtimer_cancel
+OSREC_LINUX_IRQ_FORMAT_BEGIN irq/irq_handler_entry
+name: irq_handler_entry
+ID: 58
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int irq;	offset:8;	size:4;	signed:1;
+	field:__data_loc char[] name;	offset:12;	size:4;	signed:0;
+
+print fmt: "irq=%d name=%s", REC->irq, __get_str(name)
+
+OSREC_LINUX_IRQ_FORMAT_END irq/irq_handler_entry
+OSREC_LINUX_IRQ_FORMAT_BEGIN irq/irq_handler_exit
+name: irq_handler_exit
+ID: 57
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int irq;	offset:8;	size:4;	signed:1;
+	field:int ret;	offset:12;	size:4;	signed:1;
+
+print fmt: "irq=%d ret=%s", REC->irq, REC->ret ? "handled" : "unhandled"
+
+OSREC_LINUX_IRQ_FORMAT_END irq/irq_handler_exit
+OSREC_LINUX_IRQ_FORMAT_BEGIN osrec/osrec_task_dequeue
+name: osrec_task_dequeue
+ID: 2841
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:unsigned long __probe_ip;	offset:8;	size:8;	signed:0;
+	field:u64 task;	offset:16;	size:8;	signed:0;
+	field:s32 pid;	offset:24;	size:4;	signed:1;
+	field:u32 state;	offset:28;	size:4;	signed:0;
+	field:u32 saved;	offset:32;	size:4;	signed:0;
+	field:u32 on_rq;	offset:36;	size:4;	signed:0;
+	field:u32 on_cpu;	offset:40;	size:4;	signed:0;
+
+print fmt: "(%lx) task=0x%Lx pid=%d state=%u saved=%u on_rq=%u on_cpu=%u", REC->__probe_ip, REC->task, REC->pid, REC->state, REC->saved, REC->on_rq, REC->on_cpu
+
+OSREC_LINUX_IRQ_FORMAT_END osrec/osrec_task_dequeue
+OSREC_LINUX_IRQ_FORMAT_BEGIN osrec/osrec_task_wake
+name: osrec_task_wake
+ID: 2842
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:unsigned long __probe_ip;	offset:8;	size:8;	signed:0;
+	field:u64 task;	offset:16;	size:8;	signed:0;
+	field:s32 pid;	offset:24;	size:4;	signed:1;
+	field:u32 state;	offset:28;	size:4;	signed:0;
+	field:u32 saved;	offset:32;	size:4;	signed:0;
+	field:u32 on_rq;	offset:36;	size:4;	signed:0;
+	field:u32 on_cpu;	offset:40;	size:4;	signed:0;
+
+print fmt: "(%lx) task=0x%Lx pid=%d state=%u saved=%u on_rq=%u on_cpu=%u", REC->__probe_ip, REC->task, REC->pid, REC->state, REC->saved, REC->on_rq, REC->on_cpu
+
+OSREC_LINUX_IRQ_FORMAT_END osrec/osrec_task_wake
+OSREC_LINUX_IRQ_FORMAT_BEGIN osrec/osrec_task_activate
+name: osrec_task_activate
+ID: 2843
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:unsigned long __probe_ip;	offset:8;	size:8;	signed:0;
+	field:u64 task;	offset:16;	size:8;	signed:0;
+	field:s32 pid;	offset:24;	size:4;	signed:1;
+	field:u32 state;	offset:28;	size:4;	signed:0;
+	field:u32 saved;	offset:32;	size:4;	signed:0;
+	field:u32 on_rq;	offset:36;	size:4;	signed:0;
+	field:u32 on_cpu;	offset:40;	size:4;	signed:0;
+
+print fmt: "(%lx) task=0x%Lx pid=%d state=%u saved=%u on_rq=%u on_cpu=%u", REC->__probe_ip, REC->task, REC->pid, REC->state, REC->saved, REC->on_rq, REC->on_cpu
+
+OSREC_LINUX_IRQ_FORMAT_END osrec/osrec_task_activate
+OSREC_LINUX_IRQ_FORMAT_BEGIN osrec/osrec_task_preempt
+name: osrec_task_preempt
+ID: 2844
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:unsigned long __probe_ip;	offset:8;	size:8;	signed:0;
+	field:u64 task;	offset:16;	size:8;	signed:0;
+	field:s32 pid;	offset:24;	size:4;	signed:1;
+	field:u32 state;	offset:28;	size:4;	signed:0;
+	field:u32 saved;	offset:32;	size:4;	signed:0;
+	field:u32 on_rq;	offset:36;	size:4;	signed:0;
+	field:u32 on_cpu;	offset:40;	size:4;	signed:0;
+
+print fmt: "(%lx) task=0x%Lx pid=%d state=%u saved=%u on_rq=%u on_cpu=%u", REC->__probe_ip, REC->task, REC->pid, REC->state, REC->saved, REC->on_rq, REC->on_cpu
+
+OSREC_LINUX_IRQ_FORMAT_END osrec/osrec_task_preempt
+OSREC_LINUX_IRQ_PROFILE_BEGIN
+  osrec_task_dequeue                                        22               0
+  osrec_task_wake                                            7               0
+  osrec_task_activate                                       22               0
+  osrec_task_preempt                                        20               0
+
+OSREC_LINUX_IRQ_PROFILE_END
+OSREC_LINUX_IRQ_RESULT {"task_state_capture":true,"pid":1,"tid":1,"syscall":101,"request_ns":20000000,"timer_slack_ns":50000,"raw":0,"before_ns":4439200992,"after_ns":4478092992}
+OSREC_LINUX_IRQ_TRACE_BEGIN
+# tracer: nop
+#
+# entries-in-buffer/entries-written: 20/20   #P:1
+#
+#                                _-----=> irqs-off/BH-disabled
+#                               / _----=> need-resched
+#                              | / _---=> hardirq/softirq
+#                              || / _--=> preempt-depth
+#                              ||| / _-=> migrate-disable
+#                              |||| /     delay
+#           TASK-PID     CPU#  |||||  TIMESTAMP  FUNCTION
+#              | |         |   |||||     |         |
+            init-1       [000] d.h..     4.441453: irq_handler_entry: irq=11 name=arch_timer
+            init-1       [000] dNh..     4.442118: irq_handler_exit: irq=11 ret=handled
+            init-1       [000] .N...     4.442198: sys_nanosleep(rqtp: ffffd8f10f70, rmtp: 0)
+            init-1       [000] .N...     4.442420: hrtimer_init: hrtimer=000000004be468d4 clockid=CLOCK_MONOTONIC mode=REL
+            init-1       [000] dN...     4.443233: hrtimer_start: hrtimer=000000004be468d4 function=hrtimer_wakeup expires=4463222000 softexpires=4463172000 mode=REL
+            init-1       [000] dN...     4.443427: osrec_task_dequeue: (dequeue_task_fair+0x0/0x360) task=0xffff000002e38000 pid=1 state=8193 saved=0 on_rq=0 on_cpu=1
+            init-1       [000] d....     4.443905: sched_switch: prev_comm=init prev_pid=1 prev_prio=120 prev_state=S ==> next_comm=rcuos/0 next_pid=18 next_prio=120
+         rcuos/0-18      [000] d....     4.444034: sched_switch: prev_comm=rcuos/0 prev_pid=18 prev_prio=120 prev_state=S ==> next_comm=swapper/0 next_pid=0 next_prio=120
+          <idle>-0       [000] d.h..     4.475007: irq_handler_entry: irq=11 name=arch_timer
+          <idle>-0       [000] d.h..     4.475645: hrtimer_cancel: hrtimer=000000004be468d4
+          <idle>-0       [000] d.h..     4.475741: hrtimer_expire_entry: hrtimer=000000004be468d4 function=hrtimer_wakeup now=4475412992
+          <idle>-0       [000] d.h..     4.476014: osrec_task_wake: (wake_up_process+0x0/0x38) task=0xffff000002e38000 pid=1 state=8193 saved=0 on_rq=0 on_cpu=0
+          <idle>-0       [000] d.h..     4.476034: sched_waking: comm=init pid=1 prio=120 target_cpu=000
+          <idle>-0       [000] d.h..     4.476056: osrec_task_activate: (activate_task+0x0/0x100) task=0xffff000002e38000 pid=1 state=512 saved=0 on_rq=0 on_cpu=0
+          <idle>-0       [000] d.h..     4.476978: osrec_task_preempt: (wakeup_preempt+0x0/0x98) task=0xffff000002e38000 pid=1 state=512 saved=0 on_rq=1 on_cpu=0
+          <idle>-0       [000] dNh..     4.476995: sched_wakeup: comm=init pid=1 prio=120 target_cpu=000
+          <idle>-0       [000] dNh..     4.477028: hrtimer_expire_exit: hrtimer=000000004be468d4
+          <idle>-0       [000] dNh..     4.477101: irq_handler_exit: irq=11 ret=handled
+          <idle>-0       [000] d....     4.477269: sched_switch: prev_comm=swapper/0 prev_pid=0 prev_prio=120 prev_state=R ==> next_comm=init next_pid=1 next_prio=120
+            init-1       [000] .....     4.477479: sys_nanosleep -> 0x0
+
+OSREC_LINUX_IRQ_TRACE_END
+OSREC_LINUX_IRQ_STATS_BEGIN
+entries: 20
+overrun: 0
+commit overrun: 0
+bytes: 800
+oldest event ts:     4.441453
+now ts:     4.506134
+dropped events: 0
+read events: 0
+
+OSREC_LINUX_IRQ_STATS_END
+OSREC_LINUX_IRQ_DONE
+[    4.902009] reboot: Power down

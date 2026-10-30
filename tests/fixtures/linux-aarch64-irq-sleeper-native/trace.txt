@@ -1,0 +1,34 @@
+# tracer: nop
+#
+# entries-in-buffer/entries-written: 21/21   #P:1
+#
+#                                _-----=> irqs-off/BH-disabled
+#                               / _----=> need-resched
+#                              | / _---=> hardirq/softirq
+#                              || / _--=> preempt-depth
+#                              ||| / _-=> migrate-disable
+#                              |||| /     delay
+#           TASK-PID     CPU#  |||||  TIMESTAMP  FUNCTION
+#              | |         |   |||||     |         |
+            init-1       [000] .....     4.826038: sys_nanosleep(rqtp: ffffdbd35640, rmtp: 0)
+            init-1       [000] .....     4.826548: hrtimer_init: hrtimer=00000000000c74e4 clockid=CLOCK_MONOTONIC mode=REL
+            init-1       [000] d....     4.826945: osrec_sleeper_entry: (do_nanosleep+0x0/0x158) object=0xffff000002e53d70 task=0xffff000002e38000
+            init-1       [000] d....     4.827093: hrtimer_start: hrtimer=00000000000c74e4 function=hrtimer_wakeup expires=4847088992 softexpires=4847038992 mode=REL
+            init-1       [000] d....     4.827160: osrec_task_dequeue: (dequeue_task_fair+0x0/0x360) task=0xffff000002e38000 pid=1 state=8193 saved=0 on_rq=0 on_cpu=1
+            init-1       [000] d....     4.827212: sched_switch: prev_comm=init prev_pid=1 prev_prio=120 prev_state=S ==> next_comm=swapper/0 next_pid=0 next_prio=120
+          <idle>-0       [000] d.h..     4.854293: irq_handler_entry: irq=11 name=arch_timer
+          <idle>-0       [000] d.h..     4.854450: hrtimer_cancel: hrtimer=00000000000c74e4
+          <idle>-0       [000] d.h..     4.854556: hrtimer_expire_entry: hrtimer=00000000000c74e4 function=hrtimer_wakeup now=4854372000
+          <idle>-0       [000] d.h..     4.854626: osrec_sleeper_callback: (hrtimer_wakeup+0x0/0x48) object=0xffff000002e53d70 task=0xffff000002e38000
+          <idle>-0       [000] d.h..     4.854721: osrec_task_wake: (wake_up_process+0x0/0x38) task=0xffff000002e38000 pid=1 state=8193 saved=0 on_rq=0 on_cpu=0
+          <idle>-0       [000] d.h..     4.854738: sched_waking: comm=init pid=1 prio=120 target_cpu=000
+          <idle>-0       [000] d.h..     4.854838: osrec_task_activate: (activate_task+0x0/0x100) task=0xffff000002e38000 pid=1 state=512 saved=0 on_rq=0 on_cpu=0
+          <idle>-0       [000] d.h..     4.854875: osrec_task_preempt: (wakeup_preempt+0x0/0x98) task=0xffff000002e38000 pid=1 state=512 saved=0 on_rq=1 on_cpu=0
+          <idle>-0       [000] dNh..     4.854891: sched_wakeup: comm=init pid=1 prio=120 target_cpu=000
+          <idle>-0       [000] dNh..     4.855220: osrec_sleeper_callback_return: (__hrtimer_run_queues+0x13c/0x308 <- hrtimer_wakeup) object=0xffff000002e53d70 task=0x0 result=0
+          <idle>-0       [000] dNh..     4.855778: hrtimer_expire_exit: hrtimer=00000000000c74e4
+          <idle>-0       [000] dNh..     4.855958: irq_handler_exit: irq=11 ret=handled
+          <idle>-0       [000] d....     4.856553: sched_switch: prev_comm=swapper/0 prev_pid=0 prev_prio=120 prev_state=R ==> next_comm=init next_pid=1 next_prio=120
+            init-1       [000] d....     4.857602: osrec_sleeper_return: (hrtimer_nanosleep+0xa0/0x120 <- do_nanosleep) object=0xffff000002e53d70 task=0x0 result=0
+            init-1       [000] .....     4.857736: sys_nanosleep -> 0x0
+

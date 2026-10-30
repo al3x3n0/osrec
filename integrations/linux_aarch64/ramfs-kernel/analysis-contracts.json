@@ -1,0 +1,148 @@
+{
+  "format": "osrec-entry-state-boundaries-v1",
+  "boundaries": {
+    "get_current": {
+      "kind": "object_provider",
+      "reason": "arm64 current task: `mrs sp_el0` in EL1. The SVC boundary contract locates the same object (anchor current, SP_EL0) and binds it from live state",
+      "implementation": "integrations/linux_aarch64/svc-boundary.json anchor; tools/live_kernel_binding.py",
+      "snapshot_safe": true
+    },
+    "percpu_down_read": {
+      "kind": "ordering_model",
+      "reason": "filesystem freeze protection (sb->s_writers per-CPU rwsem); replay is sequential on one CPU and frozen superblocks are outside the admitted states",
+      "implementation": "no-op ordering model: acquisition always succeeds and its counters are not entry state"
+    },
+    "percpu_up_read": {
+      "kind": "ordering_model",
+      "reason": "filesystem freeze protection (sb->s_writers per-CPU rwsem); replay is sequential on one CPU and frozen superblocks are outside the admitted states",
+      "implementation": "no-op ordering model: acquisition always succeeds and its counters are not entry state"
+    },
+    "raw_atomic_read_acquire": {
+      "kind": "memory_model",
+      "reads": [
+        0
+      ],
+      "reason": "arm64 load-acquire (ldar) of v->counter; on one CPU in sequential replay it is a plain read of the counter",
+      "implementation": "reads *v; ordering has no effect in sequential replay"
+    },
+    "array_index_mask_nospec": {
+      "kind": "value_model",
+      "semantics": "index_mask",
+      "reason": "arm64 implements the Spectre index mask in assembly (cmp/sbc/csdb); its value is all-ones when index < size, else zero, as in the generic C body in include/linux/nospec.h",
+      "implementation": "index_mask(index, size)"
+    },
+    "raw_atomic64_cmpxchg": {
+      "kind": "memory_model",
+      "reads": [
+        0
+      ],
+      "writes": [
+        0
+      ],
+      "reason": "last C function before the arm64 LL/SC or LSE cmpxchg assembly; replay is sequential on one CPU with no concurrent tasks; it reads and conditionally writes v->counter",
+      "implementation": "reads and writes *v"
+    },
+    "mutex_lock": {
+      "kind": "ordering_model",
+      "reason": "replay is sequential on one CPU with no concurrent tasks; uncontended mutexes always succeed; lock words are not entry state",
+      "implementation": "no-op ordering model"
+    },
+    "mutex_unlock": {
+      "kind": "ordering_model",
+      "reason": "replay is sequential on one CPU with no concurrent tasks; uncontended mutexes always succeed; lock words are not entry state",
+      "implementation": "no-op ordering model"
+    },
+    "rcu_read_lock": {
+      "kind": "ordering_model",
+      "reason": "replay is sequential on one CPU with no concurrent tasks; RCU read-side sections delimit no observable state and no grace period completes during one call",
+      "implementation": "no-op ordering model"
+    },
+    "rcu_read_unlock": {
+      "kind": "ordering_model",
+      "reason": "replay is sequential on one CPU with no concurrent tasks; RCU read-side sections delimit no observable state and no grace period completes during one call",
+      "implementation": "no-op ordering model"
+    },
+    "fput": {
+      "kind": "memory_model",
+      "reads": [
+        0
+      ],
+      "writes": [
+        0
+      ],
+      "reason": "drops a file reference (fs/file_table.c, outside the current closure); a descriptor-table reference keeps the file alive, so release work is not reached",
+      "implementation": "reads and writes the struct file; refined when fs/file_table.c joins the closure"
+    }
+  },
+  "volatile_fields": [
+    {
+      "record": "struct thread_info",
+      "field": "flags",
+      "reason": "TIF_* bits may be set asynchronously by other CPUs or interrupts; replay is sequential on one CPU, so the entry value is a snapshot",
+      "validated_by": "live state field task.thread_info.flags captured at the SVC boundary"
+    }
+  ],
+  "state_ranges": [
+    {
+      "record": "struct fdtable",
+      "field": "max_fds",
+      "min": 64,
+      "max": 64,
+      "reason": "small-table processes use the embedded fdtab with NR_OPEN_DEFAULT (BITS_PER_LONG) descriptors",
+      "validated_by": "live state field files.fdtab.max_fds"
+    }
+  ],
+  "pointer_extents": [
+    {
+      "record": "struct fdtable",
+      "field": "fd",
+      "extent_field": "max_fds",
+      "reason": "alloc_fdtable/files_struct init size the descriptor array to max_fds entries",
+      "validated_by": "live binding reads fd[0..max_fds-1] at the SVC boundary"
+    }
+  ],
+  "operand_free_asm": {
+    "classification": "no_memory_effects",
+    "reason": "in this kernel, asm without operands is barrier(), dmb/dsb/isb, msr daif and similar: they order or mask but access no C object; traps are recognized separately",
+    "validated_by": "contract per configured kernel; asm templates are not in the Clang JSON AST"
+  },
+  "volatile_accesses": {
+    "classification": "sequential_snapshot",
+    "reason": "READ_ONCE/WRITE_ONCE and rcu_dereference use volatile for single-copy atomicity; replay is sequential on one CPU with no concurrent tasks; MMIO pointers stay unresolved integer addresses",
+    "validated_by": "every resolved volatile read is an entry read checked against live state"
+  },
+  "callback_targets": [
+    {
+      "record": "struct file_operations",
+      "field": "read_iter",
+      "targets": [
+        "generic_file_read_iter"
+      ],
+      "reason": "ramfs_file_operations.read_iter (fs/ramfs/file-mmu.c)",
+      "validated_by": "live state: every admitted file has f_op == &ramfs_file_operations (vmlinux data symbol; tiny-shmem memfds use it)"
+    },
+    {
+      "record": "struct file_operations",
+      "field": "write_iter",
+      "targets": [
+        "generic_file_write_iter"
+      ],
+      "reason": "ramfs_file_operations.write_iter (fs/ramfs/file-mmu.c)",
+      "validated_by": "live state: every admitted file has f_op == &ramfs_file_operations (vmlinux data symbol; tiny-shmem memfds use it)"
+    },
+    {
+      "record": "struct file_operations",
+      "field": "read",
+      "targets": [],
+      "reason": "ramfs_file_operations has no .read; vfs_read uses read_iter",
+      "validated_by": "live state: every admitted file has f_op == &ramfs_file_operations (vmlinux data symbol; tiny-shmem memfds use it)"
+    },
+    {
+      "record": "struct file_operations",
+      "field": "write",
+      "targets": [],
+      "reason": "ramfs_file_operations has no .write; vfs_write uses write_iter",
+      "validated_by": "live state: every admitted file has f_op == &ramfs_file_operations (vmlinux data symbol; tiny-shmem memfds use it)"
+    }
+  ]
+}

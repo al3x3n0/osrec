@@ -1,0 +1,95 @@
+{
+  "format": "osrec-linux-aarch64-capture-manifest-v1",
+  "identity": {
+    "kernel_release": "6.10.14-linuxkit",
+    "kernel_image_sha256": "d196f8248abdddab384e4998a9714501b2932ccfafd9b8ba45112c7dea2cfa35",
+    "kernel_config_sha256": "f6fabe8341dd01882ab1d6fa176cf2ed34c5d3c5a0451f2dfb45acfa24a2892f",
+    "architecture": "aarch64"
+  },
+  "reviewed_source_identity": {
+    "format": "osrec-linux-reviewed-source-v1",
+    "release": "v6.10",
+    "source": "kernel/sys.c + kernel/groups.c",
+    "upstream_url": "https://raw.githubusercontent.com/torvalds/linux/v6.10/kernel/sys.c",
+    "scope": "selected original syscall definitions; reviewed excerpt",
+    "excerpt_sha256": "702f57d5dc6eba25af6301fb0bbe6e54150a2f936fc434c66be63dfcb731b435",
+    "definitions": {
+      "getpid": "6a91176c8f85fa7ecc72a83b63ecd881dc7a78c5371557460fe54afca9e13ac8",
+      "gettid": "8b0ec6b55c75f5445ecea2c6fd840cefe7108278653d28942e312f3c51071d03",
+      "getppid": "9c241ee1f0dfa89e3a615a6e498d6410854c95c10ca24cc4adfe1c6b80a8f7a1",
+      "getuid": "76a0e2839c8c67fc874e8fdb8f9f4671f0078291fd9e07b65e5283ffebd1896f",
+      "geteuid": "bcef93b26a90e8ac23c3ae751cab0c5813f137b71022f8159d8844a765d89d5c",
+      "getgid": "8b1694871f93ef3080b9d495a4006c302fa3cb27cdb1b6a977578a7d2e57881d",
+      "getegid": "663f5466996e30f1448dea998999821dbba0bb5f8d4220fd189aa80a8adc4cde",
+      "getresuid": "8512433a32130c14d9546419853c7b4f384013adeaa8ed6903a52ddf8f3074b6",
+      "getresgid": "c7950cdd6fe8ce6f3d7608f5e6f5d396337edb7ced52a624f052ae78e26170d5",
+      "umask": "8fb2d6f697353df0563d1728af146664b32d3954d9717cdd2e716590080be6dc",
+      "setresgid": "2e6411f6d7df4c6f18f1b88f1c59b9ae64e1ea054947e35a2e8f1bd3167870e5",
+      "setfsgid": "ea1b822a1867b4145e5651d1cf7728a0f5ae1750f75a8adeb21309c575566277",
+      "setgid": "a19f6a15269c0a7545a9e38b45f85072bc5240cbb167c0a96b3859dbf2f2dc4b",
+      "setregid": "2285518bd8eb5246bf4cbed4edf2ccdac101c18698d55b5435ad29d608af60ae",
+      "__sys_setresgid": "c3a7e751410136bb36b9b7f1b4abbdafc073f6aef432c21a1b3376785b6e1d6a",
+      "__sys_setfsgid": "69f51eb5299a79155c46a69fa3bd3a77f4c357d9571f752be45b2340167f53ca",
+      "__sys_setgid": "ccccc3955d8334cc7971fad0db906a32fd0edc6ce3db5eee3487e6a469f4439f",
+      "__sys_setregid": "2f07cdb745cf1e0b0c4ca4fbc99797b62ff9e6407ddca97e4c5cc1de5f7117fe",
+      "getgroups": "8dde8acd87832734f01ffe4323c4f9070bc9a05ee152e03473c3e4bc9ee7b31d",
+      "groups_to_user": "0f11b1e23c06ba33c3d2d96dbac5595503976d2640fb2301e5824e1faeaaf061"
+    },
+    "syscall_abi_sha256": "64ab5944cc86f082404a3f2b5aed34293fe8d7bd18d98bf9dd0abcf019713e93",
+    "profile": "getgroups",
+    "additional_upstream_urls": {
+      "kernel/groups.c": "https://raw.githubusercontent.com/torvalds/linux/v6.10/kernel/groups.c"
+    },
+    "additional_sources": {
+      "kernel/groups.c": "25ccbb4cf807c30c873dda3d47f28d1e22a03845fac842339b42a728e63f5a5d"
+    }
+  },
+  "capture_sha256": "fc050baf1fadc7c685955b40459146038433122274cbc83f34ff862416aa3d42",
+  "init_sha256": "36df1cae89c0b602cb1efdc07eaedc147e145ec1a38562c77f522c3be7471926",
+  "root_disk_sha256": "abdc9cb2a33159c2bdc0028da98f1c685905877898e0a6ff632333a780930f04",
+  "qemu_log_sha256": "59af86d3b6246a6af28cdd5b90737b55176eeca97863b526197a6347f9dc97b8",
+  "capture_construction_sha256": {
+    "capture_linux_aarch64.py": "3600f126f3f6b43bd3a36a9f186abde7566ef5d0990b61ecccdd39ff7b4d55a4",
+    "minimal_ext2.py": "e4489ec565b553f176ce847fd0f393027bbd02a46ded2cb110afef75bc5515ad",
+    "compile_c_application.py": "f0083059cd741b22d916379e379ecc1accc820f34294e919422073958c6ea5ca"
+  },
+  "root_builder_sha256": "e4489ec565b553f176ce847fd0f393027bbd02a46ded2cb110afef75bc5515ad",
+  "source_sha256": {
+    "native-start.S": "12b675b3fc9912aeaebac3109c65c712fa145c158c98f01446c61bbbfef93aa7",
+    "native.c": "2e13342007f88a5ec5e66250ed726ac51c5cc2f345a5e4ac4233352e2f32005b",
+    "osrec_application.h": "a97405b6aa469be7f72ccbf3d4afc64f7de406856a691d2c5cb584f37c074b02",
+    "application.c": "2596dbb82fa9f425047fcd458c34d78528a4478d89bbeb112f52d8d4d711637d",
+    "syscall.S": "ec7227974b7b67f124e2a436529d8ff2d8d9e5e9d5a6d45850564fe7c5fdcb34"
+  },
+  "qemu_command": [
+    "qemu-system-aarch64",
+    "-machine",
+    "virt",
+    "-cpu",
+    "cortex-a53",
+    "-accel",
+    "tcg",
+    "-smp",
+    "1",
+    "-m",
+    "512M",
+    "-nographic",
+    "-monitor",
+    "none",
+    "-nic",
+    "none",
+    "-no-reboot",
+    "-kernel",
+    "/Applications/Docker.app/Contents/Resources/linuxkit/kernel",
+    "-drive",
+    "file=/Users/al3x3n0/huawei/osrec/build/linux-getgroups-pipeline-final-v1/native/root.ext2,format=raw,if=none,id=root,readonly=on",
+    "-device",
+    "virtio-blk-device,drive=root",
+    "-append",
+    "console=ttyAMA0 root=/dev/vda rootfstype=ext4 ro rootwait init=/init panic=-1"
+  ],
+  "qemu_exit_status": 0,
+  "native_linux_boot": true,
+  "semihosting": false,
+  "state_observation": "syscall-observed projection; umask probes restore the observed mask; private getresgid and nonmutating setfsgid(-1) probes observe group IDs; pool slots/generations are modeled bookkeeping; private getgroups probes observe supplementary IDs; native caller witness ends at a protected guard page"
+}

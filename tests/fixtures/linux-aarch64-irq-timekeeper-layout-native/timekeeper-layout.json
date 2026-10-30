@@ -1,0 +1,15 @@
+{
+  "source": "native-sysfs-btf-unique-anonymous-shape",
+  "symbol_type_binding_attested": false,
+  "core_type_id": 3754,
+  "core_size": 288,
+  "timekeeper_type_id": 3745,
+  "timekeeper_size": 280,
+  "sequence_offset": 0,
+  "clock_sequence_offset": 180,
+  "mono_base_offset": 48,
+  "real_offset": 152,
+  "boot_offset": 160,
+  "tai_offset": 168,
+  "leap_offset": 192
+}

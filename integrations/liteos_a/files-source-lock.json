@@ -1,0 +1,44 @@
+{
+  "repository": "https://github.com/openharmony/kernel_liteos_a",
+  "revision": "4ac7f3aed67000b47bc14d6fe79d63ada708d780",
+  "source": "syscall/fs_syscall.c",
+  "source_sha256": "bcc88620c1f02ef1ca0deaf47a5424d7d6e1bcbf28a4395f86b65d90a36b84ab",
+  "headers": {
+    "syscall/syscall_lookup.h": "468a2f8c8ab28c8a78c988aed2a56ad4396cd5bb11287520e98e1661d65fea5e",
+    "fs/vfs/operation/vfs_procfd.c": "0dc51f7fa4cd5941132107a85c2bd161b9945e0839e8bc0859c04a3497e754e5",
+    "fs/include/fs/fd_table.h": "c8e74782d0a064250a89a0a01d1a9a954cf43fc64ed90a9061bf753cfb762d6d",
+    "syscall/syscall_pub.h": "f430a03c270024fb95ab06f75c1d3ec3dc8d42cdf639dee88ff863779ed72a29",
+    "syscall/syscall_pub.c": "9b955a0fd9efed5755d3b2eaca0958c75bc88d2de66ab97da15966d9f82785cd",
+    "kernel/base/include/los_vm_lock.h": "e879af4fd9b0e8f42b60c9e1109928bc7117131a61e4e88a18c0e900ed3b6148",
+    "fs/vfs/operation/vfs_other.c": "02bc13d28d670911f3d19617cca802878badf69ceaf8d12a9b11fd44305aa7d2"
+  },
+  "libc_headers": {
+    "porting/liteos_a/kernel/include/errno.h": "e5a830a2dc47320bdb541bf62da461ec3041b3a045cb81229de59b817b393673",
+    "porting/liteos_a/kernel/include/bits/stat.h": "cff2861c30443afdf267013cbf12b4ef9f8a32df6a1d6823966726eaf530a634",
+    "porting/liteos_a/kernel/include/sys/kstat.h": "5ec92d39052bb822d4b1339877b4b1b5335edeaaa5374a547849cd741a89bf12",
+    "porting/liteos_a/kernel/include/sys/stat.h": "2ceb6f7cc242ba3046e1cc7b5babdbfd310dd9ab2894d86d19d02e2f3e0853c1",
+    "porting/liteos_a/kernel/include/bits/alltypes.h": "b205b6b3cac09ebf04f86353287a0a899f3ece1c63975e63c9512e2daf26c27d",
+    "porting/liteos_a/kernel/include/fcntl.h": "855391c2f23b4a6b07efbfe4c159cd77bf562f98484f15860f18116a6d6a49ec"
+  },
+  "native_abi": "signed 32-bit descriptors; normalized three-slot mapping/allocation/cloexec and native file reference count",
+  "vfs_sources": {
+    "fs/inode/fs_files.c": "64f90227d5a2e5396ee21ed6c6a27dd360934b33df1d83fac449902d16cf5c65",
+    "fs/vfs/include/file.h": "af1c9fc7f1459c6ad118609250f1074be346ef6cf0977eccdadaef16af6e9046",
+    "fs/vfs/fs_close.c": "7d40a9d34103dc503f1d55ada48063e796339f3f2f9f13c3ea333eeb15a449c7",
+    "fs/vfs/fs_read.c": "8811ce9e82a53446c814b083e43411f7de84c67f252c961ab19de3f07419b99b",
+    "fs/vfs/fs_write.c": "3ffb658e53d57142c336373db93ba34a6f58082823b9960e1c2112dac5ddf445",
+    "fs/vfs/fs_stat.c": "68453fba6a9fab73d39470c729dde688cd96fc6471174865684605992d2c40ca"
+  },
+  "functions": {
+    "GetPath": "4cedb3c4e0203254c700e8de9809ee2c00ea993037b752ff790b62162e3dad43",
+    "SysOpen": "8a7bad2c905dd6a46968cfe45dd009b4224ccb777ae8c831afab97d4395ca2e0",
+    "SysOpenat": "3fe5f0feec2d970dab7096045a323653d21056b5590a3a3d698da7684335552f",
+    "SysWrite": "5034fc7f8b74bef77dcca370faf0de3676125c1ad4d3c3625f93e999d4b9851a",
+    "SysRead": "3a39009fb9a2d2d22b1da915d824a821c5a768e0969c9d5bc5b419df7cf98c78",
+    "SysLseek64": "539be9a65525e4e4f7c354b72a22176b55a431d8147fea81394df592d16361e7",
+    "SysFstat64": "e3ce10b2b738e9e535ae80392f815632294f8e35bc637072f0df9e59b6b1abb0",
+    "SysStat": "fe69ad7be9b52bc32cb461e85bff1734900bd1d58aeeb0f8b359318eda22ef7e",
+    "SysDup2": "e9a559f81d3a97518d690540421abfe8636307655e601ee4b1a0282027ebabda",
+    "SysClose": "af64116e2bb6d1d44d4c7b53b1c0949d0dacdd842794f69220d273684d7999bb"
+  }
+}

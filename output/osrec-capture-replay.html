@@ -1,0 +1,159 @@
+<div id="osrec-explainer">
+  <style>
+    #osrec-explainer { color: var(--foreground); }
+    #osrec-explainer .osrec-flow { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 16px; margin: 18px 0 24px; }
+    #osrec-explainer .osrec-flow-item { display: flex; flex-direction: column; gap: 6px; }
+    #osrec-explainer .osrec-flow-item strong { font-weight: 500; }
+    #osrec-explainer .osrec-graphic { width: 100%; margin: 12px 0; }
+    #osrec-explainer .osrec-graphic svg { display: block; width: 100%; }
+    #osrec-explainer .osrec-graphic text { fill: var(--foreground); font-size: 12px; }
+    #osrec-explainer .osrec-detail { margin: 12px 0 18px; min-height: 2em; }
+    #osrec-explainer .osrec-transcript { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 12px 0; }
+    #osrec-explainer .osrec-foot { margin-top: 20px; }
+    @media (max-width: 520px) {
+      #osrec-explainer .osrec-flow { grid-template-columns: repeat(2,minmax(0,1fr)); }
+    }
+  </style>
+  <div class="nav nav-pills" role="tablist" aria-label="Recorder implementation">
+    <button class="nav-link active" id="osrec-plan-tab" role="tab" aria-controls="osrec-plan" aria-selected="true" type="button">Planned OHOS solution</button>
+    <button class="nav-link" id="osrec-demo-tab" role="tab" aria-controls="osrec-demo" aria-selected="false" type="button">Working host demo</button>
+  </div>
+  <div id="osrec-plan" role="tabpanel" aria-labelledby="osrec-plan-tab">
+    <div class="osrec-flow" aria-label="Solution pipeline">
+      <div class="osrec-flow-item"><strong>1 · Analyze</strong><span class="text-small">Kernel source + pinned build</span><span class="text-small text-muted">Dependencies · ownership · effects</span></div>
+      <div class="osrec-flow-item"><strong>2 · Instrument</strong><span class="text-small">Capture plan + selected hooks</span><span class="text-small text-muted">Skip proven redundant observations</span></div>
+      <div class="osrec-flow-item"><strong>3 · Record</strong><span class="text-small">Task state + external observations</span><span class="text-small text-muted">Preallocated buffers · complete captures</span></div>
+      <div class="osrec-flow-item"><strong>4 · Replay</strong><span class="text-small">Code + state + dependency transcript</span><span class="text-small text-muted">Matching kernel harness · output checks</span></div>
+    </div>
+    <div class="viz-row"><strong style="font-weight:500">One syscall across scheduling and an interrupt</strong><span class="viz-badge">Schematic · planned</span></div>
+    <div id="osrec-task-graphic" class="osrec-graphic"></div>
+    <div id="osrec-task-controls" class="viz-controls" aria-label="Select task capture event"></div>
+    <div id="osrec-task-detail" class="osrec-detail" aria-live="polite"></div>
+    <div class="osrec-transcript text-small" aria-label="Replay capsule contents">
+      <span>Capsule: entry checkpoint</span><span>+ code closure</span><span>+ context and dependency transcript</span><span>+ expected outputs</span>
+    </div>
+    <div class="osrec-foot text-small text-muted">Functional replay · interrupt effects and shared observations required · timing fidelity not implied</div>
+  </div>
+  <div id="osrec-demo" role="tabpanel" aria-labelledby="osrec-demo-tab" hidden>
+    <div class="viz-row" style="margin-top:18px"><strong style="font-weight:500">Budget helper capture and replay</strong><span class="viz-badge">Implemented · host only</span></div>
+    <div id="osrec-demo-graphic" class="osrec-graphic"></div>
+    <div id="osrec-demo-controls" class="viz-controls" aria-label="Select demo pipeline stage"></div>
+    <div id="osrec-demo-detail" class="osrec-detail" aria-live="polite"></div>
+    <div class="osrec-transcript text-small tabular-nums" aria-label="Recorded example values">
+      <span>Credits: 100</span><span>Deadline: 500</span><span>Demand: 30</span><span>Clock: 400</span><span>Result: 30 granted · 70 remaining</span>
+    </div>
+    <div class="osrec-foot text-small text-muted">180-byte capture · manual hooks · single writer · scheduling and interrupts not implemented</div>
+  </div>
+  <script>
+    (() => {
+      const root = document.getElementById('osrec-explainer');
+      const ns = 'http://www.w3.org/2000/svg';
+      const states = {task:0,demo:0};
+      const taskSteps = ['Entry','Block','IRQ','Wake','Resume','Return'];
+      const taskDetails = [
+        ['Captured','Arguments + relevant object state','Recomputed','Ordinary task instructions'],
+        ['Captured','Wait object + boundary occurrence','Recomputed','Included wait-path code'],
+        ['Captured','Device input + modeled effects outside closure','Recomputed','Included interrupt-handler code'],
+        ['Captured','Completion effects + wakeup relation','Recomputed','Included completion-path code'],
+        ['Captured','Relevant shared and per-CPU observations','Recomputed','Deterministic work from restored state'],
+        ['Captured','Return value + observable writes + completeness','Verified','Replay outputs + transcript consumption']
+      ];
+      const demoSteps = ['Inputs','Clock','Execute','Export','Replay'];
+      const demoDetails = [
+        ['Captured','100 credits · deadline 500 · demand 30','Record','Input snapshot'],
+        ['Captured','Clock returns 400','Record','One external observation'],
+        ['Computed','30 granted · 70 remaining','Captured','Expected output values'],
+        ['Generated','Original helper + state + replay clock','Checked','Source fingerprint + record structure'],
+        ['Recomputed','30 granted · 70 remaining','Verified','Outputs match + exactly one clock call']
+      ];
+      const element = (name, attrs, parent, value) => {
+        const node = document.createElementNS(ns,name);
+        Object.entries(attrs || {}).forEach(([key,val]) => node.setAttribute(key,String(val)));
+        if(value !== undefined) node.textContent=value;
+        if(parent) parent.appendChild(node);
+        return node;
+      };
+      function graphic(type) {
+        const host=root.querySelector(type==='task'?'#osrec-task-graphic':'#osrec-demo-graphic');
+        const width=Math.max(300,host.clientWidth || root.clientWidth || 736);
+        const small=width<450;
+        const left=small?59:88;
+        const columns=type==='task'?6:5;
+        const column=(width-left-6)/columns;
+        const height=type==='task'?223:211;
+        host.replaceChildren();
+        const svg=element('svg',{viewBox:`0 0 ${width} ${height}`,height,role:'img','aria-labelledby':`osrec-${type}-title osrec-${type}-desc`},host);
+        element('title',{id:`osrec-${type}-title`},svg,type==='task'?'Task capture across scheduling and interrupt completion':'Working budget helper capture and executable replay');
+        element('desc',{id:`osrec-${type}-desc`},svg,type==='task'?'Logical event order: syscall entry, blocking, interrupt handling, wakeup, task resumption, return. Another task runs while the selected task waits.':'Original execution records inputs, clock and expected outputs. Export creates C code. Replay restores inputs and verifies recomputed outputs.');
+        const steps=type==='task'?taskSteps:demoSteps;
+        const index=states[type];
+        const x=left+index*column;
+        element('rect',{x:x+1,y:32,width:column-2,height:height-39,rx:3,fill:'var(--viz-series-1)','fill-opacity':0.08},svg);
+        element('text',{x:0,y:17},svg,'Order');
+        steps.forEach((step,i)=>{
+          element('text',{x:left+column*(i+.5),y:17,'text-anchor':'middle'},svg,small?String(i+1):`${i+1} ${step}`);
+          element('line',{x1:left+column*i,y1:27,x2:left+column*i,y2:height-10,stroke:'var(--border)','stroke-width':1},svg);
+        });
+        function mark(row,start,end,label,series,muted=false){
+          const y=54+row*55;
+          element('rect',{x:left+start*column+3,y,width:(end-start)*column-6,height:31,rx:3,
+            fill:muted?'var(--muted)':`var(--viz-series-${series})`,'fill-opacity':muted?0.65:0.22},svg);
+          element('text',{x:left+(start+end)*column/2,y:y+20,'text-anchor':'middle'},svg,label);
+        }
+        if(type==='task') {
+          ['Task A','Task B','IRQ'].forEach((name,row)=>element('text',{x:0,y:74+row*55},svg,name));
+          mark(0,0,1,small?'In':'Entry',1);
+          mark(0,1,4,'Blocked',1,true);
+          mark(0,4,5,'Run',1);
+          mark(0,5,6,small?'Out':'Return',1);
+          mark(1,1,2,'Run',3);
+          mark(1,3,4,'Run',3);
+          mark(2,2,3,column<80?'IRQ':'Complete',2);
+          const wakeX=left+3*column;
+          const resumeX=left+4.5*column;
+          element('path',{d:`M ${wakeX-3} 179 L ${wakeX+1} 179 L ${wakeX+1} 98 L ${resumeX} 98 L ${resumeX} 89`,
+            fill:'none',stroke:'var(--foreground)','stroke-width':1.2},svg);
+          element('path',{d:`M ${resumeX-3} 94 L ${resumeX} 89 L ${resumeX+3} 94`,
+            fill:'none',stroke:'var(--foreground)','stroke-width':1.2},svg);
+        } else {
+          ['Record','Export','Replay'].forEach((name,row)=>element('text',{x:0,y:74+row*55},svg,name));
+          mark(0,0,1,'State',1);
+          mark(0,1,2,'400',2);
+          mark(0,2,3,column<130?'30 / 70':'30 granted / 70 left',1);
+          mark(1,3,4,small?'C':'C snippet',3);
+          mark(2,4,5,small?'Check':'Verify',1);
+        }
+      }
+      function update(type) {
+        const container=root.querySelector(type==='task'?'#osrec-task-controls':'#osrec-demo-controls');
+        const steps=type==='task'?taskSteps:demoSteps;
+        if(!container.children.length) {
+          steps.forEach((step,i)=>{
+            const button=document.createElement('button');
+            button.type='button'; button.className='btn';
+            button.textContent=`${i+1} · ${step}`;
+            button.addEventListener('click',()=>{states[type]=i;update(type);});
+            container.appendChild(button);
+          });
+        }
+        [...container.children].forEach((button,i)=>button.setAttribute('aria-pressed',String(i===states[type])));
+        const detail=root.querySelector(type==='task'?'#osrec-task-detail':'#osrec-demo-detail');
+        const text=(type==='task'?taskDetails:demoDetails)[states[type]];
+        detail.textContent=`${text[0]}: ${text[1]} · ${text[2]}: ${text[3]}`;
+        graphic(type);
+      }
+      update('task');update('demo');
+      const resize=new ResizeObserver(()=>{
+        if(!root.querySelector('#osrec-plan').hidden) graphic('task');
+        if(!root.querySelector('#osrec-demo').hidden) graphic('demo');
+      });
+      resize.observe(root);
+      const visibility=new MutationObserver(()=>{
+        if(!root.querySelector('#osrec-plan').hidden) graphic('task');
+        if(!root.querySelector('#osrec-demo').hidden) graphic('demo');
+      });
+      visibility.observe(root.querySelector('#osrec-plan'),{attributes:true,attributeFilter:['hidden']});
+      visibility.observe(root.querySelector('#osrec-demo'),{attributes:true,attributeFilter:['hidden']});
+    })();
+  </script>
+</div>

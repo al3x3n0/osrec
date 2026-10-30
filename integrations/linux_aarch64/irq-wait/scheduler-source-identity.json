@@ -1,0 +1,56 @@
+{
+  "release": "Linux v6.10",
+  "source": "kernel/sched/core.c",
+  "source_url": "https://github.com/torvalds/linux/blob/v6.10/kernel/sched/core.c",
+  "extraction": "Selected complete definitions, internal block comments omitted; declarations and statements unchanged",
+  "native_source_build_attested": false,
+  "files": {
+    "sched_state.c": {
+      "excerpt_sha256": "cf12afce9b1cfeabd2b6e663154da9b4a2ffbb4811939cf2f09e792ac1ab7db1",
+      "functions": [
+        {
+          "name": "__task_state_match",
+          "source_line": 2115
+        },
+        {
+          "name": "ttwu_state_match",
+          "source_line": 3836
+        }
+      ]
+    },
+    "sched_wakeup.c": {
+      "excerpt_sha256": "5b7ebc677babd50a6c0dd758f4ed292ef8137f0224e16aa149335fa6ada42305",
+      "functions": [
+        {
+          "name": "ttwu_do_wakeup",
+          "source_line": 3542
+        },
+        {
+          "name": "wake_up_process",
+          "source_line": 4241
+        }
+      ]
+    },
+    "sched_queue.c": {
+      "excerpt_sha256": "4f7140dfc3f4f74e737b9628eb59be3944453e93728fcb5b51b25b50d0ae7f6f",
+      "functions": [
+        {
+          "name": "enqueue_task",
+          "source_line": 1976
+        },
+        {
+          "name": "dequeue_task",
+          "source_line": 1992
+        },
+        {
+          "name": "activate_task",
+          "source_line": 2008
+        },
+        {
+          "name": "deactivate_task",
+          "source_line": 2021
+        }
+      ]
+    }
+  }
+}

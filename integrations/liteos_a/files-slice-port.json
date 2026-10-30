@@ -1,0 +1,103 @@
+{
+  "format": "osrec-kernel-slice-port-v1",
+  "name": "liteos-a-files",
+  "target_isa": "aarch64",
+  "kernel_abi": "liteos-a-armv7-captured-32-bit-scalars",
+  "capture_adapter": "files_slice_port",
+  "argument_width": 32,
+  "roots": [
+    {
+      "number": 5,
+      "function": "SysOpen",
+      "arguments": [
+        "path",
+        "signed",
+        "unsigned"
+      ]
+    },
+    {
+      "number": 322,
+      "function": "SysOpenat",
+      "arguments": [
+        "signed",
+        "path",
+        "signed",
+        "unsigned"
+      ]
+    },
+    {
+      "number": 4,
+      "function": "SysWrite",
+      "arguments": [
+        "signed",
+        "buffer",
+        "unsigned"
+      ]
+    },
+    {
+      "number": 3,
+      "function": "SysRead",
+      "arguments": [
+        "signed",
+        "buffer",
+        "unsigned"
+      ]
+    },
+    {
+      "number": 140,
+      "function": "SysLseek64",
+      "arguments": [
+        "signed",
+        "signed",
+        "signed",
+        "buffer",
+        "signed"
+      ]
+    },
+    {
+      "number": 197,
+      "function": "SysFstat64",
+      "arguments": [
+        "signed",
+        "buffer"
+      ]
+    },
+    {
+      "number": 106,
+      "function": "SysStat",
+      "arguments": [
+        "path",
+        "buffer"
+      ]
+    },
+    {
+      "number": 63,
+      "function": "SysDup2",
+      "arguments": [
+        "signed",
+        "signed"
+      ]
+    },
+    {
+      "number": 6,
+      "function": "SysClose",
+      "arguments": [
+        "signed"
+      ]
+    }
+  ],
+  "application_abi": {
+    "format": "osrec-aarch64-syscall-registers-v1",
+    "number_register": 8,
+    "argument_registers": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "result_register": 0,
+    "continuation": "svc-pc-plus-4"
+  }
+}

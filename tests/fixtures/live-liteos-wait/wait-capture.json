@@ -1,0 +1,295 @@
+{
+  "format": "osrec-live-wait-v1",
+  "state": [
+    1,
+    5,
+    1,
+    4100,
+    4,
+    2,
+    32,
+    0,
+    20000000,
+    16,
+    1000,
+    0,
+    0,
+    5244687,
+    0,
+    4100,
+    0,
+    10,
+    0,
+    0,
+    7068437,
+    0,
+    7735437,
+    0,
+    6068437,
+    0,
+    7068437,
+    0,
+    50000000,
+    7708687,
+    0,
+    2
+  ],
+  "events": [
+    [
+      0,
+      1,
+      5,
+      5,
+      4100,
+      0,
+      0,
+      0,
+      536871123,
+      4100
+    ],
+    [
+      1,
+      2,
+      5,
+      5,
+      4100,
+      0,
+      1000000,
+      0,
+      536871123,
+      4100
+    ],
+    [
+      2,
+      3,
+      5,
+      0,
+      8192,
+      0,
+      5,
+      0,
+      536871123,
+      4132
+    ],
+    [
+      3,
+      9,
+      0,
+      5,
+      4128,
+      0,
+      7068437,
+      0,
+      536871123,
+      4128
+    ],
+    [
+      4,
+      4,
+      0,
+      0,
+      0,
+      1,
+      29,
+      0,
+      1610613203,
+      4128
+    ],
+    [
+      5,
+      6,
+      0,
+      5,
+      4098,
+      1,
+      7708687,
+      0,
+      536871379,
+      4098
+    ],
+    [
+      6,
+      5,
+      0,
+      0,
+      0,
+      1,
+      29,
+      0,
+      1610613203,
+      4098
+    ],
+    [
+      7,
+      3,
+      0,
+      5,
+      4096,
+      0,
+      0,
+      5,
+      536871379,
+      4096
+    ],
+    [
+      8,
+      7,
+      5,
+      5,
+      4100,
+      0,
+      0,
+      0,
+      536871123,
+      4100
+    ],
+    [
+      9,
+      8,
+      5,
+      5,
+      4100,
+      0,
+      0,
+      0,
+      536871123,
+      4100
+    ]
+  ],
+  "checkpoint": {
+    "task": {
+      "id": 5,
+      "status": 4100,
+      "wait_time": 0,
+      "start_time": 5244687,
+      "policy": 2
+    },
+    "request": {
+      "seconds": 0,
+      "nanoseconds": 20000000,
+      "bytes": 16
+    },
+    "tick_hz": 1000,
+    "clock_hz": 50000000
+  },
+  "scheduler_clock_inputs": {
+    "deadline_base_start": 6068437,
+    "enqueue_clock": 7708687,
+    "resume_start": 7735437
+  },
+  "user_result": 0,
+  "user_mode": 16,
+  "selected_task": 5,
+  "background_task": 0,
+  "delay_cycles": 1000000,
+  "deadline": 7068437,
+  "wake_time": 7708687,
+  "timer_irq": 29,
+  "event_count": 10,
+  "source_identity": {
+    "repository": "https://github.com/openharmony/kernel_liteos_a",
+    "revision": "4ac7f3aed67000b47bc14d6fe79d63ada708d780",
+    "sources": {
+      "syscall/time_syscall.c": "ea8125af0274ba7f22daadc19c6218a30382903563642bec8f0bb715e9aed09c",
+      "compat/posix/src/time.c": "3108f2ed423a5ca4ab3c61e5f142aa44c39de566a2a0fd2e22182b9ad3083e5b",
+      "compat/posix/include/time_posix.h": "4ed8d3977b45ed76cc1201d89d95d67dd8916ddebe5aee992632736857f442b0",
+      "kernel/base/core/los_sys.c": "4bb62b2d319c6f93404f3b03540590e9964debc019e01f6967c7e648e59ec149",
+      "kernel/base/sched/los_priority.c": "7df733ffaea30a46c90e0eaabf1e0584ae2f08115922ade90b34931026d8ac7b",
+      "kernel/base/sched/los_sched.c": "443c8012487346c1b853c5b1a9a147ac8b40827d97f30269dff61406d0651568"
+    },
+    "definitions": {
+      "SysNanoSleep": {
+        "source": "syscall/time_syscall.c",
+        "sha256": "1ae6da6d5c5fb0c19b46f3f0618bfb8abaf7218d588c33145ba4b2912af921d2"
+      },
+      "nanosleep": {
+        "source": "compat/posix/src/time.c",
+        "sha256": "91c2625468f2d31b870e74eaf145f5c4397c8cd5472aeb8d511a808bae142b55"
+      },
+      "DoNanoSleep": {
+        "source": "compat/posix/src/time.c",
+        "sha256": "146bce6c5ac4d4820de6d5c07803014d4b76069e777afabdd3a6203007983585"
+      },
+      "ValidTimeSpec": {
+        "source": "compat/posix/include/time_posix.h",
+        "sha256": "7e7538c034d1e4ff6332e6df7dd62c686b47c4404c38b175237ff412796f1741"
+      },
+      "OsNS2Tick": {
+        "source": "kernel/base/core/los_sys.c",
+        "sha256": "cfe0e2e9849250c3af5c4853dd8ab909643d008588d35360a8386e4034ca2a21"
+      },
+      "HPFDelay": {
+        "source": "kernel/base/sched/los_priority.c",
+        "sha256": "0ae711f22926a100a7da4ddab4ba92d4e95d6a7daef8ff89b48b2ebdfdb26a73"
+      },
+      "HPFWaitTimeGet": {
+        "source": "kernel/base/sched/los_priority.c",
+        "sha256": "e580774666b8db4119a45117932c25665af78dd2b92f62ffac4ed1ca0c99e174"
+      },
+      "SchedTimeoutTaskWake": {
+        "source": "kernel/base/sched/los_sched.c",
+        "sha256": "4c20fb2c8bd4e7ab61997bef85181c7b44a8a2cc1047eb6d10db7dd93e39273d"
+      }
+    },
+    "headers": {
+      "kernel/base/include/los_sched_pri.h": "d618ea6a61c736d718c1f855fe671f4513539568d1b84be4843a4d1da70dbc15",
+      "kernel/base/include/los_task_pri.h": "1f73f9bdf6e20f3d834295f337868229865caa32b3e59175a97f52d834009c19",
+      "syscall/syscall_lookup.h": "468a2f8c8ab28c8a78c988aed2a56ad4396cd5bb11287520e98e1661d65fea5e",
+      "kernel/extended/hook/include/los_hook_types.h": "7b27e25f1d6a064612c1a3956d4abf5828d35b6579cf7126ec64d3c2e65203da"
+    }
+  },
+  "native_scheduler_executed": true,
+  "native_timer_irq_observed": true,
+  "replay_scheduler": "explicit sequential model",
+  "original_definitions": [
+    "ValidTimeSpec",
+    "OsNS2Tick",
+    "HPFDelay",
+    "HPFWaitTimeGet",
+    "SchedTimeoutTaskWake",
+    "DoNanoSleep",
+    "nanosleep",
+    "SysNanoSleep"
+  ],
+  "kernel_image_sha256": "25a42cbdbdd340da5827974df6b283710c237218636c9fbf9f05dacb240437a2",
+  "generated_source_sha256": "707b113ec5fd7ad24be0913c58966a6567ef212d59817aa79504481b24a530d5",
+  "replay_requires_live_kernel": false,
+  "replay_host_runtime": true,
+  "replay_external_inputs": "embedded",
+  "syscall": {
+    "number": 162,
+    "function": "SysNanoSleep",
+    "remaining_pointer": "NULL"
+  },
+  "capture_adapter_sha256": "bfc5a0fa4f9e8963603a9fd91c74e6cb00d41cb19a9750cc54ba871d6108f694",
+  "replay_template_sha256": "dda54325810b6a727d9a14e75770911f5fe8d973881ebd5563c24a19aea7a376",
+  "source_lock_sha256": "f06dc88b8b8f1264cd24292225740be7a9f0b4160c0afc64734d1a7ec2d29778",
+  "replay_binary_sha256": "72a329ffad2b6b4835961eb077d99ba7d46f9088c3ed55c0b83aaf09d193ffab",
+  "qemu_command": [
+    "qemu-system-arm",
+    "-M",
+    "virt-9.2,gic-version=2,secure=on",
+    "-cpu",
+    "cortex-a7",
+    "-accel",
+    "tcg",
+    "-smp",
+    "1",
+    "-m",
+    "1G",
+    "-display",
+    "none",
+    "-monitor",
+    "none",
+    "-serial",
+    "stdio",
+    "-bios",
+    "/Users/al3x3n0/huawei/osrec/build/ohos/out/liteos.bin"
+  ],
+  "boot_log_sha256": "275f79d40b20be32553613419c8d6eb0123e475c286ca316818b18bc5c32123b",
+  "capture_sha256": {
+    "WAIT_STATE": "0130b01c2023493df2466a1360a16fcf26de25df62f6eb0505e8a07dfc8a64b8",
+    "WAIT_EVENTS": "84bedc184bc32c08d34118ff2198bd25f59fc1a19093b7d8f6c1b05225c6ecfd",
+    "WAIT_USER": "48443c868f27fd5d4e1749506108b7419f6c508bd93fa3cb4f99b5745241e476"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "format": "osrec-sysread-case-v1",
+  "provenance": "synthetic model capture; not recorded from a running kernel",
+  "request": {"fd": 3, "count": 8, "null_buffer": 0},
+  "environment": {"mode": 0, "success_limit": 2, "payload": "41424344"}
+}

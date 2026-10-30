@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/openharmony/kernel_liteos_a",
+  "revision": "4ac7f3aed67000b47bc14d6fe79d63ada708d780",
+  "source": "kernel/base/misc/los_misc.c",
+  "source_sha256": "4888aee6de3353235fc8223a86929e833d0cd222f78e2d86c890152ab7fe94b1",
+  "function": "LOS_Align",
+  "function_sha256": "7a914b09532d7d61980a0c5a9400d8fb3d5ab45385c1e6ee24ac97f775ed18a6"
+}

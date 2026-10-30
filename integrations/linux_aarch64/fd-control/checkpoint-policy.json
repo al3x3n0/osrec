@@ -1,0 +1,1104 @@
+{
+  "format": "osrec-slice-checkpoint-schema-v1",
+  "fields": {
+    "user_ns": {
+      "type": "struct user_namespace",
+      "policy": "members",
+      "members": {
+        "initial": {
+          "type": "uint32_t",
+          "policy": "persist"
+        },
+        "uid_map": {
+          "type": "struct uid_gid_map",
+          "policy": "members",
+          "members": {
+            "nr_extents": {
+              "type": "uint32_t",
+              "policy": "persist"
+            },
+            "extent": {
+              "type": "struct uid_gid_extent[5]",
+              "policy": "elements",
+              "element": {
+                "type": "struct uid_gid_extent",
+                "policy": "members",
+                "members": {
+                  "first": {
+                    "type": "uint32_t",
+                    "policy": "persist"
+                  },
+                  "lower_first": {
+                    "type": "uint32_t",
+                    "policy": "persist"
+                  },
+                  "count": {
+                    "type": "uint32_t",
+                    "policy": "persist"
+                  }
+                }
+              }
+            },
+            "forward": {
+              "type": "struct uid_gid_extent *",
+              "policy": "transient"
+            },
+            "reverse": {
+              "type": "struct uid_gid_extent *",
+              "policy": "transient"
+            }
+          }
+        },
+        "gid_map": {
+          "type": "struct uid_gid_map",
+          "policy": "members",
+          "members": {
+            "nr_extents": {
+              "type": "uint32_t",
+              "policy": "persist"
+            },
+            "extent": {
+              "type": "struct uid_gid_extent[5]",
+              "policy": "elements",
+              "element": {
+                "type": "struct uid_gid_extent",
+                "policy": "members",
+                "members": {
+                  "first": {
+                    "type": "uint32_t",
+                    "policy": "persist"
+                  },
+                  "lower_first": {
+                    "type": "uint32_t",
+                    "policy": "persist"
+                  },
+                  "count": {
+                    "type": "uint32_t",
+                    "policy": "persist"
+                  }
+                }
+              }
+            },
+            "forward": {
+              "type": "struct uid_gid_extent *",
+              "policy": "transient"
+            },
+            "reverse": {
+              "type": "struct uid_gid_extent *",
+              "policy": "transient"
+            }
+          }
+        }
+      }
+    },
+    "fs": {
+      "type": "struct fs_struct",
+      "policy": "members",
+      "members": {
+        "umask": {
+          "type": "int",
+          "policy": "persist"
+        }
+      }
+    },
+    "creds": {
+      "type": "struct cred",
+      "policy": "members",
+      "members": {
+        "uid": {
+          "type": "kuid_t",
+          "policy": "members",
+          "members": {
+            "val": {
+              "type": "uint32_t",
+              "policy": "persist"
+            }
+          }
+        },
+        "euid": {
+          "type": "kuid_t",
+          "policy": "members",
+          "members": {
+            "val": {
+              "type": "uint32_t",
+              "policy": "persist"
+            }
+          }
+        },
+        "suid": {
+          "type": "kuid_t",
+          "policy": "members",
+          "members": {
+            "val": {
+              "type": "uint32_t",
+              "policy": "persist"
+            }
+          }
+        },
+        "gid": {
+          "type": "kgid_t",
+          "policy": "members",
+          "members": {
+            "val": {
+              "type": "uint32_t",
+              "policy": "persist"
+            }
+          }
+        },
+        "egid": {
+          "type": "kgid_t",
+          "policy": "members",
+          "members": {
+            "val": {
+              "type": "uint32_t",
+              "policy": "persist"
+            }
+          }
+        },
+        "sgid": {
+          "type": "kgid_t",
+          "policy": "members",
+          "members": {
+            "val": {
+              "type": "uint32_t",
+              "policy": "persist"
+            }
+          }
+        },
+        "user_ns": {
+          "type": "struct user_namespace *",
+          "policy": "self_reference",
+          "target": "user_ns"
+        }
+      }
+    },
+    "overflowuid": {
+      "type": "int",
+      "policy": "transient"
+    },
+    "overflowgid": {
+      "type": "int",
+      "policy": "transient"
+    },
+    "parent": {
+      "type": "struct task_struct",
+      "policy": "members",
+      "members": {
+        "pid": {
+          "type": "int32_t",
+          "policy": "persist"
+        },
+        "tgid": {
+          "type": "int32_t",
+          "policy": "persist"
+        },
+        "real_parent": {
+          "type": "struct task_struct *",
+          "policy": "transient"
+        },
+        "fs": {
+          "type": "struct fs_struct *",
+          "policy": "transient"
+        },
+        "cred": {
+          "type": "struct cred *",
+          "policy": "transient"
+        },
+        "files": {
+          "type": "struct files_struct *",
+          "policy": "transient"
+        },
+        "ioac": {
+          "type": "struct task_io_accounting",
+          "policy": "transient"
+        },
+        "nr_dirtied": {
+          "type": "int",
+          "policy": "transient"
+        },
+        "nr_dirtied_pause": {
+          "type": "int",
+          "policy": "transient"
+        },
+        "mm": {
+          "type": "struct mm_struct *",
+          "policy": "transient"
+        },
+        "thread_info": {
+          "type": "struct thread_info",
+          "policy": "members",
+          "members": {
+            "flags": {
+              "type": "unsigned long",
+              "policy": "transient"
+            }
+          }
+        },
+        "thread": {
+          "type": "struct thread_struct",
+          "policy": "members",
+          "members": {
+            "sctlr_user": {
+              "type": "uint64_t",
+              "policy": "transient"
+            }
+          }
+        },
+        "flags": {
+          "type": "unsigned int",
+          "policy": "transient"
+        }
+      }
+    },
+    "task": {
+      "type": "struct task_struct",
+      "policy": "members",
+      "members": {
+        "pid": {
+          "type": "int32_t",
+          "policy": "persist"
+        },
+        "tgid": {
+          "type": "int32_t",
+          "policy": "persist"
+        },
+        "real_parent": {
+          "type": "struct task_struct *",
+          "policy": "self_reference",
+          "target": "parent"
+        },
+        "fs": {
+          "type": "struct fs_struct *",
+          "policy": "self_reference",
+          "target": "fs"
+        },
+        "cred": {
+          "type": "struct cred *",
+          "policy": "self_reference",
+          "target": "creds"
+        },
+        "files": {
+          "type": "struct files_struct *",
+          "policy": "self_reference",
+          "target": "files"
+        },
+        "ioac": {
+          "type": "struct task_io_accounting",
+          "policy": "members",
+          "members": {
+            "rchar": {
+              "type": "uint64_t",
+              "policy": "persist"
+            },
+            "wchar": {
+              "type": "uint64_t",
+              "policy": "persist"
+            },
+            "syscr": {
+              "type": "uint64_t",
+              "policy": "persist"
+            },
+            "syscw": {
+              "type": "uint64_t",
+              "policy": "persist"
+            }
+          }
+        },
+        "nr_dirtied": {
+          "type": "int",
+          "policy": "transient"
+        },
+        "nr_dirtied_pause": {
+          "type": "int",
+          "policy": "transient"
+        },
+        "mm": {
+          "type": "struct mm_struct *",
+          "policy": "transient"
+        },
+        "thread_info": {
+          "type": "struct thread_info",
+          "policy": "members",
+          "members": {
+            "flags": {
+              "type": "unsigned long",
+              "policy": "transient"
+            }
+          }
+        },
+        "thread": {
+          "type": "struct thread_struct",
+          "policy": "members",
+          "members": {
+            "sctlr_user": {
+              "type": "uint64_t",
+              "policy": "transient"
+            }
+          }
+        },
+        "flags": {
+          "type": "unsigned int",
+          "policy": "persist"
+        }
+      }
+    },
+    "current": {
+      "type": "struct task_struct *",
+      "policy": "self_reference",
+      "target": "task"
+    },
+    "active_memory": {
+      "type": "struct osrec_user_memory",
+      "policy": "transient"
+    },
+    "rcu_depth": {
+      "type": "int",
+      "policy": "transient"
+    },
+    "fop_pool": {
+      "type": "struct file_operations[2]",
+      "policy": "elements",
+      "element": {
+        "type": "struct file_operations",
+        "policy": "members",
+        "members": {
+          "osrec_class": {
+            "type": "uint32_t",
+            "policy": "transient"
+          },
+          "read": {
+            "type": "int",
+            "policy": "transient"
+          },
+          "read_iter": {
+            "type": "int",
+            "policy": "transient"
+          },
+          "write": {
+            "type": "int",
+            "policy": "transient"
+          },
+          "write_iter": {
+            "type": "int",
+            "policy": "transient"
+          },
+          "iterate_shared": {
+            "type": "int",
+            "policy": "transient"
+          },
+          "fop_flags": {
+            "type": "uint32_t",
+            "policy": "transient"
+          },
+          "flush": {
+            "type": "int",
+            "policy": "transient"
+          }
+        }
+      }
+    },
+    "file_pool": {
+      "type": "struct file[2]",
+      "policy": "elements",
+      "element": {
+        "type": "struct file",
+        "policy": "members",
+        "members": {
+          "f_count": {
+            "type": "int64_t",
+            "policy": "persist"
+          },
+          "f_mode": {
+            "type": "uint32_t",
+            "policy": "persist"
+          },
+          "f_flags": {
+            "type": "uint32_t",
+            "policy": "persist"
+          },
+          "object_id": {
+            "type": "uint32_t",
+            "policy": "persist"
+          },
+          "f_pos": {
+            "type": "int64_t",
+            "policy": "persist"
+          },
+          "f_version": {
+            "type": "uint64_t",
+            "policy": "persist"
+          },
+          "f_lock": {
+            "type": "int",
+            "policy": "transient"
+          },
+          "f_path": {
+            "type": "struct path",
+            "policy": "members",
+            "members": {
+              "dentry": {
+                "type": "struct dentry *",
+                "policy": "context_reference",
+                "targets": [
+                  "dentry_pool[0]",
+                  "dentry_pool[1]"
+                ],
+                "nullable": false
+              },
+              "mnt": {
+                "type": "struct vfsmount *",
+                "policy": "self_reference",
+                "target": "mount"
+              }
+            }
+          },
+          "f_owner": {
+            "type": "struct fown_struct",
+            "policy": "members",
+            "members": {
+              "signum": {
+                "type": "int",
+                "policy": "persist"
+              }
+            }
+          },
+          "f_pos_lock": {
+            "type": "int",
+            "policy": "transient"
+          },
+          "f_iocb_flags": {
+            "type": "uint32_t",
+            "policy": "persist"
+          },
+          "f_op": {
+            "type": "const struct file_operations *",
+            "policy": "context_reference",
+            "targets": [
+              "fop_pool[0]",
+              "fop_pool[1]"
+            ]
+          },
+          "f_mapping": {
+            "type": "struct address_space *",
+            "policy": "context_reference",
+            "targets": [
+              "inode_pool[0].i_data",
+              "inode_pool[1].i_data"
+            ]
+          }
+        }
+      }
+    },
+    "files": {
+      "type": "struct files_struct",
+      "policy": "members",
+      "members": {
+        "fdt": {
+          "type": "struct fdtable *",
+          "policy": "context_reference",
+          "targets": [
+            "files.fdtab"
+          ],
+          "nullable": false
+        },
+        "fdtab": {
+          "type": "struct fdtable",
+          "policy": "members",
+          "members": {
+            "max_fds": {
+              "type": "unsigned int",
+              "policy": "persist"
+            },
+            "fd": {
+              "type": "struct file *[64]",
+              "policy": "elements",
+              "element": {
+                "type": "struct file *",
+                "policy": "context_reference",
+                "targets": [
+                  "file_pool[0]",
+                  "file_pool[1]"
+                ],
+                "nullable": true
+              }
+            },
+            "close_on_exec": {
+              "type": "uint64_t[1]",
+              "policy": "persist"
+            },
+            "open_fds": {
+              "type": "uint64_t[1]",
+              "policy": "persist"
+            },
+            "full_fds_bits": {
+              "type": "uint64_t[1]",
+              "policy": "persist"
+            }
+          }
+        },
+        "next_fd": {
+          "type": "unsigned int",
+          "policy": "persist"
+        },
+        "file_lock": {
+          "type": "int",
+          "policy": "transient"
+        },
+        "resize_in_progress": {
+          "type": "int",
+          "policy": "persist"
+        },
+        "count": {
+          "type": "atomic_t",
+          "policy": "members",
+          "members": {
+            "counter": {
+              "type": "int",
+              "policy": "persist"
+            }
+          }
+        },
+        "resize_wait": {
+          "type": "struct wait_queue_head",
+          "policy": "transient"
+        }
+      }
+    },
+    "model_fault": {
+      "type": "int",
+      "policy": "transient"
+    },
+    "file_data": {
+      "type": "struct file_data",
+      "policy": "members",
+      "members": {
+        "bytes": {
+          "type": "uint8_t[64]",
+          "policy": "persist"
+        }
+      }
+    },
+    "aops_pool": {
+      "type": "struct address_space_operations[2]",
+      "policy": "elements",
+      "element": {
+        "type": "struct address_space_operations",
+        "policy": "members",
+        "members": {
+          "osrec_class": {
+            "type": "uint32_t",
+            "policy": "transient"
+          },
+          "dirty_folio": {
+            "type": "int",
+            "policy": "transient"
+          },
+          "write_begin": {
+            "type": "int",
+            "policy": "transient"
+          },
+          "write_end": {
+            "type": "int",
+            "policy": "transient"
+          }
+        }
+      }
+    },
+    "iop_pool": {
+      "type": "struct inode_operations[2]",
+      "policy": "elements",
+      "element": {
+        "type": "struct inode_operations",
+        "policy": "members",
+        "members": {
+          "osrec_class": {
+            "type": "uint32_t",
+            "policy": "transient"
+          },
+          "update_time": {
+            "type": "int",
+            "policy": "transient"
+          },
+          "setattr": {
+            "type": "int",
+            "policy": "transient"
+          }
+        }
+      }
+    },
+    "super_ops": {
+      "type": "struct super_operations",
+      "policy": "members",
+      "members": {
+        "osrec_class": {
+          "type": "uint32_t",
+          "policy": "transient"
+        },
+        "dirty_inode": {
+          "type": "int",
+          "policy": "transient"
+        }
+      }
+    },
+    "noop_bdi": {
+      "type": "struct backing_dev_info",
+      "policy": "members",
+      "members": {
+        "capabilities": {
+          "type": "unsigned int",
+          "policy": "persist"
+        },
+        "wb": {
+          "type": "struct bdi_writeback",
+          "policy": "transient"
+        }
+      }
+    },
+    "superblock": {
+      "type": "struct super_block",
+      "policy": "members",
+      "members": {
+        "write_depth": {
+          "type": "int",
+          "policy": "transient"
+        },
+        "s_fsnotify_info": {
+          "type": "struct fsnotify_sb_info *",
+          "policy": "transient"
+        },
+        "s_flags": {
+          "type": "uint64_t",
+          "policy": "persist"
+        },
+        "s_time_gran": {
+          "type": "uint32_t",
+          "policy": "persist"
+        },
+        "s_time_min": {
+          "type": "int64_t",
+          "policy": "persist"
+        },
+        "s_time_max": {
+          "type": "int64_t",
+          "policy": "persist"
+        },
+        "s_user_ns": {
+          "type": "struct user_namespace *",
+          "policy": "self_reference",
+          "target": "user_ns"
+        },
+        "s_op": {
+          "type": "const struct super_operations *",
+          "policy": "self_reference",
+          "target": "super_ops"
+        },
+        "s_maxbytes": {
+          "type": "int64_t",
+          "policy": "persist"
+        },
+        "s_bdi": {
+          "type": "struct backing_dev_info *",
+          "policy": "self_reference",
+          "target": "noop_bdi"
+        }
+      }
+    },
+    "bdp_ratelimits": {
+      "type": "int",
+      "policy": "transient"
+    },
+    "dirty_throttle_leaks": {
+      "type": "int",
+      "policy": "transient"
+    },
+    "ratelimit_pages": {
+      "type": "int",
+      "policy": "transient"
+    },
+    "nop_mnt_idmap": {
+      "type": "struct mnt_idmap",
+      "policy": "transient"
+    },
+    "mount": {
+      "type": "struct vfsmount",
+      "policy": "members",
+      "members": {
+        "mnt_flags": {
+          "type": "int",
+          "policy": "persist"
+        },
+        "mnt_idmap": {
+          "type": "struct mnt_idmap *",
+          "policy": "self_reference",
+          "target": "nop_mnt_idmap"
+        },
+        "mnt_sb": {
+          "type": "struct super_block *",
+          "policy": "self_reference",
+          "target": "superblock"
+        },
+        "osrec_writers": {
+          "type": "int",
+          "policy": "transient"
+        }
+      }
+    },
+    "tk_core": {
+      "type": "struct tk_core_model",
+      "policy": "members",
+      "members": {
+        "seq": {
+          "type": "seqcount_raw_spinlock_t",
+          "policy": "transient"
+        },
+        "timekeeper": {
+          "type": "struct timekeeper",
+          "policy": "members",
+          "members": {
+            "tkr_mono": {
+              "type": "struct tk_read_base",
+              "policy": "members",
+              "members": {
+                "xtime_nsec": {
+                  "type": "uint64_t",
+                  "policy": "persist"
+                },
+                "shift": {
+                  "type": "uint32_t",
+                  "policy": "persist"
+                }
+              }
+            },
+            "xtime_sec": {
+              "type": "int64_t",
+              "policy": "persist"
+            }
+          }
+        }
+      }
+    },
+    "inode_wb": {
+      "type": "struct bdi_writeback",
+      "policy": "transient"
+    },
+    "folio_pool": {
+      "type": "struct folio[1]",
+      "policy": "elements",
+      "element": {
+        "type": "struct folio",
+        "policy": "members",
+        "members": {
+          "flags": {
+            "type": "uint64_t",
+            "policy": "persist"
+          },
+          "mapping": {
+            "type": "struct address_space *",
+            "policy": "context_reference",
+            "targets": [
+              "inode_pool[1].i_data"
+            ],
+            "nullable": true
+          },
+          "index": {
+            "type": "uint64_t",
+            "policy": "persist"
+          },
+          "_refcount": {
+            "type": "atomic_t",
+            "policy": "members",
+            "members": {
+              "counter": {
+                "type": "int",
+                "policy": "persist"
+              }
+            }
+          },
+          "page": {
+            "type": "struct page",
+            "policy": "transient"
+          },
+          "swap": {
+            "type": "swp_entry_t",
+            "policy": "transient"
+          }
+        }
+      }
+    },
+    "zero_page": {
+      "type": "struct page",
+      "policy": "transient"
+    },
+    "inode_pool": {
+      "type": "struct inode[2]",
+      "policy": "elements",
+      "element": {
+        "type": "struct inode",
+        "policy": "members",
+        "members": {
+          "i_mode": {
+            "type": "uint32_t",
+            "policy": "persist"
+          },
+          "append": {
+            "type": "uint32_t",
+            "policy": "persist"
+          },
+          "i_sb": {
+            "type": "struct super_block *",
+            "policy": "self_reference",
+            "target": "superblock"
+          },
+          "i_flags": {
+            "type": "uint32_t",
+            "policy": "persist"
+          },
+          "i_uid": {
+            "type": "kuid_t",
+            "policy": "members",
+            "members": {
+              "val": {
+                "type": "uint32_t",
+                "policy": "persist"
+              }
+            }
+          },
+          "i_gid": {
+            "type": "kgid_t",
+            "policy": "members",
+            "members": {
+              "val": {
+                "type": "uint32_t",
+                "policy": "persist"
+              }
+            }
+          },
+          "i_size": {
+            "type": "int64_t",
+            "policy": "persist"
+          },
+          "__i_atime": {
+            "type": "struct timespec64",
+            "policy": "members",
+            "members": {
+              "tv_sec": {
+                "type": "int64_t",
+                "policy": "persist"
+              },
+              "tv_nsec": {
+                "type": "int64_t",
+                "policy": "persist"
+              }
+            }
+          },
+          "__i_mtime": {
+            "type": "struct timespec64",
+            "policy": "members",
+            "members": {
+              "tv_sec": {
+                "type": "int64_t",
+                "policy": "persist"
+              },
+              "tv_nsec": {
+                "type": "int64_t",
+                "policy": "persist"
+              }
+            }
+          },
+          "__i_ctime": {
+            "type": "struct timespec64",
+            "policy": "members",
+            "members": {
+              "tv_sec": {
+                "type": "int64_t",
+                "policy": "persist"
+              },
+              "tv_nsec": {
+                "type": "int64_t",
+                "policy": "persist"
+              }
+            }
+          },
+          "i_version": {
+            "type": "atomic64_t",
+            "policy": "members",
+            "members": {
+              "counter": {
+                "type": "int64_t",
+                "policy": "persist"
+              }
+            }
+          },
+          "i_state": {
+            "type": "uint64_t",
+            "policy": "persist"
+          },
+          "i_lock": {
+            "type": "int",
+            "policy": "transient"
+          },
+          "i_hash": {
+            "type": "struct hlist_node",
+            "policy": "transient"
+          },
+          "dirtied_when": {
+            "type": "uint64_t",
+            "policy": "transient"
+          },
+          "dirtied_time_when": {
+            "type": "uint64_t",
+            "policy": "transient"
+          },
+          "i_op": {
+            "type": "const struct inode_operations *",
+            "policy": "context_reference",
+            "targets": [
+              "iop_pool[0]",
+              "iop_pool[1]"
+            ]
+          },
+          "i_mapping": {
+            "type": "struct address_space *",
+            "policy": "context_reference",
+            "targets": [
+              "inode_pool[0].i_data",
+              "inode_pool[1].i_data"
+            ]
+          },
+          "i_data": {
+            "type": "struct address_space",
+            "policy": "members",
+            "members": {
+              "host": {
+                "type": "struct inode *",
+                "policy": "context_reference",
+                "targets": [
+                  "inode_pool[0]",
+                  "inode_pool[1]"
+                ]
+              },
+              "i_pages": {
+                "type": "struct xarray",
+                "policy": "members",
+                "members": {
+                  "xa_lock": {
+                    "type": "int",
+                    "policy": "transient"
+                  },
+                  "xa_flags": {
+                    "type": "unsigned int",
+                    "policy": "persist"
+                  },
+                  "xa_head": {
+                    "type": "struct folio *",
+                    "policy": "context_reference",
+                    "targets": [
+                      "folio_pool[0]"
+                    ],
+                    "nullable": true
+                  }
+                }
+              },
+              "gfp_mask": {
+                "type": "unsigned int",
+                "policy": "persist"
+              },
+              "i_mmap_writable": {
+                "type": "atomic_t",
+                "policy": "members",
+                "members": {
+                  "counter": {
+                    "type": "int",
+                    "policy": "persist"
+                  }
+                }
+              },
+              "nrpages": {
+                "type": "uint64_t",
+                "policy": "persist"
+              },
+              "a_ops": {
+                "type": "const struct address_space_operations *",
+                "policy": "context_reference",
+                "targets": [
+                  "aops_pool[0]",
+                  "aops_pool[1]"
+                ]
+              }
+            }
+          },
+          "i_rwsem": {
+            "type": "int",
+            "policy": "transient"
+          },
+          "osrec_shmem": {
+            "type": "struct shmem_inode_info",
+            "policy": "members",
+            "members": {
+              "seals": {
+                "type": "uint32_t",
+                "policy": "persist"
+              },
+              "shrinklist": {
+                "type": "struct list_head",
+                "policy": "transient"
+              },
+              "flags": {
+                "type": "uint64_t",
+                "policy": "persist"
+              },
+              "alloced": {
+                "type": "int64_t",
+                "policy": "persist"
+              },
+              "swapped": {
+                "type": "int64_t",
+                "policy": "persist"
+              },
+              "fallocend": {
+                "type": "uint64_t",
+                "policy": "persist"
+              },
+              "lock": {
+                "type": "int",
+                "policy": "transient"
+              }
+            }
+          },
+          "i_flctx": {
+            "type": "struct file_lock_context *",
+            "policy": "transient"
+          }
+        }
+      }
+    },
+    "dentry_pool": {
+      "type": "struct dentry[2]",
+      "policy": "elements",
+      "element": {
+        "type": "struct dentry",
+        "policy": "members",
+        "members": {
+          "d_inode": {
+            "type": "struct inode *",
+            "policy": "context_reference",
+            "targets": [
+              "inode_pool[0]",
+              "inode_pool[1]"
+            ],
+            "nullable": false
+          },
+          "d_flags": {
+            "type": "unsigned int",
+            "policy": "transient"
+          },
+          "d_sb": {
+            "type": "struct super_block *",
+            "policy": "self_reference",
+            "target": "superblock"
+          }
+        }
+      }
+    }
+  }
+}

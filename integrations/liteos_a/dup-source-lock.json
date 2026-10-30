@@ -1,0 +1,22 @@
+{
+  "repository": "https://github.com/openharmony/kernel_liteos_a",
+  "revision": "4ac7f3aed67000b47bc14d6fe79d63ada708d780",
+  "source": "syscall/fs_syscall.c",
+  "source_sha256": "bcc88620c1f02ef1ca0deaf47a5424d7d6e1bcbf28a4395f86b65d90a36b84ab",
+  "function": "SysDup",
+  "function_sha256": "02b56ff737f90d52602c1ca4e330790f597136ee6f45ceba5618920a3f565324",
+  "headers": {
+    "syscall/syscall_lookup.h": "468a2f8c8ab28c8a78c988aed2a56ad4396cd5bb11287520e98e1661d65fea5e",
+    "fs/vfs/operation/vfs_procfd.c": "0dc51f7fa4cd5941132107a85c2bd161b9945e0839e8bc0859c04a3497e754e5",
+    "fs/include/fs/fd_table.h": "c8e74782d0a064250a89a0a01d1a9a954cf43fc64ed90a9061bf753cfb762d6d"
+  },
+  "libc_headers": {
+    "porting/liteos_a/kernel/include/errno.h": "e5a830a2dc47320bdb541bf62da461ec3041b3a045cb81229de59b817b393673"
+  },
+  "syscall_number": 41,
+  "native_abi": "signed 32-bit descriptors; normalized three-slot mapping/allocation/cloexec and native file reference count",
+  "vfs_sources": {
+    "fs/inode/fs_files.c": "64f90227d5a2e5396ee21ed6c6a27dd360934b33df1d83fac449902d16cf5c65",
+    "fs/vfs/include/file.h": "af1c9fc7f1459c6ad118609250f1074be346ef6cf0977eccdadaef16af6e9046"
+  }
+}

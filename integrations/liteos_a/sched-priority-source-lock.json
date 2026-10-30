@@ -1,0 +1,18 @@
+{
+  "repository": "https://github.com/openharmony/kernel_liteos_a",
+  "revision": "4ac7f3aed67000b47bc14d6fe79d63ada708d780",
+  "source": "syscall/process_syscall.c",
+  "source_sha256": "36a5c34f9fd5c38e4f0011e4ae207e8b22c74ecffccdce8700470f53e1ace10d",
+  "function": "SysSchedGetPriorityMax",
+  "function_sha256": "9b150e42bd0bdb5e0d05304cd8409d2260eea34554119b5f3364b227e5ac6c57",
+  "headers": {
+    "kernel/base/include/los_sched_pri.h": "d618ea6a61c736d718c1f855fe671f4513539568d1b84be4843a4d1da70dbc15",
+    "kernel/base/include/los_process_pri.h": "6cb70287391cd820eba9d51c43958cac671679414fb870cb21f1713f515c467f"
+  },
+  "constants": {
+    "LOS_SCHED_RR": 2,
+    "OS_USER_PROCESS_PRIORITY_LOWEST": 31,
+    "EINVAL": 22
+  },
+  "errno_contract": "ARM/Linux-compatible EINVAL=22; SysSchedGetPriorityMax returns the raw negative error"
+}

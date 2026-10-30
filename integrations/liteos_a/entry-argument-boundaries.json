@@ -1,0 +1,14 @@
+{
+  "format": "osrec-entry-state-boundaries-v1",
+  "boundaries": {},
+  "argument_objects": {
+    "OsProcessExitCodeSignalIsSet": {
+      "processCB": {
+        "kind": "object_argument",
+        "reason": "the capture adapter holds the scheduler lock and binds its live current process",
+        "implementation": "six explicit helper calls before the selected PID 1 umask calls; process lifetime held by the caller",
+        "snapshot_safe": true
+      }
+    }
+  }
+}

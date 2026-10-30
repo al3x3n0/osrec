@@ -1,0 +1,29 @@
+{
+  "format": "osrec-syscall-session-case-v1",
+  "entry": {
+    "boundary": "user syscall sequence entry",
+    "roots": {"current_process": {"object": 30, "offset": 0}},
+    "objects": [
+      {"id": 10, "type": "bytes", "data": "0011223344556677"},
+      {"id": 20, "type": "file", "fields": {"backend_fd": 17, "position": 10}},
+      {"id": 30, "type": "process", "fields": {
+        "memory": {"object": 10, "offset": 0},
+        "fd3": {"object": 20, "offset": 0},
+        "fd4": {"object": 20, "offset": 0},
+        "kernel_errno": 0, "user_errno": 0
+      }}
+    ]
+  },
+  "calls": [
+    {"syscall": "SysRead", "fd": 3, "count": 4, "buffer": {"object": 10, "offset": 2}},
+    {"syscall": "SysRead", "fd": 4, "count": 2, "buffer": {"object": 10, "offset": 4}},
+    {"syscall": "SysRead", "fd": 3, "count": 2, "buffer": {"object": 10, "offset": 6}},
+    {"syscall": "SysRead", "fd": 0, "count": 0, "buffer": {"object": 0, "offset": 0}}
+  ],
+  "environment": [
+    {"result": 2, "errno": 0, "payload": "4142"},
+    {"result": 1, "errno": 0, "payload": "43"},
+    {"result": -1, "errno": 4, "payload": ""},
+    {"result": 0, "errno": 0, "payload": ""}
+  ]
+}

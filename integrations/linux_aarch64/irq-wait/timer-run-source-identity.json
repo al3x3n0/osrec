@@ -1,0 +1,15 @@
+{
+  "release": "Linux v6.10",
+  "source": "kernel/time/hrtimer.c",
+  "source_url": "https://github.com/torvalds/linux/blob/v6.10/kernel/time/hrtimer.c#L1537",
+  "file": "timer_run.c",
+  "excerpt_sha256": "8d041b0121c233808556b05a9cd5f54e3ec3c81e696cead2576107b45435ad5f",
+  "extraction": "Selected complete definition with internal comments omitted; declarations and statements unchanged",
+  "functions": [
+    {
+      "name": "__run_hrtimer",
+      "source_line": 1537
+    }
+  ],
+  "native_source_build_attested": false
+}

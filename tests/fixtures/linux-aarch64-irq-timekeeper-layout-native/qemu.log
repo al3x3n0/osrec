@@ -1,0 +1,1009 @@
+[    0.000000] Booting Linux on physical CPU 0x0000000000 [0x410fd034]
+[    0.000000] Linux version 6.10.14-linuxkit (root@buildkitsandbox) (gcc (Alpine 13.2.1_git20240309) 13.2.1 20240309, GNU ld (GNU Binutils) 2.42) #1 SMP Thu Oct 24 19:28:55 UTC 2024
+[    0.000000] random: crng init done
+[    0.000000] Machine model: linux,dummy-virt
+[    0.000000] Zone ranges:
+[    0.000000]   DMA      [mem 0x0000000040000000-0x000000005fffffff]
+[    0.000000]   DMA32    empty
+[    0.000000]   Normal   empty
+[    0.000000] Movable zone start for each node
+[    0.000000] Early memory node ranges
+[    0.000000]   node   0: [mem 0x0000000040000000-0x000000005fffffff]
+[    0.000000] Initmem setup node 0 [mem 0x0000000040000000-0x000000005fffffff]
+[    0.000000] psci: probing for conduit method from DT.
+[    0.000000] psci: PSCIv1.1 detected in firmware.
+[    0.000000] psci: Using standard PSCI v0.2 function IDs
+[    0.000000] psci: Trusted OS migration not required
+[    0.000000] psci: SMC Calling Convention v1.0
+[    0.000000] percpu: Embedded 34 pages/cpu s99240 r8192 d31832 u139264
+[    0.000000] Detected VIPT I-cache on CPU0
+[    0.000000] alternatives: applying boot alternatives
+[    0.000000] Kernel command line: console=ttyAMA0 root=/dev/vda rootfstype=ext4 ro rootwait init=/init panic=-1
+[    0.000000] Dentry cache hash table entries: 65536 (order: 7, 524288 bytes, linear)
+[    0.000000] Inode-cache hash table entries: 32768 (order: 6, 262144 bytes, linear)
+[    0.000000] Built 1 zonelists, mobility grouping on.  Total pages: 131072
+[    0.000000] mem auto-init: stack:all(zero), heap alloc:off, heap free:off
+[    0.000000] software IO TLB: SWIOTLB bounce buffer size adjusted to 0MB
+[    0.000000] software IO TLB: area num 1.
+[    0.000000] software IO TLB: mapped [mem 0x000000005f580000-0x000000005f600000] (0MB)
+[    0.000000] Memory: 472668K/524288K available (19136K kernel code, 2822K rwdata, 10692K rodata, 6336K init, 748K bss, 51620K reserved, 0K cma-reserved)
+[    0.000000] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=1, Nodes=1
+[    0.000000] ftrace: allocating 57269 entries in 224 pages
+[    0.000000] ftrace: allocated 224 pages with 3 groups
+[    0.000000] trace event string verifier disabled
+[    0.000000] rcu: Hierarchical RCU implementation.
+[    0.000000] rcu: 	RCU restricting CPUs from NR_CPUS=24 to nr_cpu_ids=1.
+[    0.000000] 	Rude variant of Tasks RCU enabled.
+[    0.000000] 	Tracing variant of Tasks RCU enabled.
+[    0.000000] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.000000] rcu: Adjusting geometry for rcu_fanout_leaf=16, nr_cpu_ids=1
+[    0.000000] RCU Tasks Rude: Setting shift to 0 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=1.
+[    0.000000] RCU Tasks Trace: Setting shift to 0 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=1.
+[    0.000000] NR_IRQS: 64, nr_irqs: 64, preallocated irqs: 0
+[    0.000000] Root IRQ handler: gic_handle_irq
+[    0.000000] GICv2m: range[mem 0x08020000-0x08020fff], SPI[80:143]
+[    0.000000] rcu: 	Offload RCU callbacks from CPUs: 0.
+[    0.000000] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    0.000000] arch_timer: cp15 timer(s) running at 62.50MHz (virt).
+[    0.000000] clocksource: arch_sys_counter: mask: 0x1ffffffffffffff max_cycles: 0x1cd42e208c, max_idle_ns: 881590405314 ns
+[    0.000052] sched_clock: 57 bits at 63MHz, resolution 16ns, wraps every 4398046511096ns
+[    0.270778] Console: colour dummy device 80x25
+[    0.273638] Calibrating delay loop (skipped), value calculated using timer frequency.. 125.00 BogoMIPS (lpj=62500)
+[    0.273824] pid_max: default: 32768 minimum: 301
+[    0.282494] LSM: initializing lsm=capability,bpf
+[    0.318066] LSM support for eBPF active
+[    0.319382] Mount-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    0.319440] Mountpoint-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    0.354328] cacheinfo: Unable to detect cache hierarchy for CPU 0
+[    0.410170] rcu: Hierarchical SRCU implementation.
+[    0.410240] rcu: 	Max phase no-delay instances is 400.
+[    0.450268] smp: Bringing up secondary CPUs ...
+[    0.456794] smp: Brought up 1 node, 1 CPU
+[    0.456886] SMP: Total of 1 processors activated.
+[    0.456922] CPU: All CPU(s) started at EL1
+[    0.457002] CPU features: detected: 32-bit EL0 Support
+[    0.457054] CPU features: detected: CRC32 instructions
+[    0.480382] alternatives: applying system-wide alternatives
+[    0.871978] devtmpfs: initialized
+[    1.082756] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1911260446275000 ns
+[    1.085096] futex hash table entries: 256 (order: 2, 16384 bytes, linear)
+[    1.089284] 22784 pages in range for non-PLT usage
+[    1.089676] 514304 pages in range for PLT usage
+[    1.121644] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    1.179086] DMA: preallocated 128 KiB GFP_KERNEL pool for atomic allocations
+[    1.179492] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA pool for atomic allocations
+[    1.179576] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA32 pool for atomic allocations
+[    1.179902] audit: initializing netlink subsys (disabled)
+[    1.361728] audit: type=2000 audit(0.148:1): state=initialized audit_enabled=0 res=1
+[    1.391124] cpuidle: using governor menu
+[    1.392342] hw-breakpoint: found 6 breakpoint and 4 watchpoint registers.
+[    1.392942] ASID allocator initialised with 65536 entries
+[    1.404226] Serial: AMBA PL011 UART driver
+[    1.720600] 9000000.pl011: ttyAMA0 at MMIO 0x9000000 (irq = 13, base_baud = 0) is a PL011 rev1
+[    1.725820] printk: legacy console [ttyAMA0] enabled
+[    2.067130] HugeTLB: registered 1.00 GiB page size, pre-allocated 0 pages
+[    2.068322] HugeTLB: 0 KiB vmemmap can be freed for a 1.00 GiB page
+[    2.068778] HugeTLB: registered 32.0 MiB page size, pre-allocated 0 pages
+[    2.069104] HugeTLB: 0 KiB vmemmap can be freed for a 32.0 MiB page
+[    2.069424] HugeTLB: registered 2.00 MiB page size, pre-allocated 0 pages
+[    2.069790] HugeTLB: 0 KiB vmemmap can be freed for a 2.00 MiB page
+[    2.071262] HugeTLB: registered 64.0 KiB page size, pre-allocated 0 pages
+[    2.084212] HugeTLB: 0 KiB vmemmap can be freed for a 64.0 KiB page
+[    2.133714] raid6: skipped pq benchmark and selected neonx8
+[    2.134022] raid6: using neon recovery algorithm
+[    2.138884] SCSI subsystem initialized
+[    2.215380] usbcore: registered new interface driver usbfs
+[    2.232634] usbcore: registered new interface driver hub
+[    2.232996] usbcore: registered new device driver usb
+[    2.233512] pps_core: LinuxPPS API ver. 1 registered
+[    2.239378] pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+[    2.536102] vgaarb: loaded
+[    2.537324] clocksource: Switched to clocksource arch_sys_counter
+[    2.545726] VFS: Disk quotas dquot_6.6.0
+[    2.546054] VFS: Dquot-cache hash table entries: 512 (order 0, 4096 bytes)
+[    2.547408] netfs: FS-Cache loaded
+[    2.579708] CacheFiles: Loaded
+[    3.072324] NET: Registered PF_INET protocol family
+[    3.134982] IP idents hash table entries: 8192 (order: 4, 65536 bytes, linear)
+[    5.581550] tcp_listen_portaddr_hash hash table entries: 256 (order: 0, 4096 bytes, linear)
+[    6.136152] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[    6.136476] TCP established hash table entries: 4096 (order: 3, 32768 bytes, linear)
+[    6.136816] TCP bind hash table entries: 4096 (order: 5, 131072 bytes, linear)
+[    6.137116] TCP: Hash tables configured (established 4096 bind 4096)
+[    6.138500] UDP hash table entries: 256 (order: 1, 8192 bytes, linear)
+[    6.138946] UDP-Lite hash table entries: 256 (order: 1, 8192 bytes, linear)
+[    6.140380] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    6.179432] RPC: Registered named UNIX socket transport module.
+[    6.187782] RPC: Registered udp transport module.
+[    6.188014] RPC: Registered tcp transport module.
+[    6.188742] RPC: Registered tcp-with-tls transport module.
+[    6.207472] RPC: Registered tcp NFSv4.1 backchannel transport module.
+[    6.216886] NET: Registered PF_XDP protocol family
+[    6.230652] PCI: CLS 0 bytes, default 64
+[    6.490828] workingset: timestamp_bits=46 max_order=17 bucket_order=0
+[    6.491290] zbud: loaded
+[    6.596124] squashfs: version 4.0 (2009/01/31) Phillip Lougher
+[    6.884676] NFS: Registering the id_resolver key type
+[    6.885746] Key type id_resolver registered
+[    6.885898] Key type id_legacy registered
+[    6.887986] nfs4filelayout_init: NFSv4 File Layout Driver Registering...
+[    6.916674] nfs4flexfilelayout_init: NFSv4 Flexfile Layout Driver Registering...
+[    7.253252] Key type cifs.idmap registered
+[    7.256928] fuse: init (API version 7.40)
+[    7.357342] SGI XFS with security attributes, no debug enabled
+[    7.424382] 9p: Installing v9fs 9p2000 file system support
+[    8.293170] NET: Registered PF_ALG protocol family
+[    8.294232] xor: measuring software checksum speed
+[    8.296494]    8regs           :  1928 MB/sec
+[    8.311242]    32regs          :   232 MB/sec
+[    8.337232]    arm64_neon      :   916 MB/sec
+[    8.337884] xor: using function: 8regs (1928 MB/sec)
+[    8.338494] Key type asymmetric registered
+[    8.345050] Asymmetric key parser 'x509' registered
+[    8.351862] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 251)
+[    8.398430] io scheduler mq-deadline registered
+[    8.398774] io scheduler kyber registered
+[    8.482000] pl061_gpio 9030000.pl061: PL061 GPIO chip registered
+[    8.483322] pci-host-generic 4010000000.pcie: host bridge /pcie@10000000 ranges:
+[    8.484010] pci-host-generic 4010000000.pcie:       IO 0x003eff0000..0x003effffff -> 0x0000000000
+[    8.486738] pci-host-generic 4010000000.pcie:      MEM 0x0010000000..0x003efeffff -> 0x0010000000
+[    8.487076] pci-host-generic 4010000000.pcie:      MEM 0x8000000000..0xffffffffff -> 0x8000000000
+[    8.487814] pci-host-generic 4010000000.pcie: Memory resource size exceeds max for 32 bits
+[    8.488532] pci-host-generic 4010000000.pcie: ECAM at [mem 0x4010000000-0x401fffffff] for [bus 00-ff]
+[    8.489756] pci-host-generic 4010000000.pcie: PCI host bridge to bus 0000:00
+[    8.493112] pci_bus 0000:00: root bus resource [bus 00-ff]
+[    8.513802] pci_bus 0000:00: root bus resource [io  0x0000-0xffff]
+[    8.514360] pci_bus 0000:00: root bus resource [mem 0x10000000-0x3efeffff]
+[    8.514802] pci_bus 0000:00: root bus resource [mem 0x8000000000-0xffffffffff]
+[    8.532640] pci 0000:00:00.0: [1b36:0008] type 00 class 0x060000 conventional PCI endpoint
+[    9.455674] Serial: 8250/16550 driver, 4 ports, IRQ sharing enabled
+[   10.111434] brd: module loaded
+[   10.318946] loop: module loaded
+[   11.548150] virtio_blk virtio0: 1/0/0 default/read/poll queues
+[   11.625654] virtio_blk virtio0: [vda] 4096 512-byte logical blocks (2.10 MB/2.00 MiB)
+[   12.495150] wireguard: WireGuard 1.0.0 loaded. See www.wireguard.com for information.
+[   12.495624] wireguard: Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
+[   12.497742] tun: Universal TUN/TAP device driver, 1.6
+[   12.499204] PPP generic driver version 2.4.2
+[   12.499748] PPP BSD Compression module registered
+[   12.499930] PPP Deflate Compression module registered
+[   12.500250] PPP MPPE Compression module registered
+[   12.500422] NET: Registered PF_PPPOX protocol family
+[   12.558754] PPTP driver version 0.8.5
+[   12.681648] usbcore: registered new interface driver cdc_acm
+[   12.681952] cdc_acm: USB Abstract Control Model driver for USB modems and ISDN adapters
+[   12.682984] usbcore: registered new interface driver usblp
+[   12.684004] usbcore: registered new interface driver cdc_wdm
+[   12.684576] usbcore: registered new interface driver usbtmc
+[   12.685932] usbcore: registered new interface driver uas
+[   12.686528] usbcore: registered new interface driver usb-storage
+[   12.687010] usbcore: registered new interface driver ums-alauda
+[   12.687928] usbcore: registered new interface driver ums-cypress
+[   12.688622] usbcore: registered new interface driver ums-datafab
+[   12.689058] usbcore: registered new interface driver ums_eneub6250
+[   12.689416] usbcore: registered new interface driver ums-freecom
+[   12.689772] usbcore: registered new interface driver ums-isd200
+[   12.690312] usbcore: registered new interface driver ums-jumpshot
+[   12.690654] usbcore: registered new interface driver ums-karma
+[   12.690968] usbcore: registered new interface driver ums-onetouch
+[   12.691374] usbcore: registered new interface driver ums-realtek
+[   12.691740] usbcore: registered new interface driver ums-sddr09
+[   12.692066] usbcore: registered new interface driver ums-sddr55
+[   12.692476] usbcore: registered new interface driver ums-usbat
+[   12.693394] usbcore: registered new interface driver usbserial_generic
+[   12.693960] usbserial: USB Serial support registered for generic
+[   12.694342] usbcore: registered new interface driver aircable
+[   12.694836] usbserial: USB Serial support registered for aircable
+[   12.695334] usbcore: registered new interface driver ark3116
+[   12.695660] usbserial: USB Serial support registered for ark3116
+[   12.695990] usbcore: registered new interface driver belkin_sa
+[   12.696290] usbserial: USB Serial support registered for Belkin / Peracom / GoHubs USB Serial Adapter
+[   12.696766] usbcore: registered new interface driver ch341
+[   12.697058] usbserial: USB Serial support registered for ch341-uart
+[   12.698008] usbcore: registered new interface driver cp210x
+[   12.698364] usbserial: USB Serial support registered for cp210x
+[   12.699646] usbcore: registered new interface driver cyberjack
+[   12.700226] usbserial: USB Serial support registered for Reiner SCT Cyberjack USB card reader
+[   12.700742] usbcore: registered new interface driver cypress_m8
+[   12.702612] usbserial: USB Serial support registered for DeLorme Earthmate USB
+[   12.707066] usbserial: USB Serial support registered for HID->COM RS232 Adapter
+[   12.707874] usbserial: USB Serial support registered for Nokia CA-42 V2 Adapter
+[   12.709484] usbcore: registered new interface driver usb_debug
+[   12.710244] usbserial: USB Serial support registered for debug
+[   12.710670] usbserial: USB Serial support registered for xhci_dbc
+[   12.714508] usbcore: registered new interface driver digi_acceleport
+[   12.714770] usbserial: USB Serial support registered for Digi 2 port USB adapter
+[   12.714956] usbserial: USB Serial support registered for Digi 4 port USB adapter
+[   12.715722] usbcore: registered new interface driver io_edgeport
+[   12.715894] usbserial: USB Serial support registered for Edgeport 2 port adapter
+[   12.716272] usbserial: USB Serial support registered for Edgeport 4 port adapter
+[   12.717114] usbserial: USB Serial support registered for Edgeport 8 port adapter
+[   12.717978] usbserial: USB Serial support registered for EPiC device
+[   12.718252] usbcore: registered new interface driver io_ti
+[   12.718664] usbserial: USB Serial support registered for Edgeport TI 1 port adapter
+[   12.720382] usbserial: USB Serial support registered for Edgeport TI 2 port adapter
+[   12.720606] usbcore: registered new interface driver empeg
+[   12.720752] usbserial: USB Serial support registered for empeg
+[   12.720924] usbcore: registered new interface driver f81534a_ctrl
+[   12.721088] usbcore: registered new interface driver f81232
+[   12.721228] usbserial: USB Serial support registered for f81232
+[   12.721372] usbserial: USB Serial support registered for f81534a
+[   12.721536] usbcore: registered new interface driver f81534
+[   12.721890] usbserial: USB Serial support registered for Fintek F81532/F81534
+[   12.722106] usbcore: registered new interface driver ftdi_sio
+[   12.722248] usbserial: USB Serial support registered for FTDI USB Serial Device
+[   12.722442] usbcore: registered new interface driver garmin_gps
+[   12.722778] usbserial: USB Serial support registered for Garmin GPS usb/tty
+[   12.722960] usbcore: registered new interface driver ipaq
+[   12.723090] usbserial: USB Serial support registered for PocketPC PDA
+[   12.723286] usbcore: registered new interface driver ipw
+[   12.723422] usbserial: USB Serial support registered for IPWireless converter
+[   12.723656] usbcore: registered new interface driver ir_usb
+[   12.724260] usbserial: USB Serial support registered for IR Dongle
+[   12.724442] usbcore: registered new interface driver iuu_phoenix
+[   12.724592] usbserial: USB Serial support registered for iuu_phoenix
+[   12.724776] usbcore: registered new interface driver keyspan
+[   12.724924] usbserial: USB Serial support registered for Keyspan - (without firmware)
+[   12.725110] usbserial: USB Serial support registered for Keyspan 1 port adapter
+[   12.725282] usbserial: USB Serial support registered for Keyspan 2 port adapter
+[   12.725458] usbserial: USB Serial support registered for Keyspan 4 port adapter
+[   12.726444] usbcore: registered new interface driver keyspan_pda
+[   12.728424] usbserial: USB Serial support registered for Keyspan PDA
+[   12.728902] usbserial: USB Serial support registered for Keyspan PDA - (prerenumeration)
+[   12.729430] usbcore: registered new interface driver kl5kusb105
+[   12.729970] usbserial: USB Serial support registered for KL5KUSB105D / PalmConnect
+[   12.730466] usbcore: registered new interface driver kobil_sct
+[   12.730774] usbserial: USB Serial support registered for KOBIL USB smart card terminal
+[   12.732888] usbcore: registered new interface driver mct_u232
+[   12.733342] usbserial: USB Serial support registered for MCT U232
+[   12.733724] usbcore: registered new interface driver metro_usb
+[   12.734222] usbserial: USB Serial support registered for Metrologic USB to Serial
+[   12.734672] usbcore: registered new interface driver mos7720
+[   12.734972] usbserial: USB Serial support registered for Moschip 2 port adapter
+[   12.735578] usbcore: registered new interface driver mos7840
+[   12.736176] usbserial: USB Serial support registered for Moschip 7840/7820 USB Serial Driver
+[   12.736642] usbcore: registered new interface driver mxuport
+[   12.737014] usbserial: USB Serial support registered for MOXA UPort
+[   12.737996] usbcore: registered new interface driver navman
+[   12.738378] usbserial: USB Serial support registered for navman
+[   12.738706] usbcore: registered new interface driver omninet
+[   12.740658] usbserial: USB Serial support registered for ZyXEL - omni.net usb
+[   12.741508] usbcore: registered new interface driver opticon
+[   12.741828] usbserial: USB Serial support registered for opticon
+[   12.742170] usbcore: registered new interface driver option
+[   12.742452] usbserial: USB Serial support registered for GSM modem (1-port)
+[   12.742848] usbcore: registered new interface driver oti6858
+[   12.743446] usbserial: USB Serial support registered for oti6858
+[   12.743818] usbcore: registered new interface driver pl2303
+[   12.744094] usbserial: USB Serial support registered for pl2303
+[   12.744438] usbcore: registered new interface driver qcaux
+[   12.744868] usbserial: USB Serial support registered for qcaux
+[   12.745200] usbcore: registered new interface driver qcserial
+[   12.745702] usbserial: USB Serial support registered for Qualcomm USB modem
+[   12.746302] usbcore: registered new interface driver quatech2
+[   12.746690] usbserial: USB Serial support registered for Quatech 2nd gen USB to Serial Driver
+[   12.747166] usbcore: registered new interface driver safe_serial
+[   12.747500] usbserial: USB Serial support registered for safe_serial
+[   12.748198] usbcore: registered new interface driver sierra
+[   12.748532] usbserial: USB Serial support registered for Sierra USB modem
+[   12.748930] usbcore: registered new interface driver usb_serial_simple
+[   12.749410] usbserial: USB Serial support registered for carelink
+[   12.749804] usbserial: USB Serial support registered for flashloader
+[   12.750130] usbserial: USB Serial support registered for funsoft
+[   12.750504] usbserial: USB Serial support registered for google
+[   12.750972] usbserial: USB Serial support registered for hp4x
+[   12.751200] usbserial: USB Serial support registered for kaufmann
+[   12.751368] usbserial: USB Serial support registered for libtransistor
+[   12.751534] usbserial: USB Serial support registered for moto_modem
+[   12.751692] usbserial: USB Serial support registered for motorola_tetra
+[   12.751856] usbserial: USB Serial support registered for nokia
+[   12.752002] usbserial: USB Serial support registered for novatel_gps
+[   12.752162] usbserial: USB Serial support registered for siemens_mpi
+[   12.752318] usbserial: USB Serial support registered for suunto
+[   12.752552] usbserial: USB Serial support registered for vivopay
+[   12.752728] usbserial: USB Serial support registered for zio
+[   12.752962] usbcore: registered new interface driver spcp8x5
+[   12.753116] usbserial: USB Serial support registered for SPCP8x5
+[   12.753292] usbcore: registered new interface driver ssu100
+[   12.753446] usbserial: USB Serial support registered for Quatech SSU-100 USB to Serial Driver
+[   12.753768] usbcore: registered new interface driver symbolserial
+[   12.753922] usbserial: USB Serial support registered for symbol
+[   12.754096] usbcore: registered new interface driver ti_usb_3410_5052
+[   12.754334] usbserial: USB Serial support registered for TI USB 3410 1 port adapter
+[   12.754536] usbserial: USB Serial support registered for TI USB 5052 2 port adapter
+[   12.754746] usbcore: registered new interface driver upd78f0730
+[   12.755060] usbserial: USB Serial support registered for upd78f0730
+[   12.755232] usbcore: registered new interface driver visor
+[   12.755374] usbserial: USB Serial support registered for Handspring Visor / Palm OS
+[   12.755616] usbserial: USB Serial support registered for Sony Clie 5.0
+[   12.755794] usbserial: USB Serial support registered for Sony Clie 3.5
+[   12.756014] usbcore: registered new interface driver wishbone_serial
+[   12.756798] usbserial: USB Serial support registered for wishbone_serial
+[   12.757440] usbcore: registered new interface driver whiteheat
+[   12.757888] usbserial: USB Serial support registered for Connect Tech - WhiteHEAT - (prerenumeration)
+[   12.758818] usbserial: USB Serial support registered for Connect Tech - WhiteHEAT
+[   12.759066] usbcore: registered new interface driver xr_serial
+[   12.759212] usbserial: USB Serial support registered for xr_serial
+[   12.759596] usbcore: registered new interface driver xsens_mt
+[   12.759752] usbserial: USB Serial support registered for xsens_mt
+[   13.189044] vhci_hcd vhci_hcd.0: USB/IP Virtual Host Controller
+[   13.191312] vhci_hcd vhci_hcd.0: new USB bus registered, assigned bus number 1
+[   13.192172] vhci_hcd: created sysfs vhci_hcd.0
+[   13.195368] usb usb1: New USB device found, idVendor=1d6b, idProduct=0002, bcdDevice= 6.10
+[   13.195660] usb usb1: New USB device strings: Mfr=3, Product=2, SerialNumber=1
+[   13.195944] usb usb1: Product: USB/IP Virtual Host Controller
+[   13.198526] usb usb1: Manufacturer: Linux 6.10.14-linuxkit vhci_hcd
+[   13.198882] usb usb1: SerialNumber: vhci_hcd.0
+[   13.247886] hub 1-0:1.0: USB hub found
+[   13.249652] hub 1-0:1.0: 8 ports detected
+[   13.254938] vhci_hcd vhci_hcd.0: USB/IP Virtual Host Controller
+[   13.375730] vhci_hcd vhci_hcd.0: new USB bus registered, assigned bus number 2
+[   13.452244] usb usb2: We don't know the algorithms for LPM for this host, disabling LPM.
+[   13.782318] usb usb2: New USB device found, idVendor=1d6b, idProduct=0003, bcdDevice= 6.10
+[   13.783662] usb usb2: New USB device strings: Mfr=3, Product=2, SerialNumber=1
+[   13.784060] usb usb2: Product: USB/IP Virtual Host Controller
+[   13.784326] usb usb2: Manufacturer: Linux 6.10.14-linuxkit vhci_hcd
+[   13.784600] usb usb2: SerialNumber: vhci_hcd.0
+[   13.787462] hub 2-0:1.0: USB hub found
+[   13.787816] hub 2-0:1.0: 8 ports detected
+[   13.791356] mousedev: PS/2 mouse device common for all mice
+[   13.902606] rtc-pl031 9010000.pl031: registered as rtc0
+[   13.903392] rtc-pl031 9010000.pl031: setting system clock to 2026-10-19T21:21:35 UTC (1792444895)
+[   13.906250] i2c_dev: i2c /dev entries driver
+[   14.048530] device-mapper: ioctl: 4.48.0-ioctl (2023-03-01) initialised: dm-devel@lists.linux.dev
+[   14.057270] usbcore: registered new interface driver usbhid
+[   14.058008] usbhid: USB HID core driver
+[   14.068112] hw perfevents: enabled with armv8_pmuv3 PMU driver, 7 counters available
+[   14.072300] GACT probability on
+[   14.088424] Mirror/redirect action on
+[   14.089862] Simple TC action Loaded
+[   14.108572] netem: version 1.3
+[   14.113492] u32 classifier
+[   14.119628]     Performance counters on
+[   14.120546]     input device check on
+[   14.121092]     Actions configured
+[   14.147840] xt_time: kernel timezone is -0000
+[   14.148412] IPVS: Registered protocols (TCP, UDP)
+[   14.148616] IPVS: Connection hash table configured (size=4096, memory=32Kbytes)
+[   14.154646] IPVS: ipvs loaded.
+[   14.154912] IPVS: [rr] scheduler registered.
+[   14.155064] IPVS: [wrr] scheduler registered.
+[   14.155184] IPVS: [sh] scheduler registered.
+[   14.155526] ipip: IPv4 and MPLS over IPv4 tunneling driver
+[   14.208400] gre: GRE over IPv4 demultiplexor driver
+[   14.289414] ip_gre: GRE over IPv4 tunneling driver
+[   14.452230] IPv4 over IPsec tunneling driver
+[   14.726808] Initializing XFRM netlink socket
+[   14.738214] NET: Registered PF_INET6 protocol family
+[   15.028006] Segment Routing with IPv6
+[   15.028656] In-situ OAM (IOAM) with IPv6
+[   15.030888] mip6: Mobile IPv6
+[   15.036390] sit: IPv6, IPv4 and MPLS over IPv4 tunneling driver
+[   15.251938] ip6_gre: GRE over IPv6 tunneling driver
+[   15.274486] NET: Registered PF_PACKET protocol family
+[   15.274894] NET: Registered PF_KEY protocol family
+[   15.278300] Bridge firewalling registered
+[   15.281946] l2tp_core: L2TP core driver, V2.0
+[   15.291508] l2tp_ppp: PPPoL2TP kernel driver, V2.0
+[   15.332410] 8021q: 802.1Q VLAN Support v1.8
+[   15.333076] sctp: Hash tables configured (bind 256/256)
+[   15.439538] 9pnet: Installing 9P2000 support
+[   15.440192] Key type dns_resolver registered
+[   15.440356] openvswitch: Open vSwitch switching datapath
+[   15.735854] NET: Registered PF_VSOCK protocol family
+[   15.736494] mpls_gso: MPLS GSO support
+[   15.783590] registered taskstats version 1
+[   16.267290] Key type .fscrypt registered
+[   16.267674] Key type fscrypt-provisioning registered
+[   16.520478] Btrfs loaded, zoned=no, fsverity=no
+[   16.527546] Key type encrypted registered
+[   16.768830] gtp: GTP module loaded (pdp ctx size 128 bytes)
+[   20.063694] clk: Disabling unused clocks
+[   20.217316] EXT4-fs (vda): mounted filesystem 6f737265-632d-6c69-6e75-782d726f6f74 ro without journal. Quota mode: none.
+[   20.229894] VFS: Mounted root (ext4 filesystem) readonly on device 254:0.
+[   20.235610] devtmpfs: mounted
+[   20.571182] Freeing unused kernel memory: 6336K
+[   20.583018] Run /init as init process
+OSREC_LINUX_IRQ_TIMER_LAYOUT {"source":"native-sysfs-btf","timer_type_id":388,"timer_size":64,"base_type_id":392,"base_size":64,"base_offset":48,"running_offset":24}
+OSREC_LINUX_IRQ_BASE_LAYOUT {"source":"native-sysfs-btf","base_type_id":392,"cpu_type_id":726,"cpu_size":576,"cpu_base_offset":0,"index_offset":8,"active_offset":8}
+OSREC_LINUX_IRQ_OFFSETS_LAYOUT {"source":"native-sysfs-btf","cpu_type_id":726,"cpu_size":576,"base_type_id":392,"base_size":64,"array_offset":64,"array_count":8,"offset_offset":56,"sequence_offset":12}
+OSREC_LINUX_IRQ_TIMEKEEPER_LAYOUT {"source":"native-sysfs-btf-unique-anonymous-shape","symbol_type_binding_attested":false,"core_type_id":3754,"core_size":288,"timekeeper_type_id":3745,"timekeeper_size":280,"sequence_offset":0,"clock_sequence_offset":180,"mono_base_offset":48,"real_offset":152,"boot_offset":160,"tai_offset":168,"leap_offset":192}
+OSREC_LINUX_IRQ_LAYOUT {"source":"native-sysfs-btf","btf_bytes":6239103,"type_id":33724,"size":72,"task_offset":64,"timer_offset":0}
+OSREC_LINUX_IRQ_PROBES_BEGIN
+p:osrec/osrec_task_dequeue dequeue_task_fair task=p:x64 pid=p->pid:s32 state=p->__state:u32 saved=p->saved_state:u32 on_rq=p->on_rq:u32 on_cpu=p->on_cpu:u32
+p:osrec/osrec_task_wake wake_up_process task=p:x64 pid=p->pid:s32 state=p->__state:u32 saved=p->saved_state:u32 on_rq=p->on_rq:u32 on_cpu=p->on_cpu:u32
+p:osrec/osrec_task_activate activate_task task=p:x64 pid=p->pid:s32 state=p->__state:u32 saved=p->saved_state:u32 on_rq=p->on_rq:u32 on_cpu=p->on_cpu:u32
+p:osrec/osrec_task_preempt wakeup_preempt task=p:x64 pid=p->pid:s32 state=p->__state:u32 saved=p->saved_state:u32 on_rq=p->on_rq:u32 on_cpu=p->on_cpu:u32
+p:osrec/osrec_sleeper_entry do_nanosleep object=t:x64 task=t->task:x64
+p:osrec/osrec_sleeper_callback hrtimer_wakeup object=$arg1:x64 task=+64($arg1):x64
+r8:osrec/osrec_sleeper_callback_return hrtimer_wakeup object=$arg1:x64 task=+64($arg1):x64 result=$retval:s32
+r8:osrec/osrec_sleeper_return do_nanosleep object=$arg1:x64 task=+64($arg1):x64 result=$retval:s32
+p:osrec/osrec_timer_callback hrtimer_wakeup object=timer:x64 base=timer->base:x64 running=timer->base->running:x64 state=timer->state:u8
+r8:osrec/osrec_timer_return do_nanosleep object=$arg1:x64 base=+48($arg1):x64 running=+24(+48($arg1)):x64 result=$retval:s32
+p:osrec/osrec_base_callback hrtimer_wakeup object=timer:x64 base=timer->base:x64 cpu_base=timer->base->cpu_base:x64 index=timer->base->index:u32 active=timer->base->cpu_base->active_bases:u32
+r8:osrec/osrec_base_return do_nanosleep object=$arg1:x64 base=+48($arg1):x64 cpu_base=+0(+48($arg1)):x64 index=+8(+48($arg1)):u32 active=+8(+0(+48($arg1))):u32 result=$retval:s32
+p:osrec/osrec_outer_callback hrtimer_wakeup object=timer:x64 cpu_base=timer->base->cpu_base:x64 deadline=timer->base->cpu_base->softirq_expires_next:s64 activated=timer->base->cpu_base->softirq_activated
+r8:osrec/osrec_clock_return ktime_get_update_offsets_now seq=$arg1:x64 real=$arg2:x64 boot=$arg3:x64 tai=$arg4:x64 sequence=+0($arg1):u32 offs_real=+0($arg2):s64 offs_boot=+0($arg3):s64 offs_tai=+0($arg4):s64 now=$retval:s64
+p:osrec/osrec_offsets_callback hrtimer_wakeup object=$arg1:x64 cpu_base=timer->base->cpu_base:x64 sequence=+12(+0(+48($arg1))):u32 soft_real=+440(+0(+48($arg1))):s64 soft_boot=+504(+0(+48($arg1))):s64 soft_tai=+568(+0(+48($arg1))):s64
+p:osrec/osrec_clock_entry ktime_get_update_offsets_now seq=$arg1:x64 real=$arg2:x64 boot=$arg3:x64 tai=$arg4:x64 sequence=+0($arg1):u32 offs_real=+0($arg2):s64 offs_boot=+0($arg3):s64 offs_tai=+0($arg4):s64
+
+OSREC_LINUX_IRQ_PROBES_END
+OSREC_LINUX_IRQ_FORMAT_BEGIN syscalls/sys_enter_nanosleep
+name: sys_enter_nanosleep
+ID: 274
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:struct __kernel_timespec * rqtp;	offset:16;	size:8;	signed:0;
+	field:struct __kernel_timespec * rmtp;	offset:24;	size:8;	signed:0;
+
+print fmt: "rqtp: 0x%08lx, rmtp: 0x%08lx", ((unsigned long)(REC->rqtp)), ((unsigned long)(REC->rmtp))
+
+OSREC_LINUX_IRQ_FORMAT_END syscalls/sys_enter_nanosleep
+OSREC_LINUX_IRQ_FORMAT_BEGIN syscalls/sys_exit_nanosleep
+name: sys_exit_nanosleep
+ID: 273
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+OSREC_LINUX_IRQ_FORMAT_END syscalls/sys_exit_nanosleep
+OSREC_LINUX_IRQ_FORMAT_BEGIN sched/sched_switch
+name: sched_switch
+ID: 225
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:char prev_comm[16];	offset:8;	size:16;	signed:0;
+	field:pid_t prev_pid;	offset:24;	size:4;	signed:1;
+	field:int prev_prio;	offset:28;	size:4;	signed:1;
+	field:long prev_state;	offset:32;	size:8;	signed:1;
+	field:char next_comm[16];	offset:40;	size:16;	signed:0;
+	field:pid_t next_pid;	offset:56;	size:4;	signed:1;
+	field:int next_prio;	offset:60;	size:4;	signed:1;
+
+print fmt: "prev_comm=%s prev_pid=%d prev_prio=%d prev_state=%s%s ==> next_comm=%s next_pid=%d next_prio=%d", REC->prev_comm, REC->prev_pid, REC->prev_prio, (REC->prev_state & ((((0x00000000 | 0x00000001 | 0x00000002 | 0x00000004 | 0x00000008 | 0x00000010 | 0x00000020 | 0x00000040) + 1) << 1) - 1)) ? __print_flags(REC->prev_state & ((((0x00000000 | 0x00000001 | 0x00000002 | 0x00000004 | 0x00000008 | 0x00000010 | 0x00000020 | 0x00000040) + 1) << 1) - 1), "|", { 0x00000001, "S" }, { 0x00000002, "D" }, { 0x00000004, "T" }, { 0x00000008, "t" }, { 0x00000010, "X" }, { 0x00000020, "Z" }, { 0x00000040, "P" }, { 0x00000080, "I" }) : "R", REC->prev_state & (((0x00000000 | 0x00000001 | 0x00000002 | 0x00000004 | 0x00000008 | 0x00000010 | 0x00000020 | 0x00000040) + 1) << 1) ? "+" : "", REC->next_comm, REC->next_pid, REC->next_prio
+
+OSREC_LINUX_IRQ_FORMAT_END sched/sched_switch
+OSREC_LINUX_IRQ_FORMAT_BEGIN sched/sched_waking
+name: sched_waking
+ID: 228
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:char comm[16];	offset:8;	size:16;	signed:0;
+	field:pid_t pid;	offset:24;	size:4;	signed:1;
+	field:int prio;	offset:28;	size:4;	signed:1;
+	field:int target_cpu;	offset:32;	size:4;	signed:1;
+
+print fmt: "comm=%s pid=%d prio=%d target_cpu=%03d", REC->comm, REC->pid, REC->prio, REC->target_cpu
+
+OSREC_LINUX_IRQ_FORMAT_END sched/sched_waking
+OSREC_LINUX_IRQ_FORMAT_BEGIN sched/sched_wakeup
+name: sched_wakeup
+ID: 227
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:char comm[16];	offset:8;	size:16;	signed:0;
+	field:pid_t pid;	offset:24;	size:4;	signed:1;
+	field:int prio;	offset:28;	size:4;	signed:1;
+	field:int target_cpu;	offset:32;	size:4;	signed:1;
+
+print fmt: "comm=%s pid=%d prio=%d target_cpu=%03d", REC->comm, REC->pid, REC->prio, REC->target_cpu
+
+OSREC_LINUX_IRQ_FORMAT_END sched/sched_wakeup
+OSREC_LINUX_IRQ_FORMAT_BEGIN timer/hrtimer_init
+name: hrtimer_init
+ID: 266
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:void * hrtimer;	offset:8;	size:8;	signed:0;
+	field:clockid_t clockid;	offset:16;	size:4;	signed:1;
+	field:enum hrtimer_mode mode;	offset:20;	size:4;	signed:0;
+
+print fmt: "hrtimer=%p clockid=%s mode=%s", REC->hrtimer, __print_symbolic(REC->clockid, { 0, "CLOCK_REALTIME" }, { 1, "CLOCK_MONOTONIC" }, { 7, "CLOCK_BOOTTIME" }, { 11, "CLOCK_TAI" }), __print_symbolic(REC->mode, { HRTIMER_MODE_ABS, "ABS" }, { HRTIMER_MODE_REL, "REL" }, { HRTIMER_MODE_ABS_PINNED, "ABS|PINNED" }, { HRTIMER_MODE_REL_PINNED, "REL|PINNED" }, { HRTIMER_MODE_ABS_SOFT, "ABS|SOFT" }, { HRTIMER_MODE_REL_SOFT, "REL|SOFT" }, { HRTIMER_MODE_ABS_PINNED_SOFT, "ABS|PINNED|SOFT" }, { HRTIMER_MODE_REL_PINNED_SOFT, "REL|PINNED|SOFT" }, { HRTIMER_MODE_ABS_HARD, "ABS|HARD" }, { HRTIMER_MODE_REL_HARD, "REL|HARD" }, { HRTIMER_MODE_ABS_PINNED_HARD, "ABS|PINNED|HARD" }, { HRTIMER_MODE_REL_PINNED_HARD, "REL|PINNED|HARD" })
+
+OSREC_LINUX_IRQ_FORMAT_END timer/hrtimer_init
+OSREC_LINUX_IRQ_FORMAT_BEGIN timer/hrtimer_start
+name: hrtimer_start
+ID: 265
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:void * hrtimer;	offset:8;	size:8;	signed:0;
+	field:void * function;	offset:16;	size:8;	signed:0;
+	field:s64 expires;	offset:24;	size:8;	signed:1;
+	field:s64 softexpires;	offset:32;	size:8;	signed:1;
+	field:enum hrtimer_mode mode;	offset:40;	size:4;	signed:0;
+
+print fmt: "hrtimer=%p function=%ps expires=%llu softexpires=%llu mode=%s", REC->hrtimer, REC->function, (unsigned long long) REC->expires, (unsigned long long) REC->softexpires, __print_symbolic(REC->mode, { HRTIMER_MODE_ABS, "ABS" }, { HRTIMER_MODE_REL, "REL" }, { HRTIMER_MODE_ABS_PINNED, "ABS|PINNED" }, { HRTIMER_MODE_REL_PINNED, "REL|PINNED" }, { HRTIMER_MODE_ABS_SOFT, "ABS|SOFT" }, { HRTIMER_MODE_REL_SOFT, "REL|SOFT" }, { HRTIMER_MODE_ABS_PINNED_SOFT, "ABS|PINNED|SOFT" }, { HRTIMER_MODE_REL_PINNED_SOFT, "REL|PINNED|SOFT" }, { HRTIMER_MODE_ABS_HARD, "ABS|HARD" }, { HRTIMER_MODE_REL_HARD, "REL|HARD" }, { HRTIMER_MODE_ABS_PINNED_HARD, "ABS|PINNED|HARD" }, { HRTIMER_MODE_REL_PINNED_HARD, "REL|PINNED|HARD" })
+
+OSREC_LINUX_IRQ_FORMAT_END timer/hrtimer_start
+OSREC_LINUX_IRQ_FORMAT_BEGIN timer/hrtimer_expire_entry
+name: hrtimer_expire_entry
+ID: 264
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:void * hrtimer;	offset:8;	size:8;	signed:0;
+	field:s64 now;	offset:16;	size:8;	signed:1;
+	field:void * function;	offset:24;	size:8;	signed:0;
+
+print fmt: "hrtimer=%p function=%ps now=%llu", REC->hrtimer, REC->function, (unsigned long long) REC->now
+
+OSREC_LINUX_IRQ_FORMAT_END timer/hrtimer_expire_entry
+OSREC_LINUX_IRQ_FORMAT_BEGIN timer/hrtimer_expire_exit
+name: hrtimer_expire_exit
+ID: 263
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:void * hrtimer;	offset:8;	size:8;	signed:0;
+
+print fmt: "hrtimer=%p", REC->hrtimer
+
+OSREC_LINUX_IRQ_FORMAT_END timer/hrtimer_expire_exit
+OSREC_LINUX_IRQ_FORMAT_BEGIN timer/hrtimer_cancel
+name: hrtimer_cancel
+ID: 262
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:void * hrtimer;	offset:8;	size:8;	signed:0;
+
+print fmt: "hrtimer=%p", REC->hrtimer
+
+OSREC_LINUX_IRQ_FORMAT_END timer/hrtimer_cancel
+OSREC_LINUX_IRQ_FORMAT_BEGIN irq/irq_handler_entry
+name: irq_handler_entry
+ID: 58
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int irq;	offset:8;	size:4;	signed:1;
+	field:__data_loc char[] name;	offset:12;	size:4;	signed:0;
+
+print fmt: "irq=%d name=%s", REC->irq, __get_str(name)
+
+OSREC_LINUX_IRQ_FORMAT_END irq/irq_handler_entry
+OSREC_LINUX_IRQ_FORMAT_BEGIN irq/irq_handler_exit
+name: irq_handler_exit
+ID: 57
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int irq;	offset:8;	size:4;	signed:1;
+	field:int ret;	offset:12;	size:4;	signed:1;
+
+print fmt: "irq=%d ret=%s", REC->irq, REC->ret ? "handled" : "unhandled"
+
+OSREC_LINUX_IRQ_FORMAT_END irq/irq_handler_exit
+OSREC_LINUX_IRQ_FORMAT_BEGIN osrec/osrec_task_dequeue
+name: osrec_task_dequeue
+ID: 2841
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:unsigned long __probe_ip;	offset:8;	size:8;	signed:0;
+	field:u64 task;	offset:16;	size:8;	signed:0;
+	field:s32 pid;	offset:24;	size:4;	signed:1;
+	field:u32 state;	offset:28;	size:4;	signed:0;
+	field:u32 saved;	offset:32;	size:4;	signed:0;
+	field:u32 on_rq;	offset:36;	size:4;	signed:0;
+	field:u32 on_cpu;	offset:40;	size:4;	signed:0;
+
+print fmt: "(%lx) task=0x%Lx pid=%d state=%u saved=%u on_rq=%u on_cpu=%u", REC->__probe_ip, REC->task, REC->pid, REC->state, REC->saved, REC->on_rq, REC->on_cpu
+
+OSREC_LINUX_IRQ_FORMAT_END osrec/osrec_task_dequeue
+OSREC_LINUX_IRQ_FORMAT_BEGIN osrec/osrec_task_wake
+name: osrec_task_wake
+ID: 2842
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:unsigned long __probe_ip;	offset:8;	size:8;	signed:0;
+	field:u64 task;	offset:16;	size:8;	signed:0;
+	field:s32 pid;	offset:24;	size:4;	signed:1;
+	field:u32 state;	offset:28;	size:4;	signed:0;
+	field:u32 saved;	offset:32;	size:4;	signed:0;
+	field:u32 on_rq;	offset:36;	size:4;	signed:0;
+	field:u32 on_cpu;	offset:40;	size:4;	signed:0;
+
+print fmt: "(%lx) task=0x%Lx pid=%d state=%u saved=%u on_rq=%u on_cpu=%u", REC->__probe_ip, REC->task, REC->pid, REC->state, REC->saved, REC->on_rq, REC->on_cpu
+
+OSREC_LINUX_IRQ_FORMAT_END osrec/osrec_task_wake
+OSREC_LINUX_IRQ_FORMAT_BEGIN osrec/osrec_task_activate
+name: osrec_task_activate
+ID: 2843
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:unsigned long __probe_ip;	offset:8;	size:8;	signed:0;
+	field:u64 task;	offset:16;	size:8;	signed:0;
+	field:s32 pid;	offset:24;	size:4;	signed:1;
+	field:u32 state;	offset:28;	size:4;	signed:0;
+	field:u32 saved;	offset:32;	size:4;	signed:0;
+	field:u32 on_rq;	offset:36;	size:4;	signed:0;
+	field:u32 on_cpu;	offset:40;	size:4;	signed:0;
+
+print fmt: "(%lx) task=0x%Lx pid=%d state=%u saved=%u on_rq=%u on_cpu=%u", REC->__probe_ip, REC->task, REC->pid, REC->state, REC->saved, REC->on_rq, REC->on_cpu
+
+OSREC_LINUX_IRQ_FORMAT_END osrec/osrec_task_activate
+OSREC_LINUX_IRQ_FORMAT_BEGIN osrec/osrec_task_preempt
+name: osrec_task_preempt
+ID: 2844
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:unsigned long __probe_ip;	offset:8;	size:8;	signed:0;
+	field:u64 task;	offset:16;	size:8;	signed:0;
+	field:s32 pid;	offset:24;	size:4;	signed:1;
+	field:u32 state;	offset:28;	size:4;	signed:0;
+	field:u32 saved;	offset:32;	size:4;	signed:0;
+	field:u32 on_rq;	offset:36;	size:4;	signed:0;
+	field:u32 on_cpu;	offset:40;	size:4;	signed:0;
+
+print fmt: "(%lx) task=0x%Lx pid=%d state=%u saved=%u on_rq=%u on_cpu=%u", REC->__probe_ip, REC->task, REC->pid, REC->state, REC->saved, REC->on_rq, REC->on_cpu
+
+OSREC_LINUX_IRQ_FORMAT_END osrec/osrec_task_preempt
+OSREC_LINUX_IRQ_FORMAT_BEGIN osrec/osrec_sleeper_entry
+name: osrec_sleeper_entry
+ID: 2845
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:unsigned long __probe_ip;	offset:8;	size:8;	signed:0;
+	field:u64 object;	offset:16;	size:8;	signed:0;
+	field:u64 task;	offset:24;	size:8;	signed:0;
+
+print fmt: "(%lx) object=0x%Lx task=0x%Lx", REC->__probe_ip, REC->object, REC->task
+
+OSREC_LINUX_IRQ_FORMAT_END osrec/osrec_sleeper_entry
+OSREC_LINUX_IRQ_FORMAT_BEGIN osrec/osrec_sleeper_callback
+name: osrec_sleeper_callback
+ID: 2846
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:unsigned long __probe_ip;	offset:8;	size:8;	signed:0;
+	field:u64 object;	offset:16;	size:8;	signed:0;
+	field:u64 task;	offset:24;	size:8;	signed:0;
+
+print fmt: "(%lx) object=0x%Lx task=0x%Lx", REC->__probe_ip, REC->object, REC->task
+
+OSREC_LINUX_IRQ_FORMAT_END osrec/osrec_sleeper_callback
+OSREC_LINUX_IRQ_FORMAT_BEGIN osrec/osrec_sleeper_callback_return
+name: osrec_sleeper_callback_return
+ID: 2847
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:unsigned long __probe_func;	offset:8;	size:8;	signed:0;
+	field:unsigned long __probe_ret_ip;	offset:16;	size:8;	signed:0;
+	field:u64 object;	offset:24;	size:8;	signed:0;
+	field:u64 task;	offset:32;	size:8;	signed:0;
+	field:s32 result;	offset:40;	size:4;	signed:1;
+
+print fmt: "(%lx <- %lx) object=0x%Lx task=0x%Lx result=%d", REC->__probe_func, REC->__probe_ret_ip, REC->object, REC->task, REC->result
+
+OSREC_LINUX_IRQ_FORMAT_END osrec/osrec_sleeper_callback_return
+OSREC_LINUX_IRQ_FORMAT_BEGIN osrec/osrec_sleeper_return
+name: osrec_sleeper_return
+ID: 2848
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:unsigned long __probe_func;	offset:8;	size:8;	signed:0;
+	field:unsigned long __probe_ret_ip;	offset:16;	size:8;	signed:0;
+	field:u64 object;	offset:24;	size:8;	signed:0;
+	field:u64 task;	offset:32;	size:8;	signed:0;
+	field:s32 result;	offset:40;	size:4;	signed:1;
+
+print fmt: "(%lx <- %lx) object=0x%Lx task=0x%Lx result=%d", REC->__probe_func, REC->__probe_ret_ip, REC->object, REC->task, REC->result
+
+OSREC_LINUX_IRQ_FORMAT_END osrec/osrec_sleeper_return
+OSREC_LINUX_IRQ_FORMAT_BEGIN osrec/osrec_timer_callback
+name: osrec_timer_callback
+ID: 2849
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:unsigned long __probe_ip;	offset:8;	size:8;	signed:0;
+	field:u64 object;	offset:16;	size:8;	signed:0;
+	field:u64 base;	offset:24;	size:8;	signed:0;
+	field:u64 running;	offset:32;	size:8;	signed:0;
+	field:u8 state;	offset:40;	size:1;	signed:0;
+
+print fmt: "(%lx) object=0x%Lx base=0x%Lx running=0x%Lx state=%u", REC->__probe_ip, REC->object, REC->base, REC->running, REC->state
+
+OSREC_LINUX_IRQ_FORMAT_END osrec/osrec_timer_callback
+OSREC_LINUX_IRQ_FORMAT_BEGIN osrec/osrec_timer_return
+name: osrec_timer_return
+ID: 2850
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:unsigned long __probe_func;	offset:8;	size:8;	signed:0;
+	field:unsigned long __probe_ret_ip;	offset:16;	size:8;	signed:0;
+	field:u64 object;	offset:24;	size:8;	signed:0;
+	field:u64 base;	offset:32;	size:8;	signed:0;
+	field:u64 running;	offset:40;	size:8;	signed:0;
+	field:s32 result;	offset:48;	size:4;	signed:1;
+
+print fmt: "(%lx <- %lx) object=0x%Lx base=0x%Lx running=0x%Lx result=%d", REC->__probe_func, REC->__probe_ret_ip, REC->object, REC->base, REC->running, REC->result
+
+OSREC_LINUX_IRQ_FORMAT_END osrec/osrec_timer_return
+OSREC_LINUX_IRQ_FORMAT_BEGIN osrec/osrec_base_callback
+name: osrec_base_callback
+ID: 2851
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:unsigned long __probe_ip;	offset:8;	size:8;	signed:0;
+	field:u64 object;	offset:16;	size:8;	signed:0;
+	field:u64 base;	offset:24;	size:8;	signed:0;
+	field:u64 cpu_base;	offset:32;	size:8;	signed:0;
+	field:u32 index;	offset:40;	size:4;	signed:0;
+	field:u32 active;	offset:44;	size:4;	signed:0;
+
+print fmt: "(%lx) object=0x%Lx base=0x%Lx cpu_base=0x%Lx index=%u active=%u", REC->__probe_ip, REC->object, REC->base, REC->cpu_base, REC->index, REC->active
+
+OSREC_LINUX_IRQ_FORMAT_END osrec/osrec_base_callback
+OSREC_LINUX_IRQ_FORMAT_BEGIN osrec/osrec_base_return
+name: osrec_base_return
+ID: 2852
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:unsigned long __probe_func;	offset:8;	size:8;	signed:0;
+	field:unsigned long __probe_ret_ip;	offset:16;	size:8;	signed:0;
+	field:u64 object;	offset:24;	size:8;	signed:0;
+	field:u64 base;	offset:32;	size:8;	signed:0;
+	field:u64 cpu_base;	offset:40;	size:8;	signed:0;
+	field:u32 index;	offset:48;	size:4;	signed:0;
+	field:u32 active;	offset:52;	size:4;	signed:0;
+	field:s32 result;	offset:56;	size:4;	signed:1;
+
+print fmt: "(%lx <- %lx) object=0x%Lx base=0x%Lx cpu_base=0x%Lx index=%u active=%u result=%d", REC->__probe_func, REC->__probe_ret_ip, REC->object, REC->base, REC->cpu_base, REC->index, REC->active, REC->result
+
+OSREC_LINUX_IRQ_FORMAT_END osrec/osrec_base_return
+OSREC_LINUX_IRQ_FORMAT_BEGIN osrec/osrec_outer_callback
+name: osrec_outer_callback
+ID: 2853
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:unsigned long __probe_ip;	offset:8;	size:8;	signed:0;
+	field:u64 object;	offset:16;	size:8;	signed:0;
+	field:u64 cpu_base;	offset:24;	size:8;	signed:0;
+	field:s64 deadline;	offset:32;	size:8;	signed:1;
+	field:u32 activated;	offset:40;	size:4;	signed:0;
+
+print fmt: "(%lx) object=0x%Lx cpu_base=0x%Lx deadline=%Ld activated=%u", REC->__probe_ip, REC->object, REC->cpu_base, REC->deadline, REC->activated
+
+OSREC_LINUX_IRQ_FORMAT_END osrec/osrec_outer_callback
+OSREC_LINUX_IRQ_FORMAT_BEGIN osrec/osrec_clock_return
+name: osrec_clock_return
+ID: 2854
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:unsigned long __probe_func;	offset:8;	size:8;	signed:0;
+	field:unsigned long __probe_ret_ip;	offset:16;	size:8;	signed:0;
+	field:u64 seq;	offset:24;	size:8;	signed:0;
+	field:u64 real;	offset:32;	size:8;	signed:0;
+	field:u64 boot;	offset:40;	size:8;	signed:0;
+	field:u64 tai;	offset:48;	size:8;	signed:0;
+	field:u32 sequence;	offset:56;	size:4;	signed:0;
+	field:s64 offs_real;	offset:60;	size:8;	signed:1;
+	field:s64 offs_boot;	offset:68;	size:8;	signed:1;
+	field:s64 offs_tai;	offset:76;	size:8;	signed:1;
+	field:s64 now;	offset:84;	size:8;	signed:1;
+
+print fmt: "(%lx <- %lx) seq=0x%Lx real=0x%Lx boot=0x%Lx tai=0x%Lx sequence=%u offs_real=%Ld offs_boot=%Ld offs_tai=%Ld now=%Ld", REC->__probe_func, REC->__probe_ret_ip, REC->seq, REC->real, REC->boot, REC->tai, REC->sequence, REC->offs_real, REC->offs_boot, REC->offs_tai, REC->now
+
+OSREC_LINUX_IRQ_FORMAT_END osrec/osrec_clock_return
+OSREC_LINUX_IRQ_FORMAT_BEGIN osrec/osrec_offsets_callback
+name: osrec_offsets_callback
+ID: 2855
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:unsigned long __probe_ip;	offset:8;	size:8;	signed:0;
+	field:u64 object;	offset:16;	size:8;	signed:0;
+	field:u64 cpu_base;	offset:24;	size:8;	signed:0;
+	field:u32 sequence;	offset:32;	size:4;	signed:0;
+	field:s64 soft_real;	offset:36;	size:8;	signed:1;
+	field:s64 soft_boot;	offset:44;	size:8;	signed:1;
+	field:s64 soft_tai;	offset:52;	size:8;	signed:1;
+
+print fmt: "(%lx) object=0x%Lx cpu_base=0x%Lx sequence=%u soft_real=%Ld soft_boot=%Ld soft_tai=%Ld", REC->__probe_ip, REC->object, REC->cpu_base, REC->sequence, REC->soft_real, REC->soft_boot, REC->soft_tai
+
+OSREC_LINUX_IRQ_FORMAT_END osrec/osrec_offsets_callback
+OSREC_LINUX_IRQ_FORMAT_BEGIN osrec/osrec_clock_entry
+name: osrec_clock_entry
+ID: 2856
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:unsigned long __probe_ip;	offset:8;	size:8;	signed:0;
+	field:u64 seq;	offset:16;	size:8;	signed:0;
+	field:u64 real;	offset:24;	size:8;	signed:0;
+	field:u64 boot;	offset:32;	size:8;	signed:0;
+	field:u64 tai;	offset:40;	size:8;	signed:0;
+	field:u32 sequence;	offset:48;	size:4;	signed:0;
+	field:s64 offs_real;	offset:52;	size:8;	signed:1;
+	field:s64 offs_boot;	offset:60;	size:8;	signed:1;
+	field:s64 offs_tai;	offset:68;	size:8;	signed:1;
+
+print fmt: "(%lx) seq=0x%Lx real=0x%Lx boot=0x%Lx tai=0x%Lx sequence=%u offs_real=%Ld offs_boot=%Ld offs_tai=%Ld", REC->__probe_ip, REC->seq, REC->real, REC->boot, REC->tai, REC->sequence, REC->offs_real, REC->offs_boot, REC->offs_tai
+
+OSREC_LINUX_IRQ_FORMAT_END osrec/osrec_clock_entry
+OSREC_LINUX_IRQ_PROFILE_BEGIN
+  osrec_task_dequeue                                        28               0
+  osrec_task_wake                                           10               0
+  osrec_task_activate                                       31               0
+  osrec_task_preempt                                        29               0
+  osrec_sleeper_entry                                        1               0
+  osrec_sleeper_callback                                     1               0
+  osrec_sleeper_callback_return                              1               0
+  osrec_sleeper_return                                       1               0
+  osrec_timer_callback                                       1               0
+  osrec_timer_return                                         1               0
+  osrec_base_callback                                        1               0
+  osrec_base_return                                          1               0
+  osrec_outer_callback                                       1               0
+  osrec_clock_return                                        26               0
+  osrec_offsets_callback                                     1               0
+  osrec_clock_entry                                         24               0
+
+OSREC_LINUX_IRQ_PROFILE_END
+OSREC_LINUX_IRQ_RESULT {"task_state_capture":true,"sleeper_state_capture":true,"timer_state_capture":true,"timer_return_capture":true,"base_state_capture":true,"outer_state_capture":true,"clock_state_capture":true,"clock_offsets_capture":true,"clock_entry_capture":true,"timekeeper_layout_capture":true,"pid":1,"tid":1,"syscall":101,"request_ns":20000000,"timer_slack_ns":50000,"raw":0,"before_ns":27797430000,"after_ns":27865495008}
+OSREC_LINUX_IRQ_TRACE_BEGIN
+# tracer: nop
+#
+# entries-in-buffer/entries-written: 29/29   #P:1
+#
+#                                _-----=> irqs-off/BH-disabled
+#                               / _----=> need-resched
+#                              | / _---=> hardirq/softirq
+#                              || / _--=> preempt-depth
+#                              ||| / _-=> migrate-disable
+#                              |||| /     delay
+#           TASK-PID     CPU#  |||||  TIMESTAMP  FUNCTION
+#              | |         |   |||||     |         |
+            init-1       [000] .....    27.823589: sys_nanosleep(rqtp: ffffee347db0, rmtp: 0)
+            init-1       [000] .....    27.824348: hrtimer_init: hrtimer=000000002ec94bb2 clockid=CLOCK_MONOTONIC mode=REL
+            init-1       [000] d....    27.824652: osrec_sleeper_entry: (do_nanosleep+0x0/0x158) object=0xffff000002e53d70 task=0xffff000002e38000
+            init-1       [000] d....    27.824912: hrtimer_start: hrtimer=000000002ec94bb2 function=hrtimer_wakeup expires=27844831008 softexpires=27844781008 mode=REL
+            init-1       [000] d....    27.825031: osrec_task_dequeue: (dequeue_task_fair+0x0/0x360) task=0xffff000002e38000 pid=1 state=8193 saved=0 on_rq=0 on_cpu=1
+            init-1       [000] d....    27.825133: sched_switch: prev_comm=init prev_pid=1 prev_prio=120 prev_state=S ==> next_comm=swapper/0 next_pid=0 next_prio=120
+          <idle>-0       [000] d.h..    27.864354: irq_handler_entry: irq=11 name=arch_timer
+          <idle>-0       [000] d.h..    27.864438: osrec_clock_entry: (ktime_get_update_offsets_now+0x0/0x140) seq=0xffff00001fecc4cc real=0xffff00001fecc578 boot=0xffff00001fecc5b8 tai=0xffff00001fecc5f8 sequence=3 offs_real=1792444883770046992 offs_boot=0 offs_tai=1792444883770046992
+          <idle>-0       [000] d.h..    27.864470: osrec_clock_return: (hrtimer_run_queues+0x78/0x128 <- ktime_get_update_offsets_now) seq=0xffff00001fecc4cc real=0xffff00001fecc578 boot=0xffff00001fecc5b8 tai=0xffff00001fecc5f8 sequence=3 offs_real=1792444883770046992 offs_boot=0 offs_tai=1792444883770046992 now=27864462000
+          <idle>-0       [000] d.h..    27.864613: hrtimer_cancel: hrtimer=000000002ec94bb2
+          <idle>-0       [000] d.h..    27.864701: hrtimer_expire_entry: hrtimer=000000002ec94bb2 function=hrtimer_wakeup now=27864462000
+          <idle>-0       [000] d.h..    27.864739: osrec_offsets_callback: (hrtimer_wakeup+0x0/0x48) object=0xffff000002e53d70 cpu_base=0xffff00001fecc4c0 sequence=3 soft_real=1792444883770046992 soft_boot=0 soft_tai=1792444883770046992
+          <idle>-0       [000] d.h..    27.864769: osrec_outer_callback: (hrtimer_wakeup+0x0/0x48) object=0xffff000002e53d70 cpu_base=0xffff00001fecc4c0 deadline=9223372036854775807 activated=0
+          <idle>-0       [000] d.h..    27.864792: osrec_base_callback: (hrtimer_wakeup+0x0/0x48) object=0xffff000002e53d70 base=0xffff00001fecc500 cpu_base=0xffff00001fecc4c0 index=0 active=1
+          <idle>-0       [000] d.h..    27.864794: osrec_timer_callback: (hrtimer_wakeup+0x0/0x48) object=0xffff000002e53d70 base=0xffff00001fecc500 running=0xffff000002e53d70 state=0
+          <idle>-0       [000] d.h..    27.864806: osrec_sleeper_callback: (hrtimer_wakeup+0x0/0x48) object=0xffff000002e53d70 task=0xffff000002e38000
+          <idle>-0       [000] d.h..    27.864832: osrec_task_wake: (wake_up_process+0x0/0x38) task=0xffff000002e38000 pid=1 state=8193 saved=0 on_rq=0 on_cpu=0
+          <idle>-0       [000] d.h..    27.864843: sched_waking: comm=init pid=1 prio=120 target_cpu=000
+          <idle>-0       [000] d.h..    27.864868: osrec_task_activate: (activate_task+0x0/0x100) task=0xffff000002e38000 pid=1 state=512 saved=0 on_rq=0 on_cpu=0
+          <idle>-0       [000] d.h..    27.864899: osrec_task_preempt: (wakeup_preempt+0x0/0x98) task=0xffff000002e38000 pid=1 state=512 saved=0 on_rq=1 on_cpu=0
+          <idle>-0       [000] dNh..    27.864911: sched_wakeup: comm=init pid=1 prio=120 target_cpu=000
+          <idle>-0       [000] dNh..    27.864923: osrec_sleeper_callback_return: (__hrtimer_run_queues+0x13c/0x308 <- hrtimer_wakeup) object=0xffff000002e53d70 task=0x0 result=0
+          <idle>-0       [000] dNh..    27.864952: hrtimer_expire_exit: hrtimer=000000002ec94bb2
+          <idle>-0       [000] dNh..    27.864985: irq_handler_exit: irq=11 ret=handled
+          <idle>-0       [000] d....    27.865059: sched_switch: prev_comm=swapper/0 prev_pid=0 prev_prio=120 prev_state=R ==> next_comm=init next_pid=1 next_prio=120
+            init-1       [000] d....    27.865115: osrec_sleeper_return: (hrtimer_nanosleep+0xa0/0x120 <- do_nanosleep) object=0xffff000002e53d70 task=0x0 result=0
+            init-1       [000] d....    27.865122: osrec_timer_return: (hrtimer_nanosleep+0xa0/0x120 <- do_nanosleep) object=0xffff000002e53d70 base=0xffff00001fecc500 running=0x0 result=0
+            init-1       [000] d....    27.865125: osrec_base_return: (hrtimer_nanosleep+0xa0/0x120 <- do_nanosleep) object=0xffff000002e53d70 base=0xffff00001fecc500 cpu_base=0xffff00001fecc4c0 index=0 active=1 result=0
+            init-1       [000] .....    27.865176: sys_nanosleep -> 0x0
+
+OSREC_LINUX_IRQ_TRACE_END
+OSREC_LINUX_IRQ_STATS_BEGIN
+entries: 29
+overrun: 0
+commit overrun: 0
+bytes: 1356
+oldest event ts:    27.823589
+now ts:    28.027615
+dropped events: 0
+read events: 0
+
+OSREC_LINUX_IRQ_STATS_END
+OSREC_LINUX_IRQ_DONE
+[   30.311210] reboot: Power down

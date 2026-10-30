@@ -1,0 +1,14 @@
+{
+  "format": "osrec-entry-state-boundaries-v1",
+  "boundaries": {},
+  "argument_objects": {
+    "OsrecParentExitSignalSet": {
+      "processCB": {
+        "kind": "object_argument",
+        "reason": "one scheduler-lock region holds the workload child, its distinct live PID 1 parent and their stable parentProcess edge across six original helper calls",
+        "implementation": "before the child's first getppid, capture adapter follows the real parentProcess edge before each original signal-set helper call; restore PID 1 exitCode once after the batch and before scheduler unlock",
+        "snapshot_safe": true
+      }
+    }
+  }
+}

@@ -1,0 +1,100 @@
+[
+  {
+    "name": "01-overview",
+    "path": "/Users/al3x3n0/huawei/osrec/docs/slides/.build/image-slices/01-overview.png",
+    "title": "Current flow",
+    "width": 6342,
+    "height": 4468
+  },
+  {
+    "name": "02-workflow",
+    "path": "/Users/al3x3n0/huawei/osrec/docs/slides/.build/image-slices/02-workflow.png",
+    "title": "Workflow selection",
+    "width": 956,
+    "height": 467
+  },
+  {
+    "name": "03-stage1-capture",
+    "path": "/Users/al3x3n0/huawei/osrec/docs/slides/.build/image-slices/03-stage1-capture.png",
+    "title": "Stage 1: capture and transform",
+    "width": 2211,
+    "height": 900
+  },
+  {
+    "name": "04-stage1-build",
+    "path": "/Users/al3x3n0/huawei/osrec/docs/slides/.build/image-slices/04-stage1-build.png",
+    "title": "Stage 1: codec, slices and proof",
+    "width": 2200,
+    "height": 733
+  },
+  {
+    "name": "05-stage2-import",
+    "path": "/Users/al3x3n0/huawei/osrec/docs/slides/.build/image-slices/05-stage2-import.png",
+    "title": "Stage 2: application import",
+    "width": 1733,
+    "height": 856
+  },
+  {
+    "name": "06-stage2-compose",
+    "path": "/Users/al3x3n0/huawei/osrec/docs/slides/.build/image-slices/06-stage2-compose.png",
+    "title": "Stage 2: image composition",
+    "width": 1733,
+    "height": 633
+  },
+  {
+    "name": "07-stage3-map",
+    "path": "/Users/al3x3n0/huawei/osrec/docs/slides/.build/image-slices/07-stage3-map.png",
+    "title": "Stage 3: replay runtime overview",
+    "width": 3311,
+    "height": 1145
+  },
+  {
+    "name": "08-stage3-restore",
+    "path": "/Users/al3x3n0/huawei/osrec/docs/slides/.build/image-slices/08-stage3-restore.png",
+    "title": "Stage 3: restore and execute application",
+    "width": 2099,
+    "height": 366
+  },
+  {
+    "name": "09-stage3-syscall",
+    "path": "/Users/al3x3n0/huawei/osrec/docs/slides/.build/image-slices/09-stage3-syscall.png",
+    "title": "Stage 3: syscall dispatch",
+    "width": 2133,
+    "height": 311
+  },
+  {
+    "name": "09b-stage3-return",
+    "path": "/Users/al3x3n0/huawei/osrec/docs/slides/.build/image-slices/09b-stage3-return.png",
+    "title": "Stage 3: return to application",
+    "width": 556,
+    "height": 227
+  },
+  {
+    "name": "10-stage3-boundary",
+    "path": "/Users/al3x3n0/huawei/osrec/docs/slides/.build/image-slices/10-stage3-boundary.png",
+    "title": "Stage 3: application pause or exit",
+    "width": 878,
+    "height": 227
+  },
+  {
+    "name": "11-stage4",
+    "path": "/Users/al3x3n0/huawei/osrec/docs/slides/.build/image-slices/11-stage4.png",
+    "title": "Stage 4: checkpoints and verification",
+    "width": 3011,
+    "height": 791
+  },
+  {
+    "name": "12-tools",
+    "path": "/Users/al3x3n0/huawei/osrec/docs/slides/.build/image-slices/12-tools.png",
+    "title": "Tools and runtime cheatsheet",
+    "width": 1089,
+    "height": 1033
+  },
+  {
+    "name": "13-artifacts",
+    "path": "/Users/al3x3n0/huawei/osrec/docs/slides/.build/image-slices/13-artifacts.png",
+    "title": "C, ELF and testing-purpose cheatsheet",
+    "width": 1000,
+    "height": 833
+  }
+]

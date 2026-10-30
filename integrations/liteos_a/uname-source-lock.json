@@ -1,0 +1,17 @@
+{
+  "repository": "https://github.com/openharmony/kernel_liteos_a",
+  "revision": "4ac7f3aed67000b47bc14d6fe79d63ada708d780",
+  "source": "syscall/misc_syscall.c",
+  "source_sha256": "9637a0255b6db7a4d88dbe01d56f580c53e9310cd1ec0bef1f8859a7dae8c6c4",
+  "function": "SysUname",
+  "function_sha256": "9f42faf3ebd5d66494c987428d28c0aadae3eb3966bf9361f936029e3285462a",
+  "headers": {
+    "syscall/syscall_lookup.h": "468a2f8c8ab28c8a78c988aed2a56ad4396cd5bb11287520e98e1661d65fea5e",
+    "compat/posix/src/misc.c": "1570ccc13c2d2208100285d1410bf043c6c152ba0abb2b8bbebb513015d421b7"
+  },
+  "libc_headers": {
+    "porting/liteos_a/kernel/include/sys/utsname.h": "702dc2cc191ae231a7ed092349e4cc8c0ac4369ff3848562c9a15ca4b391b268"
+  },
+  "syscall_number": 122,
+  "native_abi": "390 bytes: six 65-byte identity fields; preserved in AArch64 replay"
+}

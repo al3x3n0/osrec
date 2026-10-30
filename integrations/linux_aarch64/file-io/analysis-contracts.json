@@ -1,0 +1,70 @@
+{
+ "format": "osrec-entry-state-boundaries-v1",
+ "boundaries": {
+  "osrec_user_memory_object": {
+   "kind": "memory_model",
+   "result": "external_memory",
+   "reason": "OSREC runtime lookup of an admitted caller object in the replay's user-memory map; user bytes are not kernel entry state",
+   "implementation": "include/osrec/syscall_slice.h user-memory contract, populated from the SVC boundary's admitted user objects"
+  },
+  "osrec_user_memory_resolve": {
+   "kind": "memory_model",
+   "result": "external_memory",
+   "reason": "OSREC runtime translation of an admitted user address to replay memory",
+   "implementation": "include/osrec/syscall_slice.h user-memory contract, populated from the SVC boundary's admitted user objects"
+  }
+ },
+ "state_ranges": [
+  {
+   "record": "struct fdtable",
+   "field": "max_fds",
+   "min": 0,
+   "max": 64,
+   "reason": "the slice fdtable holds 64 inline descriptor slots and bitmap words for 64 descriptors",
+   "validated_by": "live state field files.fdtab.max_fds"
+  }
+ ],
+ "input_domains": [
+  {
+   "field": "file_pool[].f_pos",
+   "min": 0,
+   "max": 9223372036854775807,
+   "reason": "a regular-file position is never negative: vfs_llseek and rw_verify_area reject negative offsets without FMODE_UNSIGNED_OFFSET, which ramfs and memfd files do not set"
+  },
+  {
+   "field": "file_pool[].f_count",
+   "min": 0,
+   "max": 4294967296,
+   "reason": "each file reference is held by a descriptor slot, mapping or task, so the count stays far below LONG_MAX and get_file cannot overflow"
+  },
+  {
+   "field": "files.resize_in_progress",
+   "min": 0,
+   "max": 0,
+   "reason": "expand_fdtable sets resize_in_progress and clears it before returning within one call; with the files table not shared (a single-threaded task), no resize is in progress at a system-call boundary"
+  }
+ ],
+ "klee_separate_members": [
+  {
+   "member": "file_data",
+   "reason": "file reads and writes index file_data.bytes at f_pos + i; in its own KLEE object those symbolic-index accesses stay out of the rest of the context"
+  }
+ ],
+ "graph_invariants": [
+  {
+   "field": "files.fdtab.open_fds[0]",
+   "kind": "slot_mask",
+   "reason": "between system calls of a single-threaded task no descriptor is reserved without being installed: alloc_fd sets the bit and fd_install fills the slot within one call, and close clears both, so open_fds equals the installed slots"
+  },
+  {
+   "field": "files.fdtab.full_fds_bits[0]",
+   "kind": "full_slot_words",
+   "reason": "full_fds_bits records which open_fds words are all ones (__set_open_fd and __clear_open_fd keep it in step)"
+  },
+  {
+   "field": "files.next_fd",
+   "kind": "at_most_first_free_slot",
+   "reason": "next_fd is a search hint never above the lowest free descriptor: alloc_fd advances it past the allocated slot and __put_unused_fd/close lower it to the freed one"
+  }
+ ]
+}

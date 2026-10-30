@@ -1,0 +1,15 @@
+{
+  "release": "Linux v6.10",
+  "source": "kernel/time/hrtimer.c",
+  "source_url": "https://github.com/torvalds/linux/blob/v6.10/kernel/time/hrtimer.c#L588",
+  "file": "timer_clock.c",
+  "excerpt_sha256": "d54ef39d5f6e3404a6590480882f0e96e2db9aa0500bbf0da29925151d5b5ab1",
+  "extraction": "Selected complete definition with internal comments omitted; declarations and statements unchanged",
+  "functions": [
+    {
+      "name": "hrtimer_update_base",
+      "source_line": 588
+    }
+  ],
+  "native_source_build_attested": false
+}

@@ -1,0 +1,15 @@
+{
+  "release": "Linux v6.10",
+  "source": "kernel/time/timekeeping.c",
+  "source_url": "https://github.com/torvalds/linux/blob/v6.10/kernel/time/timekeeping.c#L2163",
+  "file": "timekeeper_update.c",
+  "excerpt_sha256": "4d1c8a31cf4438f6b8f1dbf73c42698d003018287c52ef22cba4ff2f354bfce5",
+  "extraction": "Selected complete definition with internal comments omitted; declarations and statements unchanged",
+  "functions": [
+    {
+      "name": "ktime_get_update_offsets_now",
+      "source_line": 2163
+    }
+  ],
+  "native_source_build_attested": false
+}

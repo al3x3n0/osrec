@@ -1,0 +1,24 @@
+{
+  "repository": "https://github.com/openharmony/kernel_liteos_a",
+  "revision": "4ac7f3aed67000b47bc14d6fe79d63ada708d780",
+  "source": "syscall/time_syscall.c",
+  "source_sha256": "ea8125af0274ba7f22daadc19c6218a30382903563642bec8f0bb715e9aed09c",
+  "functions": {
+    "SysClockGettime": "c30a10c1f91a74d2978ef5beab11d147a6f2f2d14de386653b12c14790c4f46d",
+    "SysClockGetres": "bd613c65058b430d37043af37a8064d5cca83267825ce1f6481ccfe270a58e5f"
+  },
+  "headers": {
+    "syscall/syscall_lookup.h": "468a2f8c8ab28c8a78c988aed2a56ad4396cd5bb11287520e98e1661d65fea5e",
+    "compat/posix/include/time_posix.h": "4ed8d3977b45ed76cc1201d89d95d67dd8916ddebe5aee992632736857f442b0",
+    "compat/posix/src/time.c": "3108f2ed423a5ca4ab3c61e5f142aa44c39de566a2a0fd2e22182b9ad3083e5b"
+  },
+  "numbers": [
+    263,
+    264
+  ],
+  "native_abi": "16 bytes: signed 64-bit seconds, signed 32-bit nanoseconds at offset 8, 4 zero padding bytes; preserved in AArch64 replay",
+  "libc_headers": {
+    "porting/liteos_a/kernel/include/time.h": "ea96630729bab5ace06fe42a60aaca16c5e88a4b2ede12d59be706c2765d5819",
+    "porting/liteos_a/kernel/include/bits/alltypes.h": "b205b6b3cac09ebf04f86353287a0a899f3ece1c63975e63c9512e2daf26c27d"
+  }
+}

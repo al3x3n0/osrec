@@ -1,0 +1,47 @@
+{
+  "kernel_image_sha256": "25a42cbdbdd340da5827974df6b283710c237218636c9fbf9f05dacb240437a2",
+  "kernel_elf_sha256": "dc7943f4d030bf340f03c137f748370ac93e8c5861bd200bbb6e9d6c7c9b4af5",
+  "kernel_config_sha256": "58371abd9cf7d2751ce68ceace70eca8bde3d28ae6ca238a9b9f87efa3d80f51",
+  "boot_log_sha256": "275f79d40b20be32553613419c8d6eb0123e475c286ca316818b18bc5c32123b",
+  "qemu_command": [
+    "qemu-system-arm",
+    "-M",
+    "virt-9.2,gic-version=2,secure=on",
+    "-cpu",
+    "cortex-a7",
+    "-accel",
+    "tcg",
+    "-smp",
+    "1",
+    "-m",
+    "1G",
+    "-display",
+    "none",
+    "-monitor",
+    "none",
+    "-serial",
+    "stdio",
+    "-bios",
+    "/Users/al3x3n0/huawei/osrec/build/ohos/out/liteos.bin"
+  ],
+  "qemu_version": "QEMU emulator version 9.2.3",
+  "integration_source_hashes": {
+    "build-files.json": "a95f182fd2946030e81cfbbc1c00ace3992c8f172c8dab1b8f69401b3615cec9",
+    "dependencies.json": "fdec970e1de20cb8efef8cf065345b3dfc07880ebc3cf2df66759cdec577e419",
+    "entry.json": "9a351f6cde62e9bb48c3b7b47de46f042afb975be647112820adc65dfded346d",
+    "file_capture.h": "259ded3dbd309f5ad2cc42d5e3a933880338674ef0505e9e3d605a70d7464091",
+    "kernel.config": "d6a173c631892cd2e4bb51f5a825aff810fbe2333eacf784f245c4c66a79515d",
+    "live_capture.c": "7f6c62d2913ddb60b55c3aac9540d530dd09504becb3c42e2d0bd8c826f9df03",
+    "user_init.c": "69b342e992ae1fddf2800668ca34bc347be39cbc38cf04fb755f95374d6494fa",
+    "wait_capture.h": "bfc5a0fa4f9e8963603a9fd91c74e6cb00d41cb19a9750cc54ba871d6108f694"
+  },
+  "format": "osrec-live-wait-fixture-provenance-v1",
+  "source_run": "build/live-wait-final-v4",
+  "files_sha256": {
+    "boot.log": "275f79d40b20be32553613419c8d6eb0123e475c286ca316818b18bc5c32123b",
+    "wait-user.bin": "48443c868f27fd5d4e1749506108b7419f6c508bd93fa3cb4f99b5745241e476",
+    "wait-capture.json": "9788f57a0500c008bc1f4bcf6b55512302a52a78a5fd98aaa5adffb7801bd8ea",
+    "wait-state.bin": "0130b01c2023493df2466a1360a16fcf26de25df62f6eb0505e8a07dfc8a64b8",
+    "wait-events.bin": "84bedc184bc32c08d34118ff2198bd25f59fc1a19093b7d8f6c1b05225c6ecfd"
+  }
+}

@@ -1,0 +1,407 @@
+{
+ "format": "osrec-live-kernel-binding-v1",
+ "profile": "fd-control",
+ "schema": "checkpoint-policy.json",
+ "type_source": "embedded-btf",
+ "anchor": {
+  "name": "current",
+  "record": "task_struct"
+ },
+ "kernel_config": {
+  "CONFIG_ARM64_VA_BITS": "48",
+  "CONFIG_PAGE_SHIFT": "12",
+  "CONFIG_DEBUG_INFO_BTF": "y",
+  "CONFIG_RANDOMIZE_BASE": null
+ },
+ "scalars": {
+  "task.pid": {
+   "path": ".pid"
+  },
+  "task.tgid": {
+   "path": ".tgid"
+  },
+  "task.flags": {
+   "path": ".flags",
+   "mask": 2097152
+  },
+  "parent.pid": {
+   "path": ".real_parent->pid"
+  },
+  "parent.tgid": {
+   "path": ".real_parent->tgid"
+  },
+  "fs.umask": {
+   "path": ".fs->umask"
+  },
+  "creds.uid.val": {
+   "path": ".cred->uid.val"
+  },
+  "creds.euid.val": {
+   "path": ".cred->euid.val"
+  },
+  "creds.suid.val": {
+   "path": ".cred->suid.val"
+  },
+  "creds.gid.val": {
+   "path": ".cred->gid.val"
+  },
+  "creds.egid.val": {
+   "path": ".cred->egid.val"
+  },
+  "creds.sgid.val": {
+   "path": ".cred->sgid.val"
+  },
+  "user_ns.initial": {
+   "path": ".cred->user_ns->level",
+   "equals": 0
+  },
+  "user_ns.uid_map.nr_extents": {
+   "path": ".cred->user_ns->uid_map.nr_extents"
+  },
+  "user_ns.uid_map.extent[0].first": {
+   "path": ".cred->user_ns->uid_map.extent[0].first"
+  },
+  "user_ns.uid_map.extent[0].lower_first": {
+   "path": ".cred->user_ns->uid_map.extent[0].lower_first"
+  },
+  "user_ns.uid_map.extent[0].count": {
+   "path": ".cred->user_ns->uid_map.extent[0].count"
+  },
+  "user_ns.uid_map.extent[1].first": {
+   "path": ".cred->user_ns->uid_map.extent[1].first"
+  },
+  "user_ns.uid_map.extent[1].lower_first": {
+   "path": ".cred->user_ns->uid_map.extent[1].lower_first"
+  },
+  "user_ns.uid_map.extent[1].count": {
+   "path": ".cred->user_ns->uid_map.extent[1].count"
+  },
+  "user_ns.uid_map.extent[2].first": {
+   "path": ".cred->user_ns->uid_map.extent[2].first"
+  },
+  "user_ns.uid_map.extent[2].lower_first": {
+   "path": ".cred->user_ns->uid_map.extent[2].lower_first"
+  },
+  "user_ns.uid_map.extent[2].count": {
+   "path": ".cred->user_ns->uid_map.extent[2].count"
+  },
+  "user_ns.uid_map.extent[3].first": {
+   "path": ".cred->user_ns->uid_map.extent[3].first"
+  },
+  "user_ns.uid_map.extent[3].lower_first": {
+   "path": ".cred->user_ns->uid_map.extent[3].lower_first"
+  },
+  "user_ns.uid_map.extent[3].count": {
+   "path": ".cred->user_ns->uid_map.extent[3].count"
+  },
+  "user_ns.uid_map.extent[4].first": {
+   "path": ".cred->user_ns->uid_map.extent[4].first"
+  },
+  "user_ns.uid_map.extent[4].lower_first": {
+   "path": ".cred->user_ns->uid_map.extent[4].lower_first"
+  },
+  "user_ns.uid_map.extent[4].count": {
+   "path": ".cred->user_ns->uid_map.extent[4].count"
+  },
+  "user_ns.gid_map.nr_extents": {
+   "path": ".cred->user_ns->gid_map.nr_extents"
+  },
+  "user_ns.gid_map.extent[0].first": {
+   "path": ".cred->user_ns->gid_map.extent[0].first"
+  },
+  "user_ns.gid_map.extent[0].lower_first": {
+   "path": ".cred->user_ns->gid_map.extent[0].lower_first"
+  },
+  "user_ns.gid_map.extent[0].count": {
+   "path": ".cred->user_ns->gid_map.extent[0].count"
+  },
+  "user_ns.gid_map.extent[1].first": {
+   "path": ".cred->user_ns->gid_map.extent[1].first"
+  },
+  "user_ns.gid_map.extent[1].lower_first": {
+   "path": ".cred->user_ns->gid_map.extent[1].lower_first"
+  },
+  "user_ns.gid_map.extent[1].count": {
+   "path": ".cred->user_ns->gid_map.extent[1].count"
+  },
+  "user_ns.gid_map.extent[2].first": {
+   "path": ".cred->user_ns->gid_map.extent[2].first"
+  },
+  "user_ns.gid_map.extent[2].lower_first": {
+   "path": ".cred->user_ns->gid_map.extent[2].lower_first"
+  },
+  "user_ns.gid_map.extent[2].count": {
+   "path": ".cred->user_ns->gid_map.extent[2].count"
+  },
+  "user_ns.gid_map.extent[3].first": {
+   "path": ".cred->user_ns->gid_map.extent[3].first"
+  },
+  "user_ns.gid_map.extent[3].lower_first": {
+   "path": ".cred->user_ns->gid_map.extent[3].lower_first"
+  },
+  "user_ns.gid_map.extent[3].count": {
+   "path": ".cred->user_ns->gid_map.extent[3].count"
+  },
+  "user_ns.gid_map.extent[4].first": {
+   "path": ".cred->user_ns->gid_map.extent[4].first"
+  },
+  "user_ns.gid_map.extent[4].lower_first": {
+   "path": ".cred->user_ns->gid_map.extent[4].lower_first"
+  },
+  "user_ns.gid_map.extent[4].count": {
+   "path": ".cred->user_ns->gid_map.extent[4].count"
+  },
+  "files.next_fd": {
+   "path": ".files->next_fd"
+  },
+  "files.resize_in_progress": {
+   "path": ".files->resize_in_progress"
+  },
+  "files.count.counter": {
+   "path": ".files->count.counter"
+  },
+  "files.fdtab.max_fds": {
+   "path": ".files->fdt->max_fds",
+   "require": 64
+  },
+  "files.fdtab.open_fds[0]": {
+   "path": ".files->fdt->open_fds[0]"
+  },
+  "files.fdtab.close_on_exec[0]": {
+   "path": ".files->fdt->close_on_exec[0]"
+  },
+  "files.fdtab.full_fds_bits[0]": {
+   "path": ".files->fdt->full_fds_bits[0]"
+  },
+  "task.ioac.rchar": {
+   "path": ".ioac.rchar"
+  },
+  "task.ioac.wchar": {
+   "path": ".ioac.wchar"
+  },
+  "task.ioac.syscr": {
+   "path": ".ioac.syscr"
+  },
+  "task.ioac.syscw": {
+   "path": ".ioac.syscw"
+  }
+ },
+ "embedded": [
+  {
+   "pointer": ".files->fdt",
+   "object": ".files->fdtab",
+   "field": "files.fdt",
+   "target": "files.fdtab"
+  }
+ ],
+ "descriptors": {
+  "table": ".files->fdt->fd",
+  "count": ".files->fdt->max_fds",
+  "slots": "files.fdtab.fd",
+  "capacity": 64,
+  "pool": "file_pool",
+  "class": {
+   "path": ".f_inode->i_mode",
+   "mask": 61440,
+   "values": {
+    "8192": 1,
+    "32768": 2
+   }
+  },
+  "members": {
+   "f_count": {
+    "path": ".f_count.counter"
+   },
+   "f_mode": {
+    "path": ".f_mode",
+    "mask": 103276575
+   },
+   "f_flags": {
+    "path": ".f_flags"
+   },
+   "f_pos": {
+    "path": ".f_pos"
+   },
+   "f_version": {
+    "path": ".f_version"
+   },
+   "f_owner.signum": {
+    "path": ".f_owner.signum"
+   },
+   "f_iocb_flags": {
+    "path": ".f_iocb_flags"
+   }
+  },
+  "related": {
+   "members": {
+    "inode_pool[].i_mode": {
+     "path": ".f_inode->i_mode",
+     "mask": 61440
+    },
+    "inode_pool[].append": {
+     "path": ".f_inode->i_flags",
+     "mask": 4,
+     "equals": 4
+    },
+    "inode_pool[].i_size": {
+     "path": ".f_inode->i_size"
+    },
+    "inode_pool[].i_flags": {
+     "path": ".f_inode->i_flags",
+     "mask": 5002
+    },
+    "inode_pool[].osrec_shmem.seals": {
+     "class": 2,
+     "path": ".f_inode-><shmem_inode_info.vfs_inode>.seals"
+    },
+    "inode_pool[].osrec_shmem.alloced": {
+     "class": 2,
+     "path": ".f_inode-><shmem_inode_info.vfs_inode>.alloced"
+    },
+    "inode_pool[].osrec_shmem.swapped": {
+     "class": 2,
+     "path": ".f_inode-><shmem_inode_info.vfs_inode>.swapped"
+    },
+    "inode_pool[].osrec_shmem.fallocend": {
+     "class": 2,
+     "path": ".f_inode-><shmem_inode_info.vfs_inode>.fallocend"
+    }
+   },
+   "links": [
+    {
+     "field": "file_pool[].f_path.dentry",
+     "target": "dentry_pool[]",
+     "path": ".f_path.dentry"
+    },
+    {
+     "field": "dentry_pool[].d_inode",
+     "target": "inode_pool[]",
+     "path": ".f_path.dentry->d_inode",
+     "same_as": ".f_inode"
+    },
+    {
+     "field": "inode_pool[].i_sb",
+     "target": "superblock"
+    }
+   ],
+   "preconditions": [
+    {
+     "class": 2,
+     "path": ".f_inode->i_sb->s_flags",
+     "mask": 310381569,
+     "equals": 276824064,
+     "reason": "shm superblock configuration, held by the model superblock: SB_NOSEC and SB_I_VERSION set; SB_RDONLY, SB_NOATIME, SB_NODIRATIME and SB_LAZYTIME clear"
+    },
+    {
+     "class": 2,
+     "path": ".f_inode->i_sb->s_maxbytes",
+     "equals": 9223372036854775807,
+     "reason": "shmem sets s_maxbytes to MAX_LFS_FILESIZE, the model superblock value"
+    },
+    {
+     "class": 2,
+     "path": ".f_path.mnt->mnt_flags",
+     "mask": 120,
+     "equals": 0,
+     "reason": "the internal shm mount has no MNT_NOATIME, MNT_NODIRATIME, MNT_RELATIME or MNT_READONLY, as in the model mount"
+    },
+    {
+     "class": 2,
+     "path": ".f_inode->i_sb->s_bdi->capabilities",
+     "mask": 1,
+     "equals": 0,
+     "reason": "tmpfs uses noop_backing_dev_info, without BDI_CAP_WRITEBACK, as in the model"
+    },
+    {
+     "class": 2,
+     "path": ".f_inode->i_sb->s_fsnotify_info",
+     "equals": 0,
+     "reason": "no fsnotify mark was ever added on the shm superblock; the model holds s_fsnotify_info NULL"
+    },
+    {
+     "class": 2,
+     "path": ".f_inode->i_mapping->nrpages",
+     "equals": 1,
+     "reason": "the model caches exactly one order-0 folio for the regular file"
+    },
+    {
+     "class": 2,
+     "path": ".f_inode->i_mapping->i_mmap_writable.counter",
+     "equals": 0,
+     "reason": "the file is not mmapped writable (no D-cache alias flush)"
+    },
+    {
+     "class": 2,
+     "path": ".f_inode->i_flctx",
+     "equals": 0,
+     "reason": "no lock or lease context on the inode (try_break_deleg is a no-op)"
+    },
+    {
+     "class": 2,
+     "path": ".f_inode->i_hash.pprev",
+     "equals": 0,
+     "reason": "shmem inodes are unhashed: __mark_inode_dirty leaves before any writeback list"
+    },
+    {
+     "class": 2,
+     "path": ".f_inode-><shmem_inode_info.vfs_inode>.flags",
+     "mask": 2097152,
+     "equals": 2097152,
+     "reason": "memfd inodes are VM_NORESERVE: shmem_reacct_size does no accounting"
+    }
+   ]
+  }
+ },
+ "file_data": {
+  "class": 2,
+  "size": ".f_inode->i_size",
+  "pages": ".f_inode->i_mapping->nrpages",
+  "head": ".f_inode->i_mapping->i_pages.xa_head",
+  "bytes": 64,
+  "vmemmap_start": 18446741873612554240,
+  "page_offset": 18446462598732840960,
+  "page_shift": 12,
+  "page_record": "page",
+  "size_field": "inode_pool[1].i_size"
+ },
+ "transient": {
+  "rcu_depth": 0,
+  "model_fault": 0,
+  "files.file_lock": 0,
+  "file_pool[0].f_lock": 0,
+  "file_pool[1].f_lock": 0,
+  "superblock.write_depth": 0
+ },
+ "user_objects": {
+  "buffer": {
+   "bytes": 32,
+   "object_id": 1,
+   "permissions": 3
+  }
+ },
+ "external": {
+  "descriptor_argument": 0,
+  "descriptor_numbers": [
+   62,
+   63,
+   64
+  ],
+  "classes": [
+   1
+  ],
+  "rule": "Calls without a slice root, or descriptor calls on an excluded object class (console I/O), are not executed by the slice. They are admitted in a chain only if every observable bound field is identical before and after the live call."
+ },
+ "review": "Field correspondence is reviewed; offsets come from the kernel's BTF. f_mode keeps only bits the retained code consumes (READ, WRITE, LSEEK, PREAD, PWRITE, UNSIGNED_OFFSET, PATH, STREAM, BACKING). f_owner.signum is the signal number F_GETSIG reads and F_SETSIG writes. Object class 1 is a character device (console), class 2 a regular shmem file. Page-cache bytes use the arm64 VA_BITS=48/4K vmemmap-to-linear-map relation and require one non-internal xarray head entry. Each live file's dentry and inode bind to the dentry_pool and inode_pool entries at the file's class index, as in the model's initial layout; the file's f_path.dentry->d_inode must be its f_inode. i_mode keeps only the file-type bits (the retained code tests S_ISREG); append is i_flags & S_APPEND (1 << 2). Every inode's i_sb is the one model superblock, whose only field is the transient freeze-protection depth (sb_start_write/sb_end_write balance within a call). files.count.counter is the number of tasks sharing the descriptor table; __fget_light borrows the file without a reference when it is 1. The original read/write entries consume FMODE_ATOMIC_POS, CAN_READ, CAN_WRITE, WRITER and NONOTIFY too, and f_iocb_flags (IOCB_APPEND and friends); task.ioac holds the CONFIG_TASK_XACCT read/write counters they update. The file size is inode_pool[1].i_size (i_size of the class-2 inode). i_flags keeps S_NOATIME, S_IMMUTABLE, S_NOCMTIME, S_SWAPFILE, S_PRIVATE and S_NOSEC (S_APPEND stays the append member). The shmem_inode_info fields are read through container_of from the inode (seals, alloced, swapped, fallocend); the superblock flags and s_maxbytes, its bdi capabilities and the mount flags are configuration the model superblock and mount hold, checked as class-2 preconditions rather than bound, so state discovery does not treat mount options as per-call unknowns. task.flags keeps only PF_KTHREAD, the bit access_ok reads. The credential identifiers are kuid_t/kgid_t values (creds.uid.val and so on). The user namespace's uid_map and gid_map are bound from the live namespace (the initial one: user_ns.initial is level == 0); the model holds up to UID_GID_MAP_MAX_BASE_EXTENTS extents and the checkpoint check rejects more. Timestamps, i_version, i_state, folio flags and the coarse clock are model state the binding does not observe.",
+ "preconditions": [
+  {
+   "path": ".signal->rlim[7].rlim_cur",
+   "equals": 8,
+   "reason": "the reviewed model returns rlimit(RLIMIT_NOFILE) as the constant 8 (f_dupfd and fd allocation bound new descriptors by it)"
+  },
+  {
+   "path": ".signal->rlim[1].rlim_cur",
+   "equals": 18446744073709551615,
+   "reason": "the reviewed model returns rlimit(RLIMIT_FSIZE) as RLIM_INFINITY"
+  }
+ ]
+}

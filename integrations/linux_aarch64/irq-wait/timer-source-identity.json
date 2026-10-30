@@ -1,0 +1,23 @@
+{
+  "release": "Linux v6.10",
+  "source": "kernel/time/hrtimer.c",
+  "source_url": "https://github.com/torvalds/linux/blob/v6.10/kernel/time/hrtimer.c#L1809",
+  "file": "timer_sleeper.c",
+  "excerpt_sha256": "5f092db6be12fd077e2be270d1ea69c8e4aab601b7fbc4d5f0145d0db265145f",
+  "extraction": "Selected complete definitions with internal comments omitted; declarations and statements unchanged",
+  "functions": [
+    {
+      "name": "hrtimer_sleeper_start_expires",
+      "source_line": 1809
+    },
+    {
+      "name": "__hrtimer_init_sleeper",
+      "source_line": 1824
+    },
+    {
+      "name": "hrtimer_init_sleeper",
+      "source_line": 1861
+    }
+  ],
+  "native_source_build_attested": false
+}

@@ -1,0 +1,130 @@
+{
+  "format": "osrec-slice-checkpoint-schema-v1",
+  "fields": {
+    "invocation": {
+      "type": "uint32_t",
+      "policy": "persist"
+    },
+    "cursor": {
+      "type": "uint32_t",
+      "policy": "persist"
+    },
+    "error": {
+      "type": "uint32_t",
+      "policy": "persist"
+    },
+    "path_allocated": {
+      "type": "uint32_t",
+      "policy": "persist"
+    },
+    "path_kind": {
+      "type": "uint32_t",
+      "policy": "persist"
+    },
+    "opens": {
+      "type": "uint32_t",
+      "policy": "persist"
+    },
+    "lock_depth": {
+      "type": "uint32_t",
+      "policy": "persist"
+    },
+    "range_checks": {
+      "type": "uint32_t",
+      "policy": "persist"
+    },
+    "errno_reads": {
+      "type": "uint32_t",
+      "policy": "persist"
+    },
+    "copies": {
+      "type": "uint32_t",
+      "policy": "persist"
+    },
+    "copy_bytes": {
+      "type": "uint32_t",
+      "policy": "persist"
+    },
+    "reads": {
+      "type": "uint32_t",
+      "policy": "persist"
+    },
+    "read_bytes": {
+      "type": "uint32_t",
+      "policy": "persist"
+    },
+    "writes": {
+      "type": "uint32_t",
+      "policy": "persist"
+    },
+    "write_bytes": {
+      "type": "uint32_t",
+      "policy": "persist"
+    },
+    "verified": {
+      "type": "uint32_t",
+      "policy": "persist"
+    },
+    "return_hash": {
+      "type": "uint32_t",
+      "policy": "persist"
+    },
+    "state": {
+      "type": "uint32_t[15]",
+      "policy": "persist"
+    },
+    "witness": {
+      "type": "unsigned char *",
+      "policy": "transient"
+    },
+    "content": {
+      "type": "unsigned char[8]",
+      "policy": "persist"
+    },
+    "length": {
+      "type": "unsigned int",
+      "policy": "persist"
+    },
+    "path_buffer": {
+      "type": "char[64]",
+      "policy": "persist"
+    },
+    "jump": {
+      "type": "struct osrec_slice_guard",
+      "policy": "transient"
+    },
+    "entry_path": {
+      "type": "const char *",
+      "policy": "transient"
+    },
+    "entry_path_kind": {
+      "type": "uint32_t",
+      "policy": "transient"
+    },
+    "arguments": {
+      "type": "uintptr_t[6]",
+      "policy": "transient"
+    },
+    "space": {
+      "type": "LosVmSpace",
+      "policy": "members",
+      "members": {
+        "regionMux": {
+          "type": "int",
+          "policy": "persist"
+        }
+      }
+    },
+    "process": {
+      "type": "FileProcess",
+      "policy": "members",
+      "members": {
+        "vmSpace": {
+          "type": "LosVmSpace *",
+          "policy": "self_reference",
+          "target": "space"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,96 @@
+#include "osrec_application.h"
+extern uint32_t app_words[8];
+extern uint64_t app_returns[];
+void osrec_application_main(void);
+static char output[65536];static size_t used;
+#ifdef OSREC_LINUX_SETGROUPS_PROFILE
+#define CAPTURE_EUID 0
+static const uint32_t *input_words;
+#else
+#define CAPTURE_EUID 1002
+#endif
+static void append(char c){if(used<sizeof(output))output[used++]=c;}
+static void string(const char *p){while(*p)append(*p++);}
+static void number(uint64_t n){char digits[20];unsigned i=0;do{digits[i++]=(char)('0'+n%10);n/=10;}while(n);while(i)append(digits[--i]);}
+static void scalar(uint64_t n){number(n);append(',');}
+static void flush(void)
+{
+    size_t sent=0;
+    while(sent<used){int64_t n=osrec_app_syscall(64,1,(uintptr_t)output+sent,used-sent,0,0,0);if(n<=0)return;sent+=(size_t)n;}
+    used=0;
+}
+static void halt(void){for(;;)__asm__ volatile("wfe");}
+static void fail(void){string("OSREC_LINUX_CAPTURE_FAILED\n");flush();halt();}
+void osrec_native_record(unsigned i,uint64_t syscall,const uint64_t *args)
+{
+    if(i)append(',');string("{\"number\":");number(syscall);string(",\"args\":[");
+    for(unsigned j=0;j<3;++j){if(j)append(',');uint64_t value=args[j];if(syscall==148 || syscall==150 || ((syscall==158 || syscall==159) && j==1))value=!value ? UINT64_MAX : value==1 ? UINT64_MAX-1 : value-(uintptr_t)app_words;number(value);}
+    string("],\"raw_bits\":");number(app_returns[i]);string(",\"words\":[");
+    for(unsigned j=0;j<8;++j){if(j)append(',');number(app_words[j]);}
+#ifdef OSREC_LINUX_SETGROUPS_PROFILE
+    string("],\"input_words\":[");for(unsigned j=0;j<8;++j){if(j)append(',');number(input_words[j]);}
+#endif
+    string("],\"umask_after\":");uint64_t mask=(uint64_t)osrec_app_syscall(166,022,0,0,0,0,0);number(mask);
+    osrec_app_syscall(166,mask,0,0,0,0,0);
+#ifdef OSREC_LINUX_CREDENTIAL_PROFILE
+    uint32_t gids[3];
+    if(osrec_app_syscall(150,(uintptr_t)&gids[0],(uintptr_t)&gids[1],(uintptr_t)&gids[2],0,0,0))fail();
+    string(",\"gids_after\":[");scalar(gids[0]);scalar(gids[1]);number(gids[2]);
+    string("],\"fsgid_after\":");number((uint64_t)osrec_app_syscall(152,UINT64_MAX,0,0,0,0,0));
+#ifdef OSREC_LINUX_GETGROUPS_PROFILE
+    uint32_t groups[4];int64_t count=osrec_app_syscall(158,4,(uintptr_t)groups,0,0,0,0);
+    if(count<0 || count>4)fail();
+    string(",\"groups_after\":[");for(int64_t j=0;j<count;++j){if(j)append(',');number(groups[j]);}append(']');
+#endif
+#endif
+    append('}');
+}
+#ifdef OSREC_LINUX_SETGROUPS_PROFILE
+void osrec_native_record_input(unsigned i,uint64_t syscall,const uint64_t *args,const uint32_t *before)
+{
+    input_words=before;osrec_native_record(i,syscall,args);input_words=0;
+}
+#endif
+void osrec_native_main(void)
+{
+#ifdef OSREC_LINUX_GETGROUPS_PROFILE
+    uint32_t seed_groups[3]={4007,4001,4003};
+    if(osrec_app_syscall(159,3,(uintptr_t)seed_groups,0,0,0,0))fail();
+    if(osrec_app_syscall(226,(uintptr_t)&app_words[8],4096,0,0,0,0))fail();
+#endif
+    /* Prepare one non-root identity with distinct real/effective/saved IDs.
+     * Saved UID zero allows this PID-1 capture process to regain reboot rights. */
+    if(osrec_app_syscall(149,2001,2002,2003,0,0,0) || osrec_app_syscall(147,1001,CAPTURE_EUID,0,0,0,0))fail();
+    osrec_app_syscall(166,022,0,0,0,0,0);
+    string("OSREC_LINUX_CAPTURE {");
+#ifdef OSREC_LINUX_CREDENTIAL_PROFILE
+#ifdef OSREC_LINUX_SETGROUPS_PROFILE
+    string("\"profile\":\"setgroups\",");
+#elif defined(OSREC_LINUX_GETGROUPS_PROFILE)
+    string("\"profile\":\"getgroups\",");
+#elif defined(OSREC_LINUX_GROUP_SETTERS_PROFILE)
+    string("\"profile\":\"group-setters\",");
+#elif defined(OSREC_LINUX_FSGID_PROFILE)
+    string("\"profile\":\"fsgid\",");
+#else
+    string("\"profile\":\"credentials\",");
+#endif
+#endif
+    string("\"initial\":{\"pid\":");number((uint64_t)osrec_app_syscall(178,0,0,0,0,0,0));
+    string(",\"tgid\":");number((uint64_t)osrec_app_syscall(172,0,0,0,0,0,0));
+    string(",\"ppid\":");number((uint64_t)osrec_app_syscall(173,0,0,0,0,0,0));
+    string(",\"uids\":[");scalar(1001);scalar(CAPTURE_EUID);number(0);
+    string("],\"gids\":[");scalar(2001);scalar(2002);number(2003);
+    append(']');
+#ifdef OSREC_LINUX_GETGROUPS_PROFILE
+    uint32_t initial_groups[4];int64_t count=osrec_app_syscall(158,4,(uintptr_t)initial_groups,0,0,0,0);
+    if(count<0 || count>4)fail();
+    string(",\"groups\":[");for(int64_t j=0;j<count;++j){if(j)append(',');number(initial_groups[j]);}append(']');
+#endif
+    string(",\"umask\":18},\"calls\":[");
+    osrec_application_main();string("]}\n");flush();
+    if(osrec_app_syscall(147,UINT64_MAX,0,UINT64_MAX,0,0,0))fail();
+    string("OSREC_LINUX_CAPTURE_DONE\n");flush();
+    osrec_app_syscall(142,UINT64_C(0xfee1dead),UINT64_C(0x28121969),UINT64_C(0x4321fedc),0,0,0);
+    halt();
+}

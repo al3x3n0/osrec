@@ -1,0 +1,14 @@
+{
+  "format": "osrec-slice-checkpoint-schema-v1",
+  "fields": {
+    "ledger": {
+      "type": "Ledger",
+      "policy": "members",
+      "members": {
+        "value": {"type": "uint64_t", "policy": "persist"},
+        "calls": {"type": "uint64_t", "policy": "persist"}
+      }
+    },
+    "alias": {"type": "Ledger *", "policy": "self_reference", "target": "ledger"}
+  }
+}

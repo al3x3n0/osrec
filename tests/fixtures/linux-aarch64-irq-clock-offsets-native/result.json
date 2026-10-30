@@ -1,0 +1,18 @@
+{
+  "task_state_capture": true,
+  "sleeper_state_capture": true,
+  "timer_state_capture": true,
+  "timer_return_capture": true,
+  "base_state_capture": true,
+  "outer_state_capture": true,
+  "clock_state_capture": true,
+  "clock_offsets_capture": true,
+  "pid": 1,
+  "tid": 1,
+  "syscall": 101,
+  "request_ns": 20000000,
+  "timer_slack_ns": 50000,
+  "raw": 0,
+  "before_ns": 5679320000,
+  "after_ns": 5713552000
+}

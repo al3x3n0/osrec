@@ -1,0 +1,39 @@
+# tracer: nop
+#
+# entries-in-buffer/entries-written: 26/26   #P:1
+#
+#                                _-----=> irqs-off/BH-disabled
+#                               / _----=> need-resched
+#                              | / _---=> hardirq/softirq
+#                              || / _--=> preempt-depth
+#                              ||| / _-=> migrate-disable
+#                              |||| /     delay
+#           TASK-PID     CPU#  |||||  TIMESTAMP  FUNCTION
+#              | |         |   |||||     |         |
+            init-1       [000] .....    12.404029: sys_nanosleep(rqtp: fffff0dee310, rmtp: 0)
+            init-1       [000] .....    12.408334: hrtimer_init: hrtimer=00000000110a2140 clockid=CLOCK_MONOTONIC mode=REL
+            init-1       [000] d....    12.408778: osrec_sleeper_entry: (do_nanosleep+0x0/0x158) object=0xffff000002e53d70 task=0xffff000002e38000
+            init-1       [000] d....    12.411555: hrtimer_start: hrtimer=00000000110a2140 function=hrtimer_wakeup expires=12430058000 softexpires=12430008000 mode=REL
+            init-1       [000] d.h..    12.411638: irq_handler_entry: irq=11 name=arch_timer
+            init-1       [000] dNh..    12.411730: irq_handler_exit: irq=11 ret=handled
+            init-1       [000] dN...    12.412742: osrec_task_dequeue: (dequeue_task_fair+0x0/0x360) task=0xffff000002e38000 pid=1 state=8193 saved=0 on_rq=0 on_cpu=1
+            init-1       [000] d....    12.412839: sched_switch: prev_comm=init prev_pid=1 prev_prio=120 prev_state=S ==> next_comm=rcuos/0 next_pid=18 next_prio=120
+         rcuos/0-18      [000] d....    12.414144: sched_switch: prev_comm=rcuos/0 prev_pid=18 prev_prio=120 prev_state=S ==> next_comm=swapper/0 next_pid=0 next_prio=120
+          <idle>-0       [000] d.h..    12.435514: irq_handler_entry: irq=11 name=arch_timer
+          <idle>-0       [000] d.h..    12.435888: hrtimer_cancel: hrtimer=00000000110a2140
+          <idle>-0       [000] d.h..    12.438030: hrtimer_expire_entry: hrtimer=00000000110a2140 function=hrtimer_wakeup now=12435544992
+          <idle>-0       [000] d.h..    12.438219: osrec_timer_callback: (hrtimer_wakeup+0x0/0x48) object=0xffff000002e53d70 base=0xffff00001fecc500 running=0xffff000002e53d70 state=0
+          <idle>-0       [000] d.h..    12.438301: osrec_sleeper_callback: (hrtimer_wakeup+0x0/0x48) object=0xffff000002e53d70 task=0xffff000002e38000
+          <idle>-0       [000] d.h..    12.438357: osrec_task_wake: (wake_up_process+0x0/0x38) task=0xffff000002e38000 pid=1 state=8193 saved=0 on_rq=0 on_cpu=0
+          <idle>-0       [000] d.h..    12.438378: sched_waking: comm=init pid=1 prio=120 target_cpu=000
+          <idle>-0       [000] d.h..    12.438418: osrec_task_activate: (activate_task+0x0/0x100) task=0xffff000002e38000 pid=1 state=512 saved=0 on_rq=0 on_cpu=0
+          <idle>-0       [000] d.h..    12.438477: osrec_task_preempt: (wakeup_preempt+0x0/0x98) task=0xffff000002e38000 pid=1 state=512 saved=0 on_rq=1 on_cpu=0
+          <idle>-0       [000] dNh..    12.438489: sched_wakeup: comm=init pid=1 prio=120 target_cpu=000
+          <idle>-0       [000] dNh..    12.438844: osrec_sleeper_callback_return: (__hrtimer_run_queues+0x13c/0x308 <- hrtimer_wakeup) object=0xffff000002e53d70 task=0x0 result=0
+          <idle>-0       [000] dNh..    12.439097: hrtimer_expire_exit: hrtimer=00000000110a2140
+          <idle>-0       [000] dNh..    12.439169: irq_handler_exit: irq=11 ret=handled
+          <idle>-0       [000] d....    12.439276: sched_switch: prev_comm=swapper/0 prev_pid=0 prev_prio=120 prev_state=R ==> next_comm=init next_pid=1 next_prio=120
+            init-1       [000] d....    12.439335: osrec_sleeper_return: (hrtimer_nanosleep+0xa0/0x120 <- do_nanosleep) object=0xffff000002e53d70 task=0x0 result=0
+            init-1       [000] d....    12.439343: osrec_timer_return: (hrtimer_nanosleep+0xa0/0x120 <- do_nanosleep) object=0xffff000002e53d70 base=0xffff00001fecc500 running=0x0 result=0
+            init-1       [000] .....    12.439397: sys_nanosleep -> 0x0
+

@@ -1,0 +1,9 @@
+p:osrec/osrec_task_dequeue dequeue_task_fair task=p:x64 pid=p->pid:s32 state=p->__state:u32 saved=p->saved_state:u32 on_rq=p->on_rq:u32 on_cpu=p->on_cpu:u32
+p:osrec/osrec_task_wake wake_up_process task=p:x64 pid=p->pid:s32 state=p->__state:u32 saved=p->saved_state:u32 on_rq=p->on_rq:u32 on_cpu=p->on_cpu:u32
+p:osrec/osrec_task_activate activate_task task=p:x64 pid=p->pid:s32 state=p->__state:u32 saved=p->saved_state:u32 on_rq=p->on_rq:u32 on_cpu=p->on_cpu:u32
+p:osrec/osrec_task_preempt wakeup_preempt task=p:x64 pid=p->pid:s32 state=p->__state:u32 saved=p->saved_state:u32 on_rq=p->on_rq:u32 on_cpu=p->on_cpu:u32
+p:osrec/osrec_sleeper_entry do_nanosleep object=t:x64 task=t->task:x64
+p:osrec/osrec_sleeper_callback hrtimer_wakeup object=$arg1:x64 task=+64($arg1):x64
+r8:osrec/osrec_sleeper_callback_return hrtimer_wakeup object=$arg1:x64 task=+64($arg1):x64 result=$retval:s32
+r8:osrec/osrec_sleeper_return do_nanosleep object=$arg1:x64 task=+64($arg1):x64 result=$retval:s32
+

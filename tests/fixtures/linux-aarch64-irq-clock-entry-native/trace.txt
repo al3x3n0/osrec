@@ -1,0 +1,51 @@
+# tracer: nop
+#
+# entries-in-buffer/entries-written: 38/38   #P:1
+#
+#                                _-----=> irqs-off/BH-disabled
+#                               / _----=> need-resched
+#                              | / _---=> hardirq/softirq
+#                              || / _--=> preempt-depth
+#                              ||| / _-=> migrate-disable
+#                              |||| /     delay
+#           TASK-PID     CPU#  |||||  TIMESTAMP  FUNCTION
+#              | |         |   |||||     |         |
+            init-1       [000] .....     4.537910: sys_nanosleep(rqtp: fffff5522a48, rmtp: 0)
+            init-1       [000] .....     4.538848: hrtimer_init: hrtimer=00000000320ff7f1 clockid=CLOCK_MONOTONIC mode=REL
+            init-1       [000] d....     4.539160: osrec_sleeper_entry: (do_nanosleep+0x0/0x158) object=0xffff000002e53d70 task=0xffff000002e38000
+            init-1       [000] d....     4.539430: hrtimer_start: hrtimer=00000000320ff7f1 function=hrtimer_wakeup expires=4559342000 softexpires=4559292000 mode=REL
+            init-1       [000] d.h..     4.539537: irq_handler_entry: irq=11 name=arch_timer
+            init-1       [000] d.h..     4.539614: osrec_clock_entry: (ktime_get_update_offsets_now+0x0/0x140) seq=0xffff00001fecc4cc real=0xffff00001fecc578 boot=0xffff00001fecc5b8 tai=0xffff00001fecc5f8 sequence=3 offs_real=1792437334052730000 offs_boot=0 offs_tai=1792437334052730000
+            init-1       [000] d.h..     4.539673: osrec_clock_return: (hrtimer_run_queues+0x78/0x128 <- ktime_get_update_offsets_now) seq=0xffff00001fecc4cc real=0xffff00001fecc578 boot=0xffff00001fecc5b8 tai=0xffff00001fecc5f8 sequence=3 offs_real=1792437334052730000 offs_boot=0 offs_tai=1792437334052730000 now=4539660000
+            init-1       [000] dNh..     4.539904: irq_handler_exit: irq=11 ret=handled
+            init-1       [000] dN...     4.539976: osrec_task_dequeue: (dequeue_task_fair+0x0/0x360) task=0xffff000002e38000 pid=1 state=8193 saved=0 on_rq=0 on_cpu=1
+            init-1       [000] d....     4.540041: sched_switch: prev_comm=init prev_pid=1 prev_prio=120 prev_state=S ==> next_comm=rcuos/0 next_pid=18 next_prio=120
+         rcuos/0-18      [000] d....     4.540247: sched_switch: prev_comm=rcuos/0 prev_pid=18 prev_prio=120 prev_state=S ==> next_comm=swapper/0 next_pid=0 next_prio=120
+          <idle>-0       [000] d.h..     4.540275: irq_handler_entry: irq=11 name=arch_timer
+          <idle>-0       [000] d.h..     4.540300: osrec_clock_entry: (ktime_get_update_offsets_now+0x0/0x140) seq=0xffff00001fecc4cc real=0xffff00001fecc578 boot=0xffff00001fecc5b8 tai=0xffff00001fecc5f8 sequence=3 offs_real=1792437334052730000 offs_boot=0 offs_tai=1792437334052730000
+          <idle>-0       [000] d.h..     4.540320: osrec_clock_return: (hrtimer_run_queues+0x78/0x128 <- ktime_get_update_offsets_now) seq=0xffff00001fecc4cc real=0xffff00001fecc578 boot=0xffff00001fecc5b8 tai=0xffff00001fecc5f8 sequence=3 offs_real=1792437334052730000 offs_boot=0 offs_tai=1792437334052730000 now=4540313008
+          <idle>-0       [000] d.h..     4.540354: irq_handler_exit: irq=11 ret=handled
+          <idle>-0       [000] d.h..     4.562294: irq_handler_entry: irq=11 name=arch_timer
+          <idle>-0       [000] d.h..     4.562348: osrec_clock_entry: (ktime_get_update_offsets_now+0x0/0x140) seq=0xffff00001fecc4cc real=0xffff00001fecc578 boot=0xffff00001fecc5b8 tai=0xffff00001fecc5f8 sequence=3 offs_real=1792437334052730000 offs_boot=0 offs_tai=1792437334052730000
+          <idle>-0       [000] d.h..     4.562400: osrec_clock_return: (hrtimer_run_queues+0x78/0x128 <- ktime_get_update_offsets_now) seq=0xffff00001fecc4cc real=0xffff00001fecc578 boot=0xffff00001fecc5b8 tai=0xffff00001fecc5f8 sequence=3 offs_real=1792437334052730000 offs_boot=0 offs_tai=1792437334052730000 now=4562390000
+          <idle>-0       [000] d.h..     4.562571: hrtimer_cancel: hrtimer=00000000320ff7f1
+          <idle>-0       [000] d.h..     4.562726: hrtimer_expire_entry: hrtimer=00000000320ff7f1 function=hrtimer_wakeup now=4562390000
+          <idle>-0       [000] d.h..     4.562856: osrec_offsets_callback: (hrtimer_wakeup+0x0/0x48) object=0xffff000002e53d70 cpu_base=0xffff00001fecc4c0 sequence=3 soft_real=1792437334052730000 soft_boot=0 soft_tai=1792437334052730000
+          <idle>-0       [000] d.h..     4.562908: osrec_outer_callback: (hrtimer_wakeup+0x0/0x48) object=0xffff000002e53d70 cpu_base=0xffff00001fecc4c0 deadline=9223372036854775807 activated=0
+          <idle>-0       [000] d.h..     4.562947: osrec_base_callback: (hrtimer_wakeup+0x0/0x48) object=0xffff000002e53d70 base=0xffff00001fecc500 cpu_base=0xffff00001fecc4c0 index=0 active=1
+          <idle>-0       [000] d.h..     4.562952: osrec_timer_callback: (hrtimer_wakeup+0x0/0x48) object=0xffff000002e53d70 base=0xffff00001fecc500 running=0xffff000002e53d70 state=0
+          <idle>-0       [000] d.h..     4.562978: osrec_sleeper_callback: (hrtimer_wakeup+0x0/0x48) object=0xffff000002e53d70 task=0xffff000002e38000
+          <idle>-0       [000] d.h..     4.563022: osrec_task_wake: (wake_up_process+0x0/0x38) task=0xffff000002e38000 pid=1 state=8193 saved=0 on_rq=0 on_cpu=0
+          <idle>-0       [000] d.h..     4.563039: sched_waking: comm=init pid=1 prio=120 target_cpu=000
+          <idle>-0       [000] d.h..     4.563077: osrec_task_activate: (activate_task+0x0/0x100) task=0xffff000002e38000 pid=1 state=512 saved=0 on_rq=0 on_cpu=0
+          <idle>-0       [000] d.h..     4.563134: osrec_task_preempt: (wakeup_preempt+0x0/0x98) task=0xffff000002e38000 pid=1 state=512 saved=0 on_rq=1 on_cpu=0
+          <idle>-0       [000] dNh..     4.563152: sched_wakeup: comm=init pid=1 prio=120 target_cpu=000
+          <idle>-0       [000] dNh..     4.563170: osrec_sleeper_callback_return: (__hrtimer_run_queues+0x13c/0x308 <- hrtimer_wakeup) object=0xffff000002e53d70 task=0x0 result=0
+          <idle>-0       [000] dNh..     4.563222: hrtimer_expire_exit: hrtimer=00000000320ff7f1
+          <idle>-0       [000] dNh..     4.563283: irq_handler_exit: irq=11 ret=handled
+          <idle>-0       [000] d....     4.563444: sched_switch: prev_comm=swapper/0 prev_pid=0 prev_prio=120 prev_state=R ==> next_comm=init next_pid=1 next_prio=120
+            init-1       [000] d....     4.563533: osrec_sleeper_return: (hrtimer_nanosleep+0xa0/0x120 <- do_nanosleep) object=0xffff000002e53d70 task=0x0 result=0
+            init-1       [000] d....     4.563545: osrec_timer_return: (hrtimer_nanosleep+0xa0/0x120 <- do_nanosleep) object=0xffff000002e53d70 base=0xffff00001fecc500 running=0x0 result=0
+            init-1       [000] d....     4.563550: osrec_base_return: (hrtimer_nanosleep+0xa0/0x120 <- do_nanosleep) object=0xffff000002e53d70 base=0xffff00001fecc500 cpu_base=0xffff00001fecc4c0 index=0 active=1 result=0
+            init-1       [000] .....     4.563625: sys_nanosleep -> 0x0
+

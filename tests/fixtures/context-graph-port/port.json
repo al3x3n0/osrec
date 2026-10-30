@@ -1,0 +1,51 @@
+{
+  "format": "osrec-kernel-slice-port-v1",
+  "name": "context-graph-fixture",
+  "target_isa": "aarch64",
+  "kernel_abi": "synthetic-aarch64-context-graph",
+  "argument_width": 64,
+  "roots": [
+    {
+      "number": 8589934694,
+      "function": "GraphStep",
+      "arguments": [
+        "unsigned",
+        "unsigned",
+        "buffer"
+      ]
+    }
+  ],
+  "application_abi": {
+    "format": "osrec-aarch64-syscall-registers-v1",
+    "number_register": 8,
+    "argument_registers": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "result_register": 0,
+    "continuation": "svc-pc-plus-4"
+  },
+  "bundle": {
+    "format": "osrec-kernel-slice-bundle-v1",
+    "adapter": "prepare.py",
+    "proofs": {
+      "session": {
+        "source": "proof.c",
+        "result_abi": 26
+      }
+    },
+    "inputs": {
+      "prepare.py": "514954bec5149ae58751a0ec60aafa2575599a93a153d4ba106144272b0b2948",
+      "graph_types.h": "055ce297ee2f07aec42ed13eaff5463ea77835b164867d19d70ee9573fc9ae54",
+      "kernel.c": "e5a9b1ba95ab76de0cb2594142c3b4d9497b79a3193f7fe90e42c55bde0ac9df",
+      "adapter.c": "b1e46e0ed66bef937b4b9f2289049b04fd2cc6daee29237b646ab73b1be148d0",
+      "checkpoint-policy.json": "3379aef489b6c017f90e71505459ce4daeb9a26c8b540fae93e25ba3fce5d9df",
+      "capture.json": "c9fd5a79aa8466e538c80d4d8919a0127344dab006c9fee9a26794d8efebf0eb",
+      "proof.c": "083b2f40a98b03ba0e637bf31faee6cb3410276b11e459d70c679432bd393784"
+    }
+  }
+}

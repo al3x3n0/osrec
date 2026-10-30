@@ -1,0 +1,14 @@
+{
+  "format": "osrec-entry-state-boundaries-v1",
+  "boundaries": {},
+  "argument_objects": {
+    "OsProcessIsPGroupLeader": {
+      "processCB": {
+        "kind": "object_argument",
+        "reason": "the capture adapter holds the scheduler lock and reads the live current process through a const view",
+        "implementation": "six explicit original helper calls before PID 1 umask calls; preserve the const argument signature",
+        "snapshot_safe": true
+      }
+    }
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "format": "osrec-kernel-slice-port-v1",
+  "name": "context-buffer-fixture",
+  "target_isa": "aarch64",
+  "kernel_abi": "synthetic-aarch64-context-buffers",
+  "argument_width": 64,
+  "roots": [
+    {
+      "number": 8589934711,
+      "function": "BufferStep",
+      "arguments": [
+        "unsigned",
+        "buffer"
+      ]
+    }
+  ],
+  "application_abi": {
+    "format": "osrec-aarch64-syscall-registers-v1",
+    "number_register": 8,
+    "argument_registers": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "result_register": 0,
+    "continuation": "svc-pc-plus-4"
+  },
+  "bundle": {
+    "format": "osrec-kernel-slice-bundle-v1",
+    "adapter": "prepare.py",
+    "proofs": {
+      "session": {
+        "source": "proof.c",
+        "result_abi": 26
+      }
+    },
+    "inputs": {
+      "prepare.py": "72db75dc518e4fb9a0bcfaba5387aa93b179f89f5b7b435bceedbd8158ce2e2f",
+      "buffer_types.h": "1b2dd855f9a3e8e66a0a38f6de64fa76cd11451d85b161a495036bd537c29160",
+      "kernel.c": "70c36a9e37ba36a0b7ff67ef408f1454f837b3697f3d0256ae037def30ac1a80",
+      "adapter.c": "f9a7f806ca33307b1f56466b1cd820650bf755ea67da0e621fce24bec4f77dc7",
+      "checkpoint-policy.json": "41f2d143e48fa5be7a2527a5437eee4cf5f354aaef1dfa81278ef3fb5c95374d",
+      "capture.json": "d6cc1317edfd69930e0c2d7f1618a3e887c915616373f2e4b6888b9f9f2fb7c9",
+      "proof.c": "e337045ac620780ff18ad8f9ac669002bd86c8398173c898eb3db05be4568d50",
+      "provider.c": "ad31daaafb5120cbe559d73fb51058fc722ef6e7cdf4e17d814aede306afa002"
+    }
+  }
+}

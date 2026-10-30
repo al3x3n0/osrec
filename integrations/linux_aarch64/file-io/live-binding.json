@@ -1,0 +1,69 @@
+{
+  "format": "osrec-live-kernel-binding-v1",
+  "profile": "file-io",
+  "schema": "checkpoint-policy.json",
+  "type_source": "embedded-btf",
+  "anchor": {"name": "current", "record": "task_struct"},
+  "kernel_config": {"CONFIG_ARM64_VA_BITS": "48", "CONFIG_PAGE_SHIFT": "12", "CONFIG_DEBUG_INFO_BTF": "y", "CONFIG_RANDOMIZE_BASE": null},
+  "scalars": {
+    "task.pid": {"path": ".pid"},
+    "task.tgid": {"path": ".tgid"},
+    "parent.pid": {"path": ".real_parent->pid"},
+    "parent.tgid": {"path": ".real_parent->tgid"},
+    "fs.umask": {"path": ".fs->umask"},
+    "creds.uid": {"path": ".cred->uid.val"},
+    "creds.euid": {"path": ".cred->euid.val"},
+    "creds.suid": {"path": ".cred->suid.val"},
+    "creds.gid": {"path": ".cred->gid.val"},
+    "creds.egid": {"path": ".cred->egid.val"},
+    "creds.sgid": {"path": ".cred->sgid.val"},
+    "user_ns.initial": {"path": ".cred->user_ns->level", "equals": 0},
+    "files.next_fd": {"path": ".files->next_fd"},
+    "files.resize_in_progress": {"path": ".files->resize_in_progress"},
+    "files.fdtab.max_fds": {"path": ".files->fdt->max_fds", "require": 64},
+    "files.fdtab.open_fds[0]": {"path": ".files->fdt->open_fds[0]"},
+    "files.fdtab.close_on_exec[0]": {"path": ".files->fdt->close_on_exec[0]"},
+    "files.fdtab.full_fds_bits[0]": {"path": ".files->fdt->full_fds_bits[0]"}
+  },
+  "embedded": [
+    {"pointer": ".files->fdt", "object": ".files->fdtab", "field": "files.fdt", "target": "files.fdtab"}
+  ],
+  "descriptors": {
+    "table": ".files->fdt->fd",
+    "count": ".files->fdt->max_fds",
+    "slots": "files.fdtab.fd",
+    "capacity": 64,
+    "pool": "file_pool",
+    "class": {"path": ".f_inode->i_mode", "mask": 61440, "values": {"8192": 1, "32768": 2}},
+    "members": {
+      "f_count": {"path": ".f_count.counter"},
+      "f_mode": {"path": ".f_mode", "mask": 35659783},
+      "f_flags": {"path": ".f_flags"},
+      "f_pos": {"path": ".f_pos"},
+      "f_version": {"path": ".f_version"}
+    }
+  },
+  "file_data": {
+    "class": 2,
+    "size": ".f_inode->i_size",
+    "pages": ".f_inode->i_mapping->nrpages",
+    "head": ".f_inode->i_mapping->i_pages.xa_head",
+    "bytes": 64,
+    "vmemmap_start": 18446741873612554240,
+    "page_offset": 18446462598732840960,
+    "page_shift": 12,
+    "page_record": "page"
+  },
+  "transient": {"rcu_depth": 0, "model_fault": 0, "files.file_lock": 0, "file_pool[0].f_lock": 0, "file_pool[1].f_lock": 0},
+  "user_objects": {"buffer": {"bytes": 32, "object_id": 1, "permissions": 3}},
+  "external": {
+    "descriptor_argument": 0,
+    "descriptor_numbers": [62, 63, 64],
+    "classes": [1],
+    "rule": "Calls without a slice root, or descriptor calls on an excluded object class (console I/O), are not executed by the slice. They are admitted in a chain only if every observable bound field is identical before and after the live call."
+  },
+  "review": "Field correspondence is reviewed; offsets come from the kernel's BTF. f_mode keeps only bits the retained code consumes (READ, WRITE, LSEEK, UNSIGNED_OFFSET, STREAM, BACKING). Object class 1 is a character device (console), class 2 a regular shmem file. Page-cache bytes use the arm64 VA_BITS=48/4K vmemmap-to-linear-map relation and require one non-internal xarray head entry.",
+  "preconditions": [
+    {"path": ".signal->rlim[7].rlim_cur", "equals": 8, "reason": "the reviewed model returns rlimit(RLIMIT_NOFILE) as the constant 8 (f_dupfd and fd allocation bound new descriptors by it)"}
+  ]
+}

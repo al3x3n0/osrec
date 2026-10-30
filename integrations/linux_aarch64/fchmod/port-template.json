@@ -1,0 +1,195 @@
+{
+  "format": "osrec-kernel-slice-port-v1",
+  "name": "linux-aarch64-fchmod",
+  "target_isa": "aarch64",
+  "kernel_abi": "linux-aarch64-lp64-initial-user-namespace-sequential",
+  "argument_width": 64,
+  "application_abi": {
+    "format": "osrec-aarch64-syscall-registers-v1",
+    "number_register": 8,
+    "argument_registers": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "result_register": 0,
+    "continuation": "svc-pc-plus-4"
+  },
+  "roots": [
+    {
+      "number": 166,
+      "function": "linux_umask",
+      "arguments": [
+        "signed"
+      ]
+    },
+    {
+      "number": 148,
+      "function": "linux_getresuid",
+      "arguments": [
+        "buffer",
+        "buffer",
+        "buffer"
+      ]
+    },
+    {
+      "number": 150,
+      "function": "linux_getresgid",
+      "arguments": [
+        "buffer",
+        "buffer",
+        "buffer"
+      ]
+    },
+    {
+      "number": 172,
+      "function": "linux_getpid",
+      "arguments": []
+    },
+    {
+      "number": 173,
+      "function": "linux_getppid",
+      "arguments": []
+    },
+    {
+      "number": 174,
+      "function": "linux_getuid",
+      "arguments": []
+    },
+    {
+      "number": 175,
+      "function": "linux_geteuid",
+      "arguments": []
+    },
+    {
+      "number": 176,
+      "function": "linux_getgid",
+      "arguments": []
+    },
+    {
+      "number": 177,
+      "function": "linux_getegid",
+      "arguments": []
+    },
+    {
+      "number": 178,
+      "function": "linux_gettid",
+      "arguments": []
+    },
+    {
+      "number": 23,
+      "function": "linux_dup",
+      "arguments": [
+        "unsigned"
+      ]
+    },
+    {
+      "number": 24,
+      "function": "linux_dup3",
+      "arguments": [
+        "unsigned",
+        "unsigned",
+        "signed"
+      ]
+    },
+    {
+      "number": 57,
+      "function": "linux_close",
+      "arguments": [
+        "unsigned"
+      ]
+    },
+    {
+      "number": 62,
+      "function": "linux_lseek",
+      "arguments": [
+        "unsigned",
+        "signed",
+        "unsigned"
+      ]
+    },
+    {
+      "number": 63,
+      "function": "linux_read",
+      "arguments": [
+        "unsigned",
+        "buffer",
+        "unsigned"
+      ]
+    },
+    {
+      "number": 64,
+      "function": "linux_write",
+      "arguments": [
+        "unsigned",
+        "buffer",
+        "unsigned"
+      ]
+    },
+    {
+      "number": 46,
+      "function": "linux_ftruncate",
+      "arguments": [
+        "unsigned",
+        "signed"
+      ]
+    },
+    {
+      "number": 67,
+      "function": "linux_pread64",
+      "arguments": [
+        "unsigned",
+        "buffer",
+        "unsigned",
+        "signed"
+      ]
+    },
+    {
+      "number": 68,
+      "function": "linux_pwrite64",
+      "arguments": [
+        "unsigned",
+        "buffer",
+        "unsigned",
+        "signed"
+      ]
+    },
+    {
+      "number": 25,
+      "function": "linux_fcntl",
+      "arguments": [
+        "unsigned",
+        "unsigned",
+        "unsigned"
+      ]
+    },
+    {
+      "number": 436,
+      "function": "linux_close_range",
+      "arguments": [
+        "unsigned",
+        "unsigned",
+        "unsigned"
+      ]
+    },
+    {
+      "number": 80,
+      "function": "linux_newfstat",
+      "arguments": [
+        "unsigned",
+        "buffer"
+      ]
+    },
+    {
+      "number": 52,
+      "function": "linux_fchmod",
+      "arguments": [
+        "unsigned",
+        "unsigned"
+      ]
+    }
+  ]
+}

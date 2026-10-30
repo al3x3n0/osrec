@@ -1,0 +1,169 @@
+{
+  "format": "osrec-live-helper-session-v1",
+  "calls": [
+    {
+      "root": "OsProcessExitCodeSignalSet",
+      "arguments": {
+        "signal": 1
+      }
+    },
+    {
+      "root": "OsProcessExitCodeSignalIsSet",
+      "arguments": {}
+    },
+    {
+      "root": "OsProcessExitCodeSignalSet",
+      "arguments": {
+        "signal": 2
+      }
+    },
+    {
+      "root": "OsProcessExitCodeSignalIsSet",
+      "arguments": {}
+    },
+    {
+      "root": "OsProcessExitCodeSignalSet",
+      "arguments": {
+        "signal": 128
+      }
+    },
+    {
+      "root": "OsProcessExitCodeSignalIsSet",
+      "arguments": {}
+    },
+    {
+      "root": "OsProcessExitCodeSignalSet",
+      "arguments": {
+        "signal": 4
+      }
+    },
+    {
+      "root": "OsProcessExitCodeSignalIsSet",
+      "arguments": {}
+    },
+    {
+      "root": "OsProcessExitCodeSignalSet",
+      "arguments": {
+        "signal": 2147483656
+      }
+    },
+    {
+      "root": "OsProcessExitCodeSignalIsSet",
+      "arguments": {}
+    },
+    {
+      "root": "OsProcessExitCodeSignalSet",
+      "arguments": {
+        "signal": 16
+      }
+    },
+    {
+      "root": "OsProcessExitCodeSignalIsSet",
+      "arguments": {}
+    },
+    {
+      "root": "OsProcessExitCodeSignalSet",
+      "arguments": {
+        "signal": 32
+      }
+    },
+    {
+      "root": "OsProcessExitCodeSignalIsSet",
+      "arguments": {}
+    },
+    {
+      "root": "OsProcessExitCodeSignalSet",
+      "arguments": {
+        "signal": 64
+      }
+    },
+    {
+      "root": "OsProcessExitCodeSignalIsSet",
+      "arguments": {}
+    },
+    {
+      "root": "OsProcessExitCodeSignalSet",
+      "arguments": {
+        "signal": 0
+      }
+    },
+    {
+      "root": "OsProcessExitCodeSignalIsSet",
+      "arguments": {}
+    },
+    {
+      "root": "OsProcessExitCodeSignalSet",
+      "arguments": {
+        "signal": 4294967295
+      }
+    },
+    {
+      "root": "OsProcessExitCodeSignalIsSet",
+      "arguments": {}
+    },
+    {
+      "root": "OsProcessExitCodeSignalSet",
+      "arguments": {
+        "signal": 3
+      }
+    },
+    {
+      "root": "OsProcessExitCodeSignalIsSet",
+      "arguments": {}
+    },
+    {
+      "root": "OsProcessExitCodeSignalSet",
+      "arguments": {
+        "signal": 2147483648
+      }
+    },
+    {
+      "root": "OsProcessExitCodeSignalIsSet",
+      "arguments": {}
+    },
+    {
+      "root": "OsProcessExitCodeSignalSet",
+      "arguments": {
+        "signal": 128
+      }
+    },
+    {
+      "root": "OsProcessExitCodeSignalIsSet",
+      "arguments": {}
+    },
+    {
+      "root": "OsProcessExitCodeSignalSet",
+      "arguments": {
+        "signal": 7
+      }
+    },
+    {
+      "root": "OsProcessExitCodeSignalIsSet",
+      "arguments": {}
+    },
+    {
+      "root": "OsProcessExitCodeSignalSet",
+      "arguments": {
+        "signal": 16
+      }
+    },
+    {
+      "root": "OsProcessExitCodeSignalIsSet",
+      "arguments": {}
+    },
+    {
+      "root": "OsProcessExitCodeSignalSet",
+      "arguments": {
+        "signal": 0
+      }
+    },
+    {
+      "root": "OsProcessExitCodeSignalIsSet",
+      "arguments": {}
+    },
+    {
+      "root": "OsProcessExitCodeSignalIsSet",
+      "arguments": {}
+    }
+  ]
+}

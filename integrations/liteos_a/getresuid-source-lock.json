@@ -1,0 +1,21 @@
+{
+  "revision": "4ac7f3aed67000b47bc14d6fe79d63ada708d780",
+  "source": "syscall/process_syscall.c",
+  "source_sha256": "36a5c34f9fd5c38e4f0011e4ae207e8b22c74ecffccdce8700470f53e1ace10d",
+  "functions": {
+    "SysGetRealEffSaveUserID": "89862e54953fe6fb03f355b77430aabadcafa1aaa56cff94ecf6c42e1debe232"
+  },
+  "headers": {
+    "kernel/base/include/los_process_pri.h": "6cb70287391cd820eba9d51c43958cac671679414fb870cb21f1713f515c467f",
+    "kernel/include/los_memory.h": "e9fe18965b911324620e78e4234f249d0e259ab7e4ba76bcb8c9bdebfc8087e5",
+    "security/cap/capability_type.h": "017f956d90de5894ac59f762e42e649b26a08d2b43413fdc55f2b5959b421e9f",
+    "syscall/syscall_lookup.h": "468a2f8c8ab28c8a78c988aed2a56ad4396cd5bb11287520e98e1661d65fea5e",
+    "arch/arm/include/user_copy.h": "6dc1d57a708a6bfc53765f507faec6976c33a83f32be4ee75aa30b68cacd77c8"
+  },
+  "contract": "Four original SysGetRealEffSaveUserID calls: all outputs valid, then NULL in each output position; scoped native real/effective UID fixture (default 6001/6002; v3 configured 32-bit IDs) restored outside each captured call; minimal User userID/effUserID and process-to-user edge; one stable 16-byte output witness; v1 separate offsets 0/4/8, v2/v3 three configured offsets 0..12 allowing aliases, overlaps and unaligned ranges; ordered four-byte copies retain earlier writes and stop at first NULL; capability enabled, no user containers",
+  "syscall": {
+    "number": 209,
+    "name": "getresuid"
+  },
+  "dependency_contract": "stable User userID/effUserID; scheduler lock; three ordered four-byte user copies with native NULL rejection; four-call shared output witness with source-checked configured geometry; v3 fixture IDs bind to capture build macros and generated fields"
+}

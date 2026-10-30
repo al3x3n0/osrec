@@ -1,0 +1,67 @@
+flowchart TD
+    legend["Solid arrows: data / execution flow<br/>Dashed arrows: workflow control"]
+    orchestrators["Select and run a replay workflow<br/>QEMU + Clang/LLVM: record a native scenario and build replay<br/>Native capture → port → slices → proof → test checkpoint chain<br/>Clang + local gateway + QMP: compile C and advance checkpoints<br/>C test frontend → import → shared stage engine<br/>ELF loader + state codec + QMP: import or continue saved execution<br/>Supplied ELF / checkpoint or --resume-checkpoint → shared stage engine"]
+    subgraph capture["1  NATIVE CAPTURE + KERNEL SLICES"]
+        linux["Linux AArch64 native capture<br/>QEMU AArch64: execute native SVC calls and record results<br/>Native kernel boot binary: ARM64 Image + config<br/>QEMU native SVC workload<br/>Capture calls, raw returns, copied bytes, observed umask"]
+        ohos["LiteOS-A test capture<br/>TESTING PURPOSES: pinned kernel validation fixture<br/>Kernel instrumentation + QEMU Cortex-A7: record syscall boundaries<br/>Build / boot real ARMv7 kernel in QEMU<br/>Instrumented syscall boundaries + independent user observations"]
+        port["Validate capture and prepare reviewed port<br/>Reviewed adapters + JSON policies + SHA-256 identity checks<br/>Linux external bundle or built-in OHOS file adapter<br/>Kernel C: selected syscall/helpers + reviewed model C<br/>port.json + checkpoint policy"]
+        context["Transform kernel state into per-session context<br/>Clang resolves declarations; OSREC rewrites kernel C<br/>Clang AST: mutable globals / local statics → context fields<br/>References become ctx-&gt;field; callers pass ctx<br/>Generate restoration helpers; ordinary locals stay on stack"]
+        codec["Generate portable kernel checkpoint codec<br/>Clang provides target layout; OSREC generates codec C<br/>Reviewed policy covers every context field<br/>Save scalar bytes and logical reference IDs / offsets<br/>Load: reconstruct seeds → overlay saved values → rebind pointers"]
+        archive["Build returning slices and proof image<br/>Clang cross-compiler + LLVM archive builder + LLD linker<br/>Clang / LLVM: AArch64 freestanding build + llvm-ar<br/>Kernel library: slices.a<br/>Kernel-slice proof: slices.elf / slices.bin + manifest.json"]
+        proof["Validate kernel proof image<br/>QEMU Cortex-A53: compare ELF/raw runs from EL1 and EL3<br/>QEMU: ELF / raw × EL1 / EL3<br/>Compare 128-byte results; retain verification-matrix.json"]
+    end
+    subgraph application["2  APPLICATION IMPORT + COMPOSITION"]
+        c["C application test frontend<br/>TESTING PURPOSES: generate controlled application fixtures<br/>Clang + LLD + LLVM symbols: compile and derive metadata<br/>Application C + spec.json → application.elf + checkpoint.json<br/>Derive entry / stack, SVC sites, exit boundary and assertions"]
+        user["Supplied application checkpoint<br/>Application ELF: static AArch64 user program<br/>Neutral user-state JSON<br/>CPU frame, memory overlays, objects, ordered SVC PCs"]
+        import["Validate and import application<br/>ELF segment loader + instruction audit: validate and patch routes<br/>Check ELF hash, PT_LOAD mapping, permissions and instructions<br/>Patch declared SVCs → BRKs; deduplicate repeated PCs<br/>Output application original.elf / patched.elf<br/>RAM payloads + route-plan.json"]
+        compose["Compose self-contained replay image<br/>Clang + LLD + LLVM utilities: link embedded code and state<br/>Embed application payloads, slices.a, loader, gateway, state<br/>Generated runtime C: loader / gateway / replay driver<br/>Combined replay: slices.elf / slices.bin (app + kernel slices)"]
+    end
+    subgraph guest["3  FREESTANDING REPLAY RUNTIME"]
+        restore["Restore application and kernel state<br/>AArch64 frame runtime: restore CPU registers and application RAM<br/>Restore GPR / SIMD / FP / thread pointer / RAM<br/>Initial kernel context or saved portable record"]
+        el0["Execute application at EL0<br/>Application prepares syscall arguments and consumes results<br/>Kernel state persists across sequential calls"]
+        gateway["Route declared syscall locally<br/>AArch64 BRK gateway: save the frame and dispatch calls<br/>BRK exception → save frame / validate expected route<br/>Linux: x8 number, x0–x5 arguments; port defines ABI"]
+        syscall["Execute selected original syscall body<br/>Returning slice/session runtime: execute code with reviewed models<br/>Reviewed dependency models + restored context<br/>Check supported arguments / ordered boundary events as contracted"]
+        return["Return to application<br/>Result in x0; restore application frame<br/>Resume at original SVC PC + 4"]
+        boundary["Declared pause or exit boundary<br/>Pause before next call at selected absolute ordinal<br/>Final exit checks kernel completion + application memory assertions"]
+    end
+    subgraph chain["4  CHECKPOINTS + VERIFICATION"]
+        freeze["Export joint checkpoint from stopped guest<br/>QMP memory observation + checkpoint validation: package stopped state<br/>QMP reads saved frame, RAM and kernel record externally<br/>Output kernel.bin + checkpoint.json + application/ + manifest.json<br/>Pin ordinal, completed-call history, generation and parent identity"]
+        resume["Compose fresh image / resume remaining interval<br/>Clang/LLD + state codec: compose and restore a fresh image<br/>Restore portable state; rebind context-owned references<br/>Alternate container addresses to exercise relocation<br/>Final suffix completes without another intermediate checkpoint"]
+        verify["Verify each stage and publish evidence<br/>QEMU execution matrix + artifact hashes: publish checked evidence<br/>ELF / raw × EL1 / EL3; resumed intervals execute twice<br/>Check result bytes, artifacts, state identity and checkpoint lineage<br/>Output stage-N/{image,qemu,checkpoint}, finish/, workflow.json"]
+        offline["Offline verification of retained package<br/>SHA-256 checks + route/lineage validation: verify retained evidence<br/>Recheck hashes, routes, ordinals, generations and saved evidence<br/>Original construction inputs are no longer required"]
+    end
+    linux -->|"Native capture JSON + provenance<br/>Calls / returns / bytes / initial state"| port
+    ohos -->|"Kernel + user observations<br/>Entry state + ordered dependency events"| port
+    port -->|"Kernel C sources + reviewed model headers<br/>Selected original bodies / reviewed dependencies"| context
+    context -->|"Rewritten kernel C + slice_context.h<br/>context-plan.json + reviewed field policy"| codec
+    codec -->|"Generated runtime C: slice_codec.c + schema<br/>Transformed closure / adapter / embedded capture"| archive
+    archive -->|"Kernel-slice proof ELF / raw + manifest.json<br/>Expected proof result / archive identity"| proof
+    c -->|"Application ELF: application.elf + checkpoint.json<br/>Derived CPU / memory / route metadata"| import
+    user -->|"Application ELF bytes + user-state JSON<br/>Saved frame / RAM overlays / SVC history"| import
+    proof -->|"Verified kernel package: slices.a<br/>Sources / initial state / codec / manifest"| compose
+    import -->|"Application ELF: original.elf + patched.elf<br/>RAM payloads / frame / route-plan.json"| compose
+    compose -->|"Combined replay ELF / raw image<br/>Application bytes / frame / initial kernel state"| restore
+    restore -->|"Restored PC / SP / GPR / SIMD / FP<br/>User RAM + thread pointer"| el0
+    el0 -->|"BRK trap + live application frame<br/>Syscall number / arguments / next ordinal"| gateway
+    gateway -->|"Validated syscall invocation<br/>Context pointer + arguments + user memory"| syscall
+    syscall -->|"Computed return value + updated state<br/>User-buffer writes / dependency progress"| return
+    return -->|"x0 result + restored frame<br/>PC = original SVC PC + 4; user writes retained"| el0
+    el0 -->|"Current CPU / RAM + syscall ordinal<br/>Pause route or declared exit PC"| boundary
+    boundary -->|"Paused frame + RAM + encoded kernel record<br/>External QMP dumps in pause-records/"| freeze
+    freeze -->|"Joint package: kernel.bin + application/<br/>checkpoint.json / manifest / generation / parent hash"| resume
+    resume -->|"Fresh image embedding joint snapshot<br/>Saved values / ordinal + rebound references"| restore
+    compose -->|"Image + manifest + expected results<br/>Combined replay ELF / raw + construction artifacts"| verify
+    resume -->|"Resumed image + input checkpoint identity<br/>Expected interval / state / assertions"| verify
+    boundary -->|"Final result block + assertion status<br/>Completion / model-transcript checks per port"| verify
+    verify -->|"workflow.json + matrix reports + hashes<br/>Images / result bytes / checkpoint lineage"| offline
+    orchestrators -.->|"Native capture or existing observations"| linux
+    orchestrators -.->|"Test application C, contract and pause positions"| c
+    orchestrators -.->|"Application ELF and saved user state<br/>or matching joint checkpoint"| user
+    cheatsheet["Quick reference<br/>Shared stage engine: Common host workflow for test-C and supplied-ELF inputs:<br/>build each image, verify it, save state and continue.<br/>QEMU: Emulates the target CPU and machine for native<br/>capture and functional replay validation.<br/>QMP: QEMU Machine Protocol: a host control channel used<br/>to inspect stopped guest memory for checkpoint export.<br/>Clang / AST: C compiler and typed Abstract Syntax Tree used to<br/>identify declarations, types and state references.<br/>LLVM / LLD: LLVM compiles code and supplies binary utilities.<br/>LLD links selected code and state into the executable.<br/>Context / codec: Context owns mutable session state. A codec saves<br/>selected values and rebuilds references during restore.<br/>ELF / PT_LOAD: Executable format and loadable segments describing<br/>addresses, file bytes and zero-filled memory extents.<br/>EL0 / EL1 / EL3: AArch64 privilege levels: app at EL0, gateway at EL1.<br/>Verification also tests a more privileged EL3 start.<br/>SVC / BRK: Native syscall instruction / local breakpoint trap.<br/>Declared SVC sites become BRKs routed by the gateway.<br/>Ordinal: Absolute completed-call count: identifies the next<br/>syscall and the position at which replay resumes."]
+
+    artifact_reference["C / ELF: which side?<br/>Kernel C: Selected original syscall/helper bodies plus<br/>reviewed dependency-model C; not the whole kernel.<br/>Application C: User-program source compiled into application.elf.<br/>Separate from kernel C and generated runtime C.<br/>Generated C: Replay support: context helpers, codecs, loaders<br/>and adapters; not original application/kernel source.<br/>Application ELF: User executable: application.elf or supplied ELF;<br/>import keeps original.elf and patches patched.elf.<br/>Proof / replay ELF: Proof: kernel slices + runtime + test driver.<br/>Replay: application payload + kernel slices + runtime.<br/>slices.elf name: Used in both proof and composed-image directories.<br/>Its role depends on the stage; neither is a full kernel.<br/>Testing purposes<br/>LiteOS / C frontend: LiteOS validates the kernel-port and replay path.<br/>The C frontend creates controlled application fixtures."]
+
+    style capture fill:#eff6ff,stroke:#2563eb,stroke-width:3px
+    style application fill:#f5f3ff,stroke:#7c3aed,stroke-width:3px
+    style guest fill:#f0fdf4,stroke:#16a34a,stroke-width:3px
+    style chain fill:#fffbeb,stroke:#d97706,stroke-width:3px

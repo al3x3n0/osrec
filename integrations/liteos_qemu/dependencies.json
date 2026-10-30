@@ -1,0 +1,65 @@
+{
+  "format": "osrec-liteos-qemu-dependencies-v1",
+  "repositories": [
+    {
+      "path": "kernel/liteos_a",
+      "repository": "https://github.com/openharmony/kernel_liteos_a.git",
+      "revision": "4ac7f3aed67000b47bc14d6fe79d63ada708d780"
+    },
+    {
+      "path": "device/qemu",
+      "repository": "https://github.com/openharmony/device_qemu.git",
+      "revision": "434e755fdb46ea93df016b56eb4f3033823d36d4"
+    },
+    {
+      "path": "vendor/ohemu",
+      "repository": "https://github.com/openharmony/vendor_ohemu.git",
+      "revision": "7e21e37d5310c0e45ab12548da8241fe8c536e30"
+    },
+    {
+      "path": "third_party/musl",
+      "repository": "https://github.com/openharmony/third_party_musl.git",
+      "revision": "07fa503bf652dcaad71e88c9c2bcb93bdc56efc2"
+    },
+    {
+      "path": "third_party/bounds_checking_function",
+      "repository": "https://github.com/openharmony/third_party_bounds_checking_function.git",
+      "revision": "61baa7a3eb9347efca58397d1d0504faa96d79f0"
+    },
+    {
+      "path": "drivers/hdf_core",
+      "repository": "https://github.com/openharmony/drivers_hdf_core.git",
+      "revision": "e14801f662a84540349248d843e7143dbb927b40"
+    },
+    {
+      "path": "drivers/liteos",
+      "repository": "https://github.com/openharmony/drivers_liteos.git",
+      "revision": "e57dd9259142f2375628c7024bfb97d428519b41"
+    },
+    {
+      "path": "third_party/optimized-routines",
+      "repository": "https://github.com/openharmony/third_party_optimized_routines.git",
+      "revision": "fb6dcfcddae60c4d7446609e6d250e2cbdeb6095"
+    },
+    {
+      "path": "third_party/NuttX",
+      "repository": "https://github.com/openharmony/third_party_NuttX.git",
+      "revision": "822a5bc4bba9cd645fd69c9a148180b832a0d86a"
+    },
+    {
+      "path": "third_party/FreeBSD",
+      "repository": "https://github.com/openharmony/third_party_FreeBSD.git",
+      "revision": "c1ebf8fdd7bd8009deb3b9a8d9a5f8e94084968d"
+    },
+    {
+      "path": "../kconfiglib",
+      "repository": "https://github.com/ulfalizer/Kconfiglib.git",
+      "revision": "061e71f7d78cb057762d88de088055361863deff"
+    },
+    {
+      "path": "../arm-compiler-rt",
+      "repository": "https://github.com/llvm/llvm-project.git",
+      "revision": "7cbf1a2591520c2491aa35339f227775f4d3adf6"
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "repository": "https://github.com/openharmony/kernel_liteos_a",
+  "revision": "4ac7f3aed67000b47bc14d6fe79d63ada708d780",
+  "source": "syscall/process_syscall.c",
+  "source_sha256": "36a5c34f9fd5c38e4f0011e4ae207e8b22c74ecffccdce8700470f53e1ace10d",
+  "functions": {
+    "SysGetUserID": {
+      "signature": "void",
+      "sha256": "4d20b7a3fcd1eb4169087c6e63cccfc1d1c85f00a80700f67d2915f485e5bf4f"
+    },
+    "SysGetGroupID": {
+      "signature": "void",
+      "sha256": "a5812a409eaf25eb6bbade4f369a3484a34592e0d54ed477f8c45074e5918b91"
+    },
+    "SysGetProcessGroupID": {
+      "signature": "unsigned int pid",
+      "sha256": "0386c22abf38d57297c16994b90417c8c0caf473a46bd974e00158f958b63d7f"
+    }
+  },
+  "headers": {
+    "syscall/syscall_lookup.h": "468a2f8c8ab28c8a78c988aed2a56ad4396cd5bb11287520e98e1661d65fea5e",
+    "kernel/include/los_process.h": "91ded6052ad7475e7ac6edf29f524b0321f179d4232506694bd6c42f84d2fe8d"
+  },
+  "syscalls": [
+    {
+      "number": 199,
+      "name": "getuid32",
+      "root": "SysGetUserID"
+    },
+    {
+      "number": 200,
+      "name": "getgid32",
+      "root": "SysGetGroupID"
+    },
+    {
+      "number": 65,
+      "name": "getpgrp",
+      "root": "SysGetProcessGroupID"
+    },
+    {
+      "number": 132,
+      "name": "getpgid",
+      "root": "SysGetProcessGroupID"
+    }
+  ],
+  "dependency_contract": "ordered scalar outcomes at LOS_GetCurrProcessID, LOS_GetUserID, LOS_GetGroupID and LOS_GetProcessGroupID; dependency internals are not replayed"
+}

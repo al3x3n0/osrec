@@ -1,0 +1,409 @@
+[    0.000000] Booting Linux on physical CPU 0x0000000000 [0x410fd034]
+[    0.000000] Linux version 6.10.14-linuxkit (root@buildkitsandbox) (gcc (Alpine 13.2.1_git20240309) 13.2.1 20240309, GNU ld (GNU Binutils) 2.42) #1 SMP Thu Oct 24 19:28:55 UTC 2024
+[    0.000000] random: crng init done
+[    0.000000] Machine model: linux,dummy-virt
+[    0.000000] Zone ranges:
+[    0.000000]   DMA      [mem 0x0000000040000000-0x000000005fffffff]
+[    0.000000]   DMA32    empty
+[    0.000000]   Normal   empty
+[    0.000000] Movable zone start for each node
+[    0.000000] Early memory node ranges
+[    0.000000]   node   0: [mem 0x0000000040000000-0x000000005fffffff]
+[    0.000000] Initmem setup node 0 [mem 0x0000000040000000-0x000000005fffffff]
+[    0.000000] psci: probing for conduit method from DT.
+[    0.000000] psci: PSCIv1.1 detected in firmware.
+[    0.000000] psci: Using standard PSCI v0.2 function IDs
+[    0.000000] psci: Trusted OS migration not required
+[    0.000000] psci: SMC Calling Convention v1.0
+[    0.000000] percpu: Embedded 34 pages/cpu s99240 r8192 d31832 u139264
+[    0.000000] Detected VIPT I-cache on CPU0
+[    0.000000] alternatives: applying boot alternatives
+[    0.000000] Kernel command line: console=ttyAMA0 root=/dev/vda rootfstype=ext4 ro rootwait init=/init panic=-1
+[    0.000000] Dentry cache hash table entries: 65536 (order: 7, 524288 bytes, linear)
+[    0.000000] Inode-cache hash table entries: 32768 (order: 6, 262144 bytes, linear)
+[    0.000000] Built 1 zonelists, mobility grouping on.  Total pages: 131072
+[    0.000000] mem auto-init: stack:all(zero), heap alloc:off, heap free:off
+[    0.000000] software IO TLB: SWIOTLB bounce buffer size adjusted to 0MB
+[    0.000000] software IO TLB: area num 1.
+[    0.000000] software IO TLB: mapped [mem 0x000000005f580000-0x000000005f600000] (0MB)
+[    0.000000] Memory: 472668K/524288K available (19136K kernel code, 2822K rwdata, 10692K rodata, 6336K init, 748K bss, 51620K reserved, 0K cma-reserved)
+[    0.000000] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=1, Nodes=1
+[    0.000000] ftrace: allocating 57269 entries in 224 pages
+[    0.000000] ftrace: allocated 224 pages with 3 groups
+[    0.000000] trace event string verifier disabled
+[    0.000000] rcu: Hierarchical RCU implementation.
+[    0.000000] rcu: 	RCU restricting CPUs from NR_CPUS=24 to nr_cpu_ids=1.
+[    0.000000] 	Rude variant of Tasks RCU enabled.
+[    0.000000] 	Tracing variant of Tasks RCU enabled.
+[    0.000000] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.000000] rcu: Adjusting geometry for rcu_fanout_leaf=16, nr_cpu_ids=1
+[    0.000000] RCU Tasks Rude: Setting shift to 0 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=1.
+[    0.000000] RCU Tasks Trace: Setting shift to 0 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=1.
+[    0.000000] NR_IRQS: 64, nr_irqs: 64, preallocated irqs: 0
+[    0.000000] Root IRQ handler: gic_handle_irq
+[    0.000000] GICv2m: range[mem 0x08020000-0x08020fff], SPI[80:143]
+[    0.000000] rcu: 	Offload RCU callbacks from CPUs: 0.
+[    0.000000] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    0.000000] arch_timer: cp15 timer(s) running at 62.50MHz (virt).
+[    0.000000] clocksource: arch_sys_counter: mask: 0x1ffffffffffffff max_cycles: 0x1cd42e208c, max_idle_ns: 881590405314 ns
+[    0.000075] sched_clock: 57 bits at 63MHz, resolution 16ns, wraps every 4398046511096ns
+[    0.415268] Console: colour dummy device 80x25
+[    0.464554] Calibrating delay loop (skipped), value calculated using timer frequency.. 125.00 BogoMIPS (lpj=62500)
+[    0.464814] pid_max: default: 32768 minimum: 301
+[    0.466052] LSM: initializing lsm=capability,bpf
+[    0.473746] LSM support for eBPF active
+[    0.476712] Mount-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    0.476868] Mountpoint-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    1.830682] cacheinfo: Unable to detect cache hierarchy for CPU 0
+[    2.379666] rcu: Hierarchical SRCU implementation.
+[    2.379758] rcu: 	Max phase no-delay instances is 400.
+[    2.481926] smp: Bringing up secondary CPUs ...
+[    2.482144] smp: Brought up 1 node, 1 CPU
+[    2.482184] SMP: Total of 1 processors activated.
+[    2.482209] CPU: All CPU(s) started at EL1
+[    2.482350] CPU features: detected: 32-bit EL0 Support
+[    2.482418] CPU features: detected: CRC32 instructions
+[    2.892026] alternatives: applying system-wide alternatives
+[    3.972484] devtmpfs: initialized
+[    5.070667] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1911260446275000 ns
+[    5.071225] futex hash table entries: 256 (order: 2, 16384 bytes, linear)
+[    5.072548] 22784 pages in range for non-PLT usage
+[    5.072593] 514304 pages in range for PLT usage
+[    5.662231] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    5.878813] DMA: preallocated 128 KiB GFP_KERNEL pool for atomic allocations
+[    5.902358] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA pool for atomic allocations
+[    5.902565] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA32 pool for atomic allocations
+[    5.956781] audit: initializing netlink subsys (disabled)
+[    6.039667] audit: type=2000 audit(0.241:1): state=initialized audit_enabled=0 res=1
+[    6.099971] cpuidle: using governor menu
+[    6.520790] hw-breakpoint: found 6 breakpoint and 4 watchpoint registers.
+[    6.598795] ASID allocator initialised with 65536 entries
+[    6.770123] Serial: AMBA PL011 UART driver
+[    7.994087] 9000000.pl011: ttyAMA0 at MMIO 0x9000000 (irq = 13, base_baud = 0) is a PL011 rev1
+[    8.117858] printk: legacy console [ttyAMA0] enabled
+[   10.320861] HugeTLB: registered 1.00 GiB page size, pre-allocated 0 pages
+[   10.322207] HugeTLB: 0 KiB vmemmap can be freed for a 1.00 GiB page
+[   10.322647] HugeTLB: registered 32.0 MiB page size, pre-allocated 0 pages
+[   10.322957] HugeTLB: 0 KiB vmemmap can be freed for a 32.0 MiB page
+[   10.323246] HugeTLB: registered 2.00 MiB page size, pre-allocated 0 pages
+[   10.323556] HugeTLB: 0 KiB vmemmap can be freed for a 2.00 MiB page
+[   10.323842] HugeTLB: registered 64.0 KiB page size, pre-allocated 0 pages
+[   10.328618] HugeTLB: 0 KiB vmemmap can be freed for a 64.0 KiB page
+[   11.634208] raid6: skipped pq benchmark and selected neonx8
+[   11.634824] raid6: using neon recovery algorithm
+[   11.680649] SCSI subsystem initialized
+[   11.683602] usbcore: registered new interface driver usbfs
+[   11.685354] usbcore: registered new interface driver hub
+[   11.686454] usbcore: registered new device driver usb
+[   11.687665] pps_core: LinuxPPS API ver. 1 registered
+[   11.687876] pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+[   12.744404] vgaarb: loaded
+[   12.973980] clocksource: Switched to clocksource arch_sys_counter
+[   13.177333] VFS: Disk quotas dquot_6.6.0
+[   13.182837] VFS: Dquot-cache hash table entries: 512 (order 0, 4096 bytes)
+[   13.184980] netfs: FS-Cache loaded
+[   13.328367] CacheFiles: Loaded
+[   16.581408] NET: Registered PF_INET protocol family
+[   16.818938] IP idents hash table entries: 8192 (order: 4, 65536 bytes, linear)
+[   23.408685] tcp_listen_portaddr_hash hash table entries: 256 (order: 0, 4096 bytes, linear)
+[   23.415741] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[   23.416489] TCP established hash table entries: 4096 (order: 3, 32768 bytes, linear)
+[   23.421326] TCP bind hash table entries: 4096 (order: 5, 131072 bytes, linear)
+[   23.747233] TCP: Hash tables configured (established 4096 bind 4096)
+[   23.880517] UDP hash table entries: 256 (order: 1, 8192 bytes, linear)
+[   23.898927] UDP-Lite hash table entries: 256 (order: 1, 8192 bytes, linear)
+[   23.901642] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[   24.131808] RPC: Registered named UNIX socket transport module.
+[   24.132546] RPC: Registered udp transport module.
+[   24.225652] RPC: Registered tcp transport module.
+[   24.226294] RPC: Registered tcp-with-tls transport module.
+[   24.226782] RPC: Registered tcp NFSv4.1 backchannel transport module.
+[   24.279888] NET: Registered PF_XDP protocol family
+[   24.307440] PCI: CLS 0 bytes, default 64
+[   25.222999] workingset: timestamp_bits=46 max_order=17 bucket_order=0
+[   25.230615] zbud: loaded
+[   25.321028] squashfs: version 4.0 (2009/01/31) Phillip Lougher
+[   25.345222] NFS: Registering the id_resolver key type
+[   25.346571] Key type id_resolver registered
+[   25.346781] Key type id_legacy registered
+[   25.347198] nfs4filelayout_init: NFSv4 File Layout Driver Registering...
+[   25.592825] nfs4flexfilelayout_init: NFSv4 Flexfile Layout Driver Registering...
+[   27.779761] Key type cifs.idmap registered
+[   27.980278] fuse: init (API version 7.40)
+[   28.208541] SGI XFS with security attributes, no debug enabled
+[   30.199694] 9p: Installing v9fs 9p2000 file system support
+[   34.301334] NET: Registered PF_ALG protocol family
+[   34.487240] xor: measuring software checksum speed
+[   34.624102]    8regs           :    24 MB/sec
+[   34.628234]    32regs          :  1526 MB/sec
+[   34.994063]    arm64_neon      :     8 MB/sec
+[   34.994459] xor: using function: 32regs (1526 MB/sec)
+[   34.995489] Key type asymmetric registered
+[   35.007068] Asymmetric key parser 'x509' registered
+[   35.009186] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 251)
+[   35.110777] io scheduler mq-deadline registered
+[   35.367153] io scheduler kyber registered
+[   36.098617] pl061_gpio 9030000.pl061: PL061 GPIO chip registered
+[   36.351056] pci-host-generic 4010000000.pcie: host bridge /pcie@10000000 ranges:
+[   36.352348] pci-host-generic 4010000000.pcie:       IO 0x003eff0000..0x003effffff -> 0x0000000000
+[   36.353243] pci-host-generic 4010000000.pcie:      MEM 0x0010000000..0x003efeffff -> 0x0010000000
+[   36.546355] pci-host-generic 4010000000.pcie:      MEM 0x8000000000..0xffffffffff -> 0x8000000000
+[   36.620022] pci-host-generic 4010000000.pcie: Memory resource size exceeds max for 32 bits
+[   36.715269] pci-host-generic 4010000000.pcie: ECAM at [mem 0x4010000000-0x401fffffff] for [bus 00-ff]
+[   36.790768] pci-host-generic 4010000000.pcie: PCI host bridge to bus 0000:00
+[   36.815405] pci_bus 0000:00: root bus resource [bus 00-ff]
+[   36.834155] pci_bus 0000:00: root bus resource [io  0x0000-0xffff]
+[   36.834724] pci_bus 0000:00: root bus resource [mem 0x10000000-0x3efeffff]
+[   36.878656] pci_bus 0000:00: root bus resource [mem 0x8000000000-0xffffffffff]
+[   37.284158] pci 0000:00:00.0: [1b36:0008] type 00 class 0x060000 conventional PCI endpoint
+[   39.456062] Serial: 8250/16550 driver, 4 ports, IRQ sharing enabled
+[   41.327920] brd: module loaded
+[   43.502628] loop: module loaded
+[   47.032577] virtio_blk virtio0: 1/0/0 default/read/poll queues
+[   47.907892] virtio_blk virtio0: [vda] 4096 512-byte logical blocks (2.10 MB/2.00 MiB)
+[   50.576374] wireguard: WireGuard 1.0.0 loaded. See www.wireguard.com for information.
+[   50.605957] wireguard: Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
+[   50.718567] tun: Universal TUN/TAP device driver, 1.6
+[   51.578309] PPP generic driver version 2.4.2
+[   51.584533] PPP BSD Compression module registered
+[   51.585732] PPP Deflate Compression module registered
+[   51.595491] PPP MPPE Compression module registered
+[   51.596995] NET: Registered PF_PPPOX protocol family
+[   51.771839] PPTP driver version 0.8.5
+[   52.338525] usbcore: registered new interface driver cdc_acm
+[   52.338949] cdc_acm: USB Abstract Control Model driver for USB modems and ISDN adapters
+[   52.339366] usbcore: registered new interface driver usblp
+[   52.339658] usbcore: registered new interface driver cdc_wdm
+[   52.339981] usbcore: registered new interface driver usbtmc
+[   52.647133] usbcore: registered new interface driver uas
+[   52.695583] usbcore: registered new interface driver usb-storage
+[   52.723097] usbcore: registered new interface driver ums-alauda
+[   52.946034] usbcore: registered new interface driver ums-cypress
+[   52.946791] usbcore: registered new interface driver ums-datafab
+[   52.947091] usbcore: registered new interface driver ums_eneub6250
+[   52.947326] usbcore: registered new interface driver ums-freecom
+[   52.947559] usbcore: registered new interface driver ums-isd200
+[   52.947771] usbcore: registered new interface driver ums-jumpshot
+[   52.948000] usbcore: registered new interface driver ums-karma
+[   52.948206] usbcore: registered new interface driver ums-onetouch
+[   52.948419] usbcore: registered new interface driver ums-realtek
+[   52.948638] usbcore: registered new interface driver ums-sddr09
+[   52.948851] usbcore: registered new interface driver ums-sddr55
+[   52.949055] usbcore: registered new interface driver ums-usbat
+[   52.949762] usbcore: registered new interface driver usbserial_generic
+[   53.019986] usbserial: USB Serial support registered for generic
+[   53.020548] usbcore: registered new interface driver aircable
+[   53.141080] usbserial: USB Serial support registered for aircable
+[   53.141732] usbcore: registered new interface driver ark3116
+[   53.142070] usbserial: USB Serial support registered for ark3116
+[   53.142395] usbcore: registered new interface driver belkin_sa
+[   53.166141] usbserial: USB Serial support registered for Belkin / Peracom / GoHubs USB Serial Adapter
+[   53.166931] usbcore: registered new interface driver ch341
+[   53.167385] usbserial: USB Serial support registered for ch341-uart
+[   53.167826] usbcore: registered new interface driver cp210x
+[   53.168195] usbserial: USB Serial support registered for cp210x
+[   53.198077] usbcore: registered new interface driver cyberjack
+[   53.233918] usbserial: USB Serial support registered for Reiner SCT Cyberjack USB card reader
+[   53.259066] usbcore: registered new interface driver cypress_m8
+[   53.309823] usbserial: USB Serial support registered for DeLorme Earthmate USB
+[   53.310426] usbserial: USB Serial support registered for HID->COM RS232 Adapter
+[   53.320694] usbserial: USB Serial support registered for Nokia CA-42 V2 Adapter
+[   53.363640] usbcore: registered new interface driver usb_debug
+[   53.382122] usbserial: USB Serial support registered for debug
+[   53.382617] usbserial: USB Serial support registered for xhci_dbc
+[   53.383452] usbcore: registered new interface driver digi_acceleport
+[   53.403858] usbserial: USB Serial support registered for Digi 2 port USB adapter
+[   53.404186] usbserial: USB Serial support registered for Digi 4 port USB adapter
+[   53.469467] usbcore: registered new interface driver io_edgeport
+[   53.518153] usbserial: USB Serial support registered for Edgeport 2 port adapter
+[   53.569156] usbserial: USB Serial support registered for Edgeport 4 port adapter
+[   53.569693] usbserial: USB Serial support registered for Edgeport 8 port adapter
+[   53.570058] usbserial: USB Serial support registered for EPiC device
+[   53.585462] usbcore: registered new interface driver io_ti
+[   53.585977] usbserial: USB Serial support registered for Edgeport TI 1 port adapter
+[   53.586388] usbserial: USB Serial support registered for Edgeport TI 2 port adapter
+[   53.591212] usbcore: registered new interface driver empeg
+[   53.591825] usbserial: USB Serial support registered for empeg
+[   53.592321] usbcore: registered new interface driver f81534a_ctrl
+[   53.592731] usbcore: registered new interface driver f81232
+[   53.602742] usbserial: USB Serial support registered for f81232
+[   53.618024] usbserial: USB Serial support registered for f81534a
+[   53.618731] usbcore: registered new interface driver f81534
+[   53.788606] usbserial: USB Serial support registered for Fintek F81532/F81534
+[   53.877236] usbcore: registered new interface driver ftdi_sio
+[   53.899552] usbserial: USB Serial support registered for FTDI USB Serial Device
+[   53.937220] usbcore: registered new interface driver garmin_gps
+[   53.987806] usbserial: USB Serial support registered for Garmin GPS usb/tty
+[   54.053544] usbcore: registered new interface driver ipaq
+[   54.054059] usbserial: USB Serial support registered for PocketPC PDA
+[   54.055036] usbcore: registered new interface driver ipw
+[   54.055563] usbserial: USB Serial support registered for IPWireless converter
+[   54.056387] usbcore: registered new interface driver ir_usb
+[   54.056606] usbserial: USB Serial support registered for IR Dongle
+[   54.125881] usbcore: registered new interface driver iuu_phoenix
+[   54.142250] usbserial: USB Serial support registered for iuu_phoenix
+[   54.185003] usbcore: registered new interface driver keyspan
+[   54.191784] usbserial: USB Serial support registered for Keyspan - (without firmware)
+[   54.192179] usbserial: USB Serial support registered for Keyspan 1 port adapter
+[   54.192443] usbserial: USB Serial support registered for Keyspan 2 port adapter
+[   54.192720] usbserial: USB Serial support registered for Keyspan 4 port adapter
+[   54.193061] usbcore: registered new interface driver keyspan_pda
+[   54.199762] usbserial: USB Serial support registered for Keyspan PDA
+[   54.200074] usbserial: USB Serial support registered for Keyspan PDA - (prerenumeration)
+[   54.200447] usbcore: registered new interface driver kl5kusb105
+[   54.200724] usbserial: USB Serial support registered for KL5KUSB105D / PalmConnect
+[   54.201040] usbcore: registered new interface driver kobil_sct
+[   54.201241] usbserial: USB Serial support registered for KOBIL USB smart card terminal
+[   54.201507] usbcore: registered new interface driver mct_u232
+[   54.201967] usbserial: USB Serial support registered for MCT U232
+[   54.202631] usbcore: registered new interface driver metro_usb
+[   54.230248] usbserial: USB Serial support registered for Metrologic USB to Serial
+[   54.230657] usbcore: registered new interface driver mos7720
+[   54.230872] usbserial: USB Serial support registered for Moschip 2 port adapter
+[   54.336520] usbcore: registered new interface driver mos7840
+[   54.337091] usbserial: USB Serial support registered for Moschip 7840/7820 USB Serial Driver
+[   54.337865] usbcore: registered new interface driver mxuport
+[   54.338142] usbserial: USB Serial support registered for MOXA UPort
+[   54.338435] usbcore: registered new interface driver navman
+[   54.338650] usbserial: USB Serial support registered for navman
+[   54.338894] usbcore: registered new interface driver omninet
+[   54.339108] usbserial: USB Serial support registered for ZyXEL - omni.net usb
+[   54.339391] usbcore: registered new interface driver opticon
+[   54.339603] usbserial: USB Serial support registered for opticon
+[   54.339838] usbcore: registered new interface driver option
+[   54.340044] usbserial: USB Serial support registered for GSM modem (1-port)
+[   54.340334] usbcore: registered new interface driver oti6858
+[   54.340866] usbserial: USB Serial support registered for oti6858
+[   54.364396] usbcore: registered new interface driver pl2303
+[   54.382069] usbserial: USB Serial support registered for pl2303
+[   54.414892] usbcore: registered new interface driver qcaux
+[   54.415359] usbserial: USB Serial support registered for qcaux
+[   54.415782] usbcore: registered new interface driver qcserial
+[   54.416121] usbserial: USB Serial support registered for Qualcomm USB modem
+[   54.416597] usbcore: registered new interface driver quatech2
+[   54.466014] usbserial: USB Serial support registered for Quatech 2nd gen USB to Serial Driver
+[   54.573033] usbcore: registered new interface driver safe_serial
+[   54.581240] usbserial: USB Serial support registered for safe_serial
+[   54.598325] usbcore: registered new interface driver sierra
+[   54.598785] usbserial: USB Serial support registered for Sierra USB modem
+[   54.599282] usbcore: registered new interface driver usb_serial_simple
+[   54.646742] usbserial: USB Serial support registered for carelink
+[   54.647305] usbserial: USB Serial support registered for flashloader
+[   54.648085] usbserial: USB Serial support registered for funsoft
+[   54.649430] usbserial: USB Serial support registered for google
+[   54.650272] usbserial: USB Serial support registered for hp4x
+[   54.650834] usbserial: USB Serial support registered for kaufmann
+[   54.693879] usbserial: USB Serial support registered for libtransistor
+[   54.694322] usbserial: USB Serial support registered for moto_modem
+[   54.694673] usbserial: USB Serial support registered for motorola_tetra
+[   54.716221] usbserial: USB Serial support registered for nokia
+[   54.716730] usbserial: USB Serial support registered for novatel_gps
+[   54.717141] usbserial: USB Serial support registered for siemens_mpi
+[   54.717531] usbserial: USB Serial support registered for suunto
+[   54.717950] usbserial: USB Serial support registered for vivopay
+[   54.718315] usbserial: USB Serial support registered for zio
+[   54.718799] usbcore: registered new interface driver spcp8x5
+[   54.719137] usbserial: USB Serial support registered for SPCP8x5
+[   54.719539] usbcore: registered new interface driver ssu100
+[   54.719875] usbserial: USB Serial support registered for Quatech SSU-100 USB to Serial Driver
+[   54.720394] usbcore: registered new interface driver symbolserial
+[   54.720788] usbserial: USB Serial support registered for symbol
+[   54.721204] usbcore: registered new interface driver ti_usb_3410_5052
+[   54.721598] usbserial: USB Serial support registered for TI USB 3410 1 port adapter
+[   54.722057] usbserial: USB Serial support registered for TI USB 5052 2 port adapter
+[   54.743055] usbcore: registered new interface driver upd78f0730
+[   54.743613] usbserial: USB Serial support registered for upd78f0730
+[   54.744154] usbcore: registered new interface driver visor
+[   54.744519] usbserial: USB Serial support registered for Handspring Visor / Palm OS
+[   54.744996] usbserial: USB Serial support registered for Sony Clie 5.0
+[   54.802504] usbserial: USB Serial support registered for Sony Clie 3.5
+[   55.027696] usbcore: registered new interface driver wishbone_serial
+[   55.028203] usbserial: USB Serial support registered for wishbone_serial
+[   55.060126] usbcore: registered new interface driver whiteheat
+[   55.075691] usbserial: USB Serial support registered for Connect Tech - WhiteHEAT - (prerenumeration)
+[   55.100979] usbserial: USB Serial support registered for Connect Tech - WhiteHEAT
+[   55.102329] usbcore: registered new interface driver xr_serial
+[   55.248762] usbserial: USB Serial support registered for xr_serial
+[   55.257491] usbcore: registered new interface driver xsens_mt
+[   55.263374] usbserial: USB Serial support registered for xsens_mt
+[   55.714455] vhci_hcd vhci_hcd.0: USB/IP Virtual Host Controller
+[   55.724874] vhci_hcd vhci_hcd.0: new USB bus registered, assigned bus number 1
+[   55.849324] vhci_hcd: created sysfs vhci_hcd.0
+[   56.265651] usb usb1: New USB device found, idVendor=1d6b, idProduct=0002, bcdDevice= 6.10
+[   56.271841] usb usb1: New USB device strings: Mfr=3, Product=2, SerialNumber=1
+[   56.272322] usb usb1: Product: USB/IP Virtual Host Controller
+[   56.275259] usb usb1: Manufacturer: Linux 6.10.14-linuxkit vhci_hcd
+[   56.284412] usb usb1: SerialNumber: vhci_hcd.0
+[   56.553913] hub 1-0:1.0: USB hub found
+[   56.860459] hub 1-0:1.0: 8 ports detected
+[   57.469757] vhci_hcd vhci_hcd.0: USB/IP Virtual Host Controller
+[   58.258170] vhci_hcd vhci_hcd.0: new USB bus registered, assigned bus number 2
+[   58.296585] usb usb2: We don't know the algorithms for LPM for this host, disabling LPM.
+[   58.368111] usb usb2: New USB device found, idVendor=1d6b, idProduct=0003, bcdDevice= 6.10
+[   58.368643] usb usb2: New USB device strings: Mfr=3, Product=2, SerialNumber=1
+[   58.368993] usb usb2: Product: USB/IP Virtual Host Controller
+[   58.472580] usb usb2: Manufacturer: Linux 6.10.14-linuxkit vhci_hcd
+[   58.498716] usb usb2: SerialNumber: vhci_hcd.0
+[   58.708317] hub 2-0:1.0: USB hub found
+[   58.709878] hub 2-0:1.0: 8 ports detected
+[   61.524629] mousedev: PS/2 mouse device common for all mice
+[   61.582653] rtc-pl031 9010000.pl031: registered as rtc0
+[   61.586000] rtc-pl031 9010000.pl031: setting system clock to 2026-10-14T16:16:28 UTC (1791994588)
+[   61.588199] i2c_dev: i2c /dev entries driver
+[   61.687927] device-mapper: ioctl: 4.48.0-ioctl (2023-03-01) initialised: dm-devel@lists.linux.dev
+[   61.690216] usbcore: registered new interface driver usbhid
+[   61.690549] usbhid: USB HID core driver
+[   62.369954] hw perfevents: enabled with armv8_pmuv3 PMU driver, 7 counters available
+[   62.594959] GACT probability on
+[   62.595456] Mirror/redirect action on
+[   62.595925] Simple TC action Loaded
+[   62.901618] netem: version 1.3
+[   62.911953] u32 classifier
+[   62.912326]     Performance counters on
+[   62.912599]     input device check on
+[   62.923970]     Actions configured
+[   63.203195] xt_time: kernel timezone is -0000
+[   63.204425] IPVS: Registered protocols (TCP, UDP)
+[   63.231702] IPVS: Connection hash table configured (size=4096, memory=32Kbytes)
+[   63.384264] IPVS: ipvs loaded.
+[   63.453773] IPVS: [rr] scheduler registered.
+[   63.454157] IPVS: [wrr] scheduler registered.
+[   63.467037] IPVS: [sh] scheduler registered.
+[   63.533677] ipip: IPv4 and MPLS over IPv4 tunneling driver
+[   63.572333] gre: GRE over IPv4 demultiplexor driver
+[   63.581564] ip_gre: GRE over IPv4 tunneling driver
+[   63.615387] IPv4 over IPsec tunneling driver
+[   64.183941] Initializing XFRM netlink socket
+[   64.185330] NET: Registered PF_INET6 protocol family
+[   65.410856] Segment Routing with IPv6
+[   65.422247] In-situ OAM (IOAM) with IPv6
+[   65.440597] mip6: Mobile IPv6
+[   65.786440] sit: IPv6, IPv4 and MPLS over IPv4 tunneling driver
+[   65.864284] ip6_gre: GRE over IPv6 tunneling driver
+[   66.033651] NET: Registered PF_PACKET protocol family
+[   66.035175] NET: Registered PF_KEY protocol family
+[   66.036454] Bridge firewalling registered
+[   66.053876] l2tp_core: L2TP core driver, V2.0
+[   66.095107] l2tp_ppp: PPPoL2TP kernel driver, V2.0
+[   66.104906] 8021q: 802.1Q VLAN Support v1.8
+[   66.105789] sctp: Hash tables configured (bind 256/256)
+[   66.108183] 9pnet: Installing 9P2000 support
+[   66.120868] Key type dns_resolver registered
+[   66.121301] openvswitch: Open vSwitch switching datapath
+[   66.769039] NET: Registered PF_VSOCK protocol family
+[   66.769925] mpls_gso: MPLS GSO support
+[   67.534256] registered taskstats version 1
+[   68.807575] Key type .fscrypt registered
+[   68.809858] Key type fscrypt-provisioning registered
+[   69.375300] Btrfs loaded, zoned=no, fsverity=no
+[   69.433299] Key type encrypted registered
+[   69.821903] gtp: GTP module loaded (pdp ctx size 128 bytes)
+[  107.467878] clk: Disabling unused clocks
+[  108.746791] EXT4-fs (vda): mounted filesystem 6f737265-632d-6c69-6e75-782d726f6f74 ro without journal. Quota mode: none.
+[  108.959038] VFS: Mounted root (ext4 filesystem) readonly on device 254:0.
+[  108.977605] devtmpfs: mounted
+[  110.390545] Freeing unused kernel memory: 6336K
+[  110.504177] Run /init as init process
+OSREC_LINUX_CAPTURE {"profile":"fd-dup","initial":{"pid":1,"tgid":1,"ppid":0,"uids":[1001,1002,0],"gids":[2001,2002,2003],"nofile_limit":[8,8],"file_flags":[2,131072],"fds":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]],"umask":18},"calls":[{"number":172,"args":[0,0,0],"raw_bits":1,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":178,"args":[0,0,0],"raw_bits":1,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":173,"args":[0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":174,"args":[0,0,0],"raw_bits":1001,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":175,"args":[0,0,0],"raw_bits":1002,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":176,"args":[0,0,0],"raw_bits":2001,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":177,"args":[0,0,0],"raw_bits":2002,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":166,"args":[63,0,0],"raw_bits":18,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":63,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":148,"args":[4,8,12],"raw_bits":0,"words":[2779054080,1001,1002,0,2779054084,2779054085,2779054086,2779054087],"umask_after":63,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":166,"args":[4294967807,0,0],"raw_bits":63,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":511,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":150,"args":[4,8,12],"raw_bits":0,"words":[2779054080,2001,2002,2003,2779054084,2779054085,2779054086,2779054087],"umask_after":511,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":148,"args":[4,18446744073709551615,12],"raw_bits":18446744073709551602,"words":[2779054080,1001,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":511,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":166,"args":[18446744073709551615,0,0],"raw_bits":511,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":511,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":150,"args":[18446744073709551615,8,12],"raw_bits":18446744073709551602,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":511,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":166,"args":[2,0,0],"raw_bits":511,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":2,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":148,"args":[4,4,4],"raw_bits":0,"words":[2779054080,0,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":2,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":150,"args":[4,8,18446744073709551614],"raw_bits":18446744073709551602,"words":[2779054080,2001,2002,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":2,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":172,"args":[0,0,0],"raw_bits":1,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":2,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":166,"args":[18,0,0],"raw_bits":2,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":178,"args":[0,0,0],"raw_bits":1,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":23,"args":[7,0,0],"raw_bits":18446744073709551607,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":23,"args":[18446744073709551615,0,0],"raw_bits":18446744073709551607,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":24,"args":[3,3,0],"raw_bits":18446744073709551594,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":24,"args":[7,7,0],"raw_bits":18446744073709551594,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":24,"args":[7,4,1],"raw_bits":18446744073709551594,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":24,"args":[3,8,0],"raw_bits":18446744073709551607,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":24,"args":[3,18446744073709551615,0],"raw_bits":18446744073709551607,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":24,"args":[7,4,0],"raw_bits":18446744073709551607,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":57,"args":[7,0,0],"raw_bits":18446744073709551607,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":57,"args":[18446744073709551615,0,0],"raw_bits":18446744073709551607,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[0,0],[0,0],[0,0]]},{"number":23,"args":[3,0,0],"raw_bits":4,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[2,0],[0,0],[0,0],[0,0]]},{"number":24,"args":[3,6,524288],"raw_bits":6,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[2,0],[0,0],[2,1],[0,0]]},{"number":23,"args":[4,0,0],"raw_bits":5,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[2,0],[2,0],[2,1],[0,0]]},{"number":23,"args":[6,0,0],"raw_bits":7,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[2,0],[2,0],[2,1],[2,0]]},{"number":23,"args":[3,0,0],"raw_bits":18446744073709551592,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[2,0],[2,0],[2,1],[2,0]]},{"number":23,"args":[8,0,0],"raw_bits":18446744073709551607,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[2,0],[2,0],[2,1],[2,0]]},{"number":24,"args":[3,6,0],"raw_bits":6,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[2,0],[2,0],[2,0],[2,0]]},{"number":24,"args":[4,5,524288],"raw_bits":5,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[2,0],[2,1],[2,0],[2,0]]},{"number":57,"args":[5,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[2,0],[0,0],[2,0],[2,0]]},{"number":23,"args":[6,0,0],"raw_bits":5,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[2,0],[2,0],[2,0],[2,0]]},{"number":57,"args":[4,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[2,0],[2,0],[2,0]]},{"number":24,"args":[1,5,524288],"raw_bits":5,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[0,0],[1,1],[2,0],[2,0]]},{"number":23,"args":[1,0,0],"raw_bits":4,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[1,0],[1,1],[2,0],[2,0]]},{"number":24,"args":[3,4,0],"raw_bits":4,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[2,0],[1,1],[2,0],[2,0]]},{"number":24,"args":[6,5,524288],"raw_bits":5,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,1],[2,0],[2,1],[2,0],[2,0]]},{"number":57,"args":[3,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[0,0],[2,0],[2,1],[2,0],[2,0]]},{"number":23,"args":[3,0,0],"raw_bits":18446744073709551607,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[0,0],[2,0],[2,1],[2,0],[2,0]]},{"number":23,"args":[6,0,0],"raw_bits":3,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,0],[2,0],[2,1],[2,0],[2,0]]},{"number":57,"args":[5,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,0],[2,0],[0,0],[2,0],[2,0]]},{"number":24,"args":[3,5,2],"raw_bits":18446744073709551594,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,0],[2,0],[0,0],[2,0],[2,0]]},{"number":24,"args":[4294967299,4294967301,4295491584],"raw_bits":5,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,0],[2,0],[2,1],[2,0],[2,0]]},{"number":57,"args":[4294967301,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,0],[2,0],[0,0],[2,0],[2,0]]},{"number":23,"args":[4294967299,0,0],"raw_bits":5,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,0],[2,0],[2,0],[2,0],[2,0]]},{"number":24,"args":[3,5,4294967296],"raw_bits":5,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,0],[2,0],[2,0],[2,0],[2,0]]},{"number":24,"args":[3,5,4294967295],"raw_bits":18446744073709551594,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,0],[2,0],[2,0],[2,0],[2,0]]},{"number":57,"args":[7,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,0],[2,0],[2,0],[2,0],[0,0]]},{"number":24,"args":[4,7,524288],"raw_bits":7,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,0],[2,0],[2,0],[2,0],[2,1]]},{"number":23,"args":[3,0,0],"raw_bits":18446744073709551592,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,0],[2,0],[2,0],[2,0],[2,1]]},{"number":57,"args":[4,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,0],[0,0],[2,0],[2,0],[2,1]]},{"number":23,"args":[0,0,0],"raw_bits":4,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,0],[1,0],[2,0],[2,0],[2,1]]},{"number":57,"args":[4,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,0],[0,0],[2,0],[2,0],[2,1]]},{"number":23,"args":[6,0,0],"raw_bits":4,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[2,0],[2,0],[2,0],[2,0],[2,1]]},{"number":57,"args":[3,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[0,0],[2,0],[2,0],[2,0],[2,1]]},{"number":57,"args":[4,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[0,0],[0,0],[2,0],[2,0],[2,1]]},{"number":57,"args":[5,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[0,0],[0,0],[0,0],[2,0],[2,1]]},{"number":57,"args":[6,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[0,0],[0,0],[0,0],[0,0],[2,1]]},{"number":57,"args":[7,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[0,0],[0,0],[0,0],[0,0],[0,0]]},{"number":23,"args":[6,0,0],"raw_bits":18446744073709551607,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[0,0],[0,0],[0,0],[0,0],[0,0]]},{"number":23,"args":[2,0,0],"raw_bits":3,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[1,0],[0,0],[0,0],[0,0],[0,0]]},{"number":24,"args":[0,7,524288],"raw_bits":7,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[1,0],[0,0],[0,0],[0,0],[1,1]]},{"number":57,"args":[3,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[0,0],[0,0],[0,0],[0,0],[1,1]]},{"number":57,"args":[7,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[0,0],[0,0],[0,0],[0,0],[0,0]]},{"number":24,"args":[3,3,0],"raw_bits":18446744073709551594,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"fds_after":[[1,0],[1,0],[1,0],[0,0],[0,0],[0,0],[0,0],[0,0]]}]}
+OSREC_LINUX_CAPTURE_DONE
+[  113.674992] reboot: Power down

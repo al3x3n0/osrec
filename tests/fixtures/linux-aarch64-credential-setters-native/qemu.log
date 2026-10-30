@@ -1,0 +1,409 @@
+[    0.000000] Booting Linux on physical CPU 0x0000000000 [0x410fd034]
+[    0.000000] Linux version 6.10.14-linuxkit (root@buildkitsandbox) (gcc (Alpine 13.2.1_git20240309) 13.2.1 20240309, GNU ld (GNU Binutils) 2.42) #1 SMP Thu Oct 24 19:28:55 UTC 2024
+[    0.000000] random: crng init done
+[    0.000000] Machine model: linux,dummy-virt
+[    0.000000] Zone ranges:
+[    0.000000]   DMA      [mem 0x0000000040000000-0x000000005fffffff]
+[    0.000000]   DMA32    empty
+[    0.000000]   Normal   empty
+[    0.000000] Movable zone start for each node
+[    0.000000] Early memory node ranges
+[    0.000000]   node   0: [mem 0x0000000040000000-0x000000005fffffff]
+[    0.000000] Initmem setup node 0 [mem 0x0000000040000000-0x000000005fffffff]
+[    0.000000] psci: probing for conduit method from DT.
+[    0.000000] psci: PSCIv1.1 detected in firmware.
+[    0.000000] psci: Using standard PSCI v0.2 function IDs
+[    0.000000] psci: Trusted OS migration not required
+[    0.000000] psci: SMC Calling Convention v1.0
+[    0.000000] percpu: Embedded 34 pages/cpu s99240 r8192 d31832 u139264
+[    0.000000] Detected VIPT I-cache on CPU0
+[    0.000000] alternatives: applying boot alternatives
+[    0.000000] Kernel command line: console=ttyAMA0 root=/dev/vda rootfstype=ext4 ro rootwait init=/init panic=-1
+[    0.000000] Dentry cache hash table entries: 65536 (order: 7, 524288 bytes, linear)
+[    0.000000] Inode-cache hash table entries: 32768 (order: 6, 262144 bytes, linear)
+[    0.000000] Built 1 zonelists, mobility grouping on.  Total pages: 131072
+[    0.000000] mem auto-init: stack:all(zero), heap alloc:off, heap free:off
+[    0.000000] software IO TLB: SWIOTLB bounce buffer size adjusted to 0MB
+[    0.000000] software IO TLB: area num 1.
+[    0.000000] software IO TLB: mapped [mem 0x000000005f580000-0x000000005f600000] (0MB)
+[    0.000000] Memory: 472668K/524288K available (19136K kernel code, 2822K rwdata, 10692K rodata, 6336K init, 748K bss, 51620K reserved, 0K cma-reserved)
+[    0.000000] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=1, Nodes=1
+[    0.000000] ftrace: allocating 57269 entries in 224 pages
+[    0.000000] ftrace: allocated 224 pages with 3 groups
+[    0.000000] trace event string verifier disabled
+[    0.000000] rcu: Hierarchical RCU implementation.
+[    0.000000] rcu: 	RCU restricting CPUs from NR_CPUS=24 to nr_cpu_ids=1.
+[    0.000000] 	Rude variant of Tasks RCU enabled.
+[    0.000000] 	Tracing variant of Tasks RCU enabled.
+[    0.000000] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.000000] rcu: Adjusting geometry for rcu_fanout_leaf=16, nr_cpu_ids=1
+[    0.000000] RCU Tasks Rude: Setting shift to 0 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=1.
+[    0.000000] RCU Tasks Trace: Setting shift to 0 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=1.
+[    0.000000] NR_IRQS: 64, nr_irqs: 64, preallocated irqs: 0
+[    0.000000] Root IRQ handler: gic_handle_irq
+[    0.000000] GICv2m: range[mem 0x08020000-0x08020fff], SPI[80:143]
+[    0.000000] rcu: 	Offload RCU callbacks from CPUs: 0.
+[    0.000000] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    0.000000] arch_timer: cp15 timer(s) running at 62.50MHz (virt).
+[    0.000000] clocksource: arch_sys_counter: mask: 0x1ffffffffffffff max_cycles: 0x1cd42e208c, max_idle_ns: 881590405314 ns
+[    0.000083] sched_clock: 57 bits at 63MHz, resolution 16ns, wraps every 4398046511096ns
+[    0.065125] Console: colour dummy device 80x25
+[    0.078976] Calibrating delay loop (skipped), value calculated using timer frequency.. 125.00 BogoMIPS (lpj=62500)
+[    0.079342] pid_max: default: 32768 minimum: 301
+[    0.085265] LSM: initializing lsm=capability,bpf
+[    0.085767] LSM support for eBPF active
+[    0.087684] Mount-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    0.087738] Mountpoint-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    0.971029] cacheinfo: Unable to detect cache hierarchy for CPU 0
+[    2.040293] rcu: Hierarchical SRCU implementation.
+[    2.042358] rcu: 	Max phase no-delay instances is 400.
+[    2.546190] smp: Bringing up secondary CPUs ...
+[    2.546446] smp: Brought up 1 node, 1 CPU
+[    2.546494] SMP: Total of 1 processors activated.
+[    2.546523] CPU: All CPU(s) started at EL1
+[    2.546656] CPU features: detected: 32-bit EL0 Support
+[    2.546744] CPU features: detected: CRC32 instructions
+[    2.866875] alternatives: applying system-wide alternatives
+[    4.202984] devtmpfs: initialized
+[    5.001421] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1911260446275000 ns
+[    5.002667] futex hash table entries: 256 (order: 2, 16384 bytes, linear)
+[    5.141934] 22784 pages in range for non-PLT usage
+[    5.142064] 514304 pages in range for PLT usage
+[    5.241254] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    5.320290] DMA: preallocated 128 KiB GFP_KERNEL pool for atomic allocations
+[    5.320728] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA pool for atomic allocations
+[    5.320836] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA32 pool for atomic allocations
+[    5.321259] audit: initializing netlink subsys (disabled)
+[    5.534407] audit: type=2000 audit(0.222:1): state=initialized audit_enabled=0 res=1
+[    5.544835] cpuidle: using governor menu
+[    5.555302] hw-breakpoint: found 6 breakpoint and 4 watchpoint registers.
+[    5.564337] ASID allocator initialised with 65536 entries
+[    5.565448] Serial: AMBA PL011 UART driver
+[    7.746413] 9000000.pl011: ttyAMA0 at MMIO 0x9000000 (irq = 13, base_baud = 0) is a PL011 rev1
+[    7.749435] printk: legacy console [ttyAMA0] enabled
+[    9.604629] HugeTLB: registered 1.00 GiB page size, pre-allocated 0 pages
+[    9.604937] HugeTLB: 0 KiB vmemmap can be freed for a 1.00 GiB page
+[    9.605192] HugeTLB: registered 32.0 MiB page size, pre-allocated 0 pages
+[    9.605417] HugeTLB: 0 KiB vmemmap can be freed for a 32.0 MiB page
+[    9.605619] HugeTLB: registered 2.00 MiB page size, pre-allocated 0 pages
+[    9.637506] HugeTLB: 0 KiB vmemmap can be freed for a 2.00 MiB page
+[    9.706496] HugeTLB: registered 64.0 KiB page size, pre-allocated 0 pages
+[    9.706762] HugeTLB: 0 KiB vmemmap can be freed for a 64.0 KiB page
+[   10.312206] raid6: skipped pq benchmark and selected neonx8
+[   10.312763] raid6: using neon recovery algorithm
+[   10.324971] SCSI subsystem initialized
+[   10.549105] usbcore: registered new interface driver usbfs
+[   10.558714] usbcore: registered new interface driver hub
+[   10.559304] usbcore: registered new device driver usb
+[   10.560141] pps_core: LinuxPPS API ver. 1 registered
+[   10.616514] pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+[   10.958210] vgaarb: loaded
+[   10.969653] clocksource: Switched to clocksource arch_sys_counter
+[   11.000244] VFS: Disk quotas dquot_6.6.0
+[   11.001243] VFS: Dquot-cache hash table entries: 512 (order 0, 4096 bytes)
+[   11.004326] netfs: FS-Cache loaded
+[   11.366524] CacheFiles: Loaded
+[   16.677754] NET: Registered PF_INET protocol family
+[   17.009251] IP idents hash table entries: 8192 (order: 4, 65536 bytes, linear)
+[   22.796242] tcp_listen_portaddr_hash hash table entries: 256 (order: 0, 4096 bytes, linear)
+[   22.804336] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[   22.927513] TCP established hash table entries: 4096 (order: 3, 32768 bytes, linear)
+[   23.057582] TCP bind hash table entries: 4096 (order: 5, 131072 bytes, linear)
+[   23.058689] TCP: Hash tables configured (established 4096 bind 4096)
+[   23.125891] UDP hash table entries: 256 (order: 1, 8192 bytes, linear)
+[   23.150065] UDP-Lite hash table entries: 256 (order: 1, 8192 bytes, linear)
+[   23.261567] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[   23.536891] RPC: Registered named UNIX socket transport module.
+[   23.537501] RPC: Registered udp transport module.
+[   23.537797] RPC: Registered tcp transport module.
+[   23.538041] RPC: Registered tcp-with-tls transport module.
+[   23.542724] RPC: Registered tcp NFSv4.1 backchannel transport module.
+[   23.543357] NET: Registered PF_XDP protocol family
+[   23.559096] PCI: CLS 0 bytes, default 64
+[   24.288965] workingset: timestamp_bits=46 max_order=17 bucket_order=0
+[   24.295788] zbud: loaded
+[   24.358422] squashfs: version 4.0 (2009/01/31) Phillip Lougher
+[   24.825771] NFS: Registering the id_resolver key type
+[   24.837397] Key type id_resolver registered
+[   24.901850] Key type id_legacy registered
+[   24.902941] nfs4filelayout_init: NFSv4 File Layout Driver Registering...
+[   24.971250] nfs4flexfilelayout_init: NFSv4 Flexfile Layout Driver Registering...
+[   26.682134] Key type cifs.idmap registered
+[   27.174915] fuse: init (API version 7.40)
+[   27.266487] SGI XFS with security attributes, no debug enabled
+[   27.817947] 9p: Installing v9fs 9p2000 file system support
+[   31.974015] NET: Registered PF_ALG protocol family
+[   31.975327] xor: measuring software checksum speed
+[   31.977452]    8regs           :  2007 MB/sec
+[   31.983262]    32regs          :  2138 MB/sec
+[   31.989734]    arm64_neon      :   563 MB/sec
+[   31.991361] xor: using function: 32regs (2138 MB/sec)
+[   31.992423] Key type asymmetric registered
+[   32.130564] Asymmetric key parser 'x509' registered
+[   32.505139] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 251)
+[   32.788594] io scheduler mq-deadline registered
+[   32.836494] io scheduler kyber registered
+[   33.421242] pl061_gpio 9030000.pl061: PL061 GPIO chip registered
+[   33.459952] pci-host-generic 4010000000.pcie: host bridge /pcie@10000000 ranges:
+[   33.461211] pci-host-generic 4010000000.pcie:       IO 0x003eff0000..0x003effffff -> 0x0000000000
+[   33.462242] pci-host-generic 4010000000.pcie:      MEM 0x0010000000..0x003efeffff -> 0x0010000000
+[   33.462739] pci-host-generic 4010000000.pcie:      MEM 0x8000000000..0xffffffffff -> 0x8000000000
+[   33.488035] pci-host-generic 4010000000.pcie: Memory resource size exceeds max for 32 bits
+[   33.490064] pci-host-generic 4010000000.pcie: ECAM at [mem 0x4010000000-0x401fffffff] for [bus 00-ff]
+[   33.507733] pci-host-generic 4010000000.pcie: PCI host bridge to bus 0000:00
+[   33.557432] pci_bus 0000:00: root bus resource [bus 00-ff]
+[   33.557856] pci_bus 0000:00: root bus resource [io  0x0000-0xffff]
+[   33.558228] pci_bus 0000:00: root bus resource [mem 0x10000000-0x3efeffff]
+[   33.586274] pci_bus 0000:00: root bus resource [mem 0x8000000000-0xffffffffff]
+[   33.756781] pci 0000:00:00.0: [1b36:0008] type 00 class 0x060000 conventional PCI endpoint
+[   35.225367] Serial: 8250/16550 driver, 4 ports, IRQ sharing enabled
+[   39.180261] brd: module loaded
+[   40.961915] loop: module loaded
+[   46.610716] virtio_blk virtio0: 1/0/0 default/read/poll queues
+[   47.156772] virtio_blk virtio0: [vda] 4096 512-byte logical blocks (2.10 MB/2.00 MiB)
+[   49.756601] wireguard: WireGuard 1.0.0 loaded. See www.wireguard.com for information.
+[   49.769123] wireguard: Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
+[   50.070202] tun: Universal TUN/TAP device driver, 1.6
+[   50.212371] PPP generic driver version 2.4.2
+[   50.389029] PPP BSD Compression module registered
+[   50.389576] PPP Deflate Compression module registered
+[   50.390205] PPP MPPE Compression module registered
+[   50.400614] NET: Registered PF_PPPOX protocol family
+[   50.415758] PPTP driver version 0.8.5
+[   50.443558] usbcore: registered new interface driver cdc_acm
+[   50.445915] cdc_acm: USB Abstract Control Model driver for USB modems and ISDN adapters
+[   50.458452] usbcore: registered new interface driver usblp
+[   50.465750] usbcore: registered new interface driver cdc_wdm
+[   50.466358] usbcore: registered new interface driver usbtmc
+[   50.901865] usbcore: registered new interface driver uas
+[   50.910892] usbcore: registered new interface driver usb-storage
+[   50.987476] usbcore: registered new interface driver ums-alauda
+[   51.006524] usbcore: registered new interface driver ums-cypress
+[   51.007274] usbcore: registered new interface driver ums-datafab
+[   51.007669] usbcore: registered new interface driver ums_eneub6250
+[   51.007946] usbcore: registered new interface driver ums-freecom
+[   51.008186] usbcore: registered new interface driver ums-isd200
+[   51.008418] usbcore: registered new interface driver ums-jumpshot
+[   51.008646] usbcore: registered new interface driver ums-karma
+[   51.008876] usbcore: registered new interface driver ums-onetouch
+[   51.009113] usbcore: registered new interface driver ums-realtek
+[   51.009355] usbcore: registered new interface driver ums-sddr09
+[   51.009587] usbcore: registered new interface driver ums-sddr55
+[   51.025203] usbcore: registered new interface driver ums-usbat
+[   51.026683] usbcore: registered new interface driver usbserial_generic
+[   51.027088] usbserial: USB Serial support registered for generic
+[   51.072140] usbcore: registered new interface driver aircable
+[   51.072568] usbserial: USB Serial support registered for aircable
+[   51.157921] usbcore: registered new interface driver ark3116
+[   51.158424] usbserial: USB Serial support registered for ark3116
+[   51.158780] usbcore: registered new interface driver belkin_sa
+[   51.177525] usbserial: USB Serial support registered for Belkin / Peracom / GoHubs USB Serial Adapter
+[   51.285359] usbcore: registered new interface driver ch341
+[   51.325264] usbserial: USB Serial support registered for ch341-uart
+[   51.325905] usbcore: registered new interface driver cp210x
+[   51.326228] usbserial: USB Serial support registered for cp210x
+[   51.326572] usbcore: registered new interface driver cyberjack
+[   51.385805] usbserial: USB Serial support registered for Reiner SCT Cyberjack USB card reader
+[   51.413091] usbcore: registered new interface driver cypress_m8
+[   51.413474] usbserial: USB Serial support registered for DeLorme Earthmate USB
+[   51.413862] usbserial: USB Serial support registered for HID->COM RS232 Adapter
+[   51.414218] usbserial: USB Serial support registered for Nokia CA-42 V2 Adapter
+[   51.414626] usbcore: registered new interface driver usb_debug
+[   51.414915] usbserial: USB Serial support registered for debug
+[   51.415193] usbserial: USB Serial support registered for xhci_dbc
+[   51.446684] usbcore: registered new interface driver digi_acceleport
+[   51.448541] usbserial: USB Serial support registered for Digi 2 port USB adapter
+[   51.456095] usbserial: USB Serial support registered for Digi 4 port USB adapter
+[   51.507469] usbcore: registered new interface driver io_edgeport
+[   51.508088] usbserial: USB Serial support registered for Edgeport 2 port adapter
+[   51.508579] usbserial: USB Serial support registered for Edgeport 4 port adapter
+[   51.509057] usbserial: USB Serial support registered for Edgeport 8 port adapter
+[   51.509532] usbserial: USB Serial support registered for EPiC device
+[   51.510044] usbcore: registered new interface driver io_ti
+[   51.510418] usbserial: USB Serial support registered for Edgeport TI 1 port adapter
+[   51.618285] usbserial: USB Serial support registered for Edgeport TI 2 port adapter
+[   51.665081] usbcore: registered new interface driver empeg
+[   51.715448] usbserial: USB Serial support registered for empeg
+[   51.759680] usbcore: registered new interface driver f81534a_ctrl
+[   51.776534] usbcore: registered new interface driver f81232
+[   51.822649] usbserial: USB Serial support registered for f81232
+[   51.823186] usbserial: USB Serial support registered for f81534a
+[   51.823732] usbcore: registered new interface driver f81534
+[   51.824183] usbserial: USB Serial support registered for Fintek F81532/F81534
+[   51.824725] usbcore: registered new interface driver ftdi_sio
+[   51.825128] usbserial: USB Serial support registered for FTDI USB Serial Device
+[   51.825726] usbcore: registered new interface driver garmin_gps
+[   51.855470] usbserial: USB Serial support registered for Garmin GPS usb/tty
+[   51.856393] usbcore: registered new interface driver ipaq
+[   51.856902] usbserial: USB Serial support registered for PocketPC PDA
+[   51.857412] usbcore: registered new interface driver ipw
+[   51.857781] usbserial: USB Serial support registered for IPWireless converter
+[   51.878790] usbcore: registered new interface driver ir_usb
+[   51.893832] usbserial: USB Serial support registered for IR Dongle
+[   51.894628] usbcore: registered new interface driver iuu_phoenix
+[   51.898984] usbserial: USB Serial support registered for iuu_phoenix
+[   51.899536] usbcore: registered new interface driver keyspan
+[   51.912831] usbserial: USB Serial support registered for Keyspan - (without firmware)
+[   51.913171] usbserial: USB Serial support registered for Keyspan 1 port adapter
+[   51.913439] usbserial: USB Serial support registered for Keyspan 2 port adapter
+[   51.913711] usbserial: USB Serial support registered for Keyspan 4 port adapter
+[   51.914045] usbcore: registered new interface driver keyspan_pda
+[   51.914253] usbserial: USB Serial support registered for Keyspan PDA
+[   51.914470] usbserial: USB Serial support registered for Keyspan PDA - (prerenumeration)
+[   51.914769] usbcore: registered new interface driver kl5kusb105
+[   51.914972] usbserial: USB Serial support registered for KL5KUSB105D / PalmConnect
+[   51.915255] usbcore: registered new interface driver kobil_sct
+[   51.915455] usbserial: USB Serial support registered for KOBIL USB smart card terminal
+[   51.915730] usbcore: registered new interface driver mct_u232
+[   51.915935] usbserial: USB Serial support registered for MCT U232
+[   51.916164] usbcore: registered new interface driver metro_usb
+[   51.916363] usbserial: USB Serial support registered for Metrologic USB to Serial
+[   51.916624] usbcore: registered new interface driver mos7720
+[   51.923050] usbserial: USB Serial support registered for Moschip 2 port adapter
+[   51.925079] usbcore: registered new interface driver mos7840
+[   51.928912] usbserial: USB Serial support registered for Moschip 7840/7820 USB Serial Driver
+[   51.930672] usbcore: registered new interface driver mxuport
+[   51.931129] usbserial: USB Serial support registered for MOXA UPort
+[   51.931452] usbcore: registered new interface driver navman
+[   51.931663] usbserial: USB Serial support registered for navman
+[   51.931912] usbcore: registered new interface driver omninet
+[   51.932401] usbserial: USB Serial support registered for ZyXEL - omni.net usb
+[   51.933308] usbcore: registered new interface driver opticon
+[   51.933999] usbserial: USB Serial support registered for opticon
+[   51.934657] usbcore: registered new interface driver option
+[   51.934991] usbserial: USB Serial support registered for GSM modem (1-port)
+[   51.937472] usbcore: registered new interface driver oti6858
+[   51.937799] usbserial: USB Serial support registered for oti6858
+[   52.039065] usbcore: registered new interface driver pl2303
+[   52.101736] usbserial: USB Serial support registered for pl2303
+[   52.367946] usbcore: registered new interface driver qcaux
+[   52.408554] usbserial: USB Serial support registered for qcaux
+[   52.478914] usbcore: registered new interface driver qcserial
+[   52.479171] usbserial: USB Serial support registered for Qualcomm USB modem
+[   52.479426] usbcore: registered new interface driver quatech2
+[   52.480089] usbserial: USB Serial support registered for Quatech 2nd gen USB to Serial Driver
+[   52.480734] usbcore: registered new interface driver safe_serial
+[   52.482815] usbserial: USB Serial support registered for safe_serial
+[   52.483742] usbcore: registered new interface driver sierra
+[   52.490333] usbserial: USB Serial support registered for Sierra USB modem
+[   52.491673] usbcore: registered new interface driver usb_serial_simple
+[   52.491937] usbserial: USB Serial support registered for carelink
+[   52.492145] usbserial: USB Serial support registered for flashloader
+[   52.492353] usbserial: USB Serial support registered for funsoft
+[   52.493961] usbserial: USB Serial support registered for google
+[   52.494359] usbserial: USB Serial support registered for hp4x
+[   52.494686] usbserial: USB Serial support registered for kaufmann
+[   52.508363] usbserial: USB Serial support registered for libtransistor
+[   52.556994] usbserial: USB Serial support registered for moto_modem
+[   52.557392] usbserial: USB Serial support registered for motorola_tetra
+[   52.557643] usbserial: USB Serial support registered for nokia
+[   52.557857] usbserial: USB Serial support registered for novatel_gps
+[   52.558071] usbserial: USB Serial support registered for siemens_mpi
+[   52.558290] usbserial: USB Serial support registered for suunto
+[   52.558520] usbserial: USB Serial support registered for vivopay
+[   52.558732] usbserial: USB Serial support registered for zio
+[   52.568499] usbcore: registered new interface driver spcp8x5
+[   52.568876] usbserial: USB Serial support registered for SPCP8x5
+[   52.569222] usbcore: registered new interface driver ssu100
+[   52.569466] usbserial: USB Serial support registered for Quatech SSU-100 USB to Serial Driver
+[   52.569797] usbcore: registered new interface driver symbolserial
+[   52.570032] usbserial: USB Serial support registered for symbol
+[   52.570281] usbcore: registered new interface driver ti_usb_3410_5052
+[   52.570509] usbserial: USB Serial support registered for TI USB 3410 1 port adapter
+[   52.678503] usbserial: USB Serial support registered for TI USB 5052 2 port adapter
+[   52.709849] usbcore: registered new interface driver upd78f0730
+[   52.710255] usbserial: USB Serial support registered for upd78f0730
+[   52.710643] usbcore: registered new interface driver visor
+[   52.710915] usbserial: USB Serial support registered for Handspring Visor / Palm OS
+[   52.727784] usbserial: USB Serial support registered for Sony Clie 5.0
+[   52.730845] usbserial: USB Serial support registered for Sony Clie 3.5
+[   52.731326] usbcore: registered new interface driver wishbone_serial
+[   52.731725] usbserial: USB Serial support registered for wishbone_serial
+[   52.732665] usbcore: registered new interface driver whiteheat
+[   52.733167] usbserial: USB Serial support registered for Connect Tech - WhiteHEAT - (prerenumeration)
+[   52.733501] usbserial: USB Serial support registered for Connect Tech - WhiteHEAT
+[   52.742750] usbcore: registered new interface driver xr_serial
+[   52.743756] usbserial: USB Serial support registered for xr_serial
+[   52.744308] usbcore: registered new interface driver xsens_mt
+[   52.744653] usbserial: USB Serial support registered for xsens_mt
+[   53.172583] vhci_hcd vhci_hcd.0: USB/IP Virtual Host Controller
+[   53.175016] vhci_hcd vhci_hcd.0: new USB bus registered, assigned bus number 1
+[   53.182771] vhci_hcd: created sysfs vhci_hcd.0
+[   54.718633] usb usb1: New USB device found, idVendor=1d6b, idProduct=0002, bcdDevice= 6.10
+[   54.746582] usb usb1: New USB device strings: Mfr=3, Product=2, SerialNumber=1
+[   54.746977] usb usb1: Product: USB/IP Virtual Host Controller
+[   54.827171] usb usb1: Manufacturer: Linux 6.10.14-linuxkit vhci_hcd
+[   54.827664] usb usb1: SerialNumber: vhci_hcd.0
+[   54.843389] hub 1-0:1.0: USB hub found
+[   54.857555] hub 1-0:1.0: 8 ports detected
+[   54.893532] vhci_hcd vhci_hcd.0: USB/IP Virtual Host Controller
+[   54.902240] vhci_hcd vhci_hcd.0: new USB bus registered, assigned bus number 2
+[   54.965065] usb usb2: We don't know the algorithms for LPM for this host, disabling LPM.
+[   55.614259] usb usb2: New USB device found, idVendor=1d6b, idProduct=0003, bcdDevice= 6.10
+[   55.615538] usb usb2: New USB device strings: Mfr=3, Product=2, SerialNumber=1
+[   55.615994] usb usb2: Product: USB/IP Virtual Host Controller
+[   55.616520] usb usb2: Manufacturer: Linux 6.10.14-linuxkit vhci_hcd
+[   55.616751] usb usb2: SerialNumber: vhci_hcd.0
+[   55.625775] hub 2-0:1.0: USB hub found
+[   55.651248] hub 2-0:1.0: 8 ports detected
+[   56.680151] mousedev: PS/2 mouse device common for all mice
+[   57.314228] rtc-pl031 9010000.pl031: registered as rtc0
+[   57.317184] rtc-pl031 9010000.pl031: setting system clock to 2026-10-14T14:31:55 UTC (1791988315)
+[   57.364359] i2c_dev: i2c /dev entries driver
+[   57.605241] device-mapper: ioctl: 4.48.0-ioctl (2023-03-01) initialised: dm-devel@lists.linux.dev
+[   57.613415] usbcore: registered new interface driver usbhid
+[   57.626674] usbhid: USB HID core driver
+[   57.747003] hw perfevents: enabled with armv8_pmuv3 PMU driver, 7 counters available
+[   57.749364] GACT probability on
+[   57.756162] Mirror/redirect action on
+[   57.756800] Simple TC action Loaded
+[   57.759370] netem: version 1.3
+[   57.759750] u32 classifier
+[   57.759926]     Performance counters on
+[   57.760110]     input device check on
+[   57.760289]     Actions configured
+[   58.031273] xt_time: kernel timezone is -0000
+[   58.033003] IPVS: Registered protocols (TCP, UDP)
+[   58.038027] IPVS: Connection hash table configured (size=4096, memory=32Kbytes)
+[   58.052896] IPVS: ipvs loaded.
+[   58.188149] IPVS: [rr] scheduler registered.
+[   58.258563] IPVS: [wrr] scheduler registered.
+[   58.258873] IPVS: [sh] scheduler registered.
+[   58.259488] ipip: IPv4 and MPLS over IPv4 tunneling driver
+[   58.262282] gre: GRE over IPv4 demultiplexor driver
+[   58.277045] ip_gre: GRE over IPv4 tunneling driver
+[   58.510827] IPv4 over IPsec tunneling driver
+[   58.621263] Initializing XFRM netlink socket
+[   58.622195] NET: Registered PF_INET6 protocol family
+[   59.149155] Segment Routing with IPv6
+[   59.240498] In-situ OAM (IOAM) with IPv6
+[   59.243714] mip6: Mobile IPv6
+[   59.265420] sit: IPv6, IPv4 and MPLS over IPv4 tunneling driver
+[   59.277653] ip6_gre: GRE over IPv6 tunneling driver
+[   59.325307] NET: Registered PF_PACKET protocol family
+[   59.377473] NET: Registered PF_KEY protocol family
+[   59.494933] Bridge firewalling registered
+[   59.656295] l2tp_core: L2TP core driver, V2.0
+[   59.681604] l2tp_ppp: PPPoL2TP kernel driver, V2.0
+[   59.682113] 8021q: 802.1Q VLAN Support v1.8
+[   59.683305] sctp: Hash tables configured (bind 256/256)
+[   59.861438] 9pnet: Installing 9P2000 support
+[   59.925279] Key type dns_resolver registered
+[   59.925720] openvswitch: Open vSwitch switching datapath
+[   60.632658] NET: Registered PF_VSOCK protocol family
+[   60.635118] mpls_gso: MPLS GSO support
+[   61.403624] registered taskstats version 1
+[   61.721359] Key type .fscrypt registered
+[   61.721809] Key type fscrypt-provisioning registered
+[   62.495192] Btrfs loaded, zoned=no, fsverity=no
+[   62.500640] Key type encrypted registered
+[   62.972177] gtp: GTP module loaded (pdp ctx size 128 bytes)
+[   91.508524] clk: Disabling unused clocks
+[   92.237620] EXT4-fs (vda): mounted filesystem 6f737265-632d-6c69-6e75-782d726f6f74 ro without journal. Quota mode: none.
+[   92.405174] VFS: Mounted root (ext4 filesystem) readonly on device 254:0.
+[   92.417240] devtmpfs: mounted
+[   93.453122] Freeing unused kernel memory: 6336K
+[   93.473384] Run /init as init process
+OSREC_LINUX_CAPTURE {"profile":"credential-setters","initial":{"pid":1,"tgid":1,"ppid":0,"uids":[1001,0,0],"gids":[2001,2002,2003],"groups":[4001,4003,4007],"capabilities":[4433380319,4433380319,0,2199023255551,0],"securebits":0,"fsuid":0,"nproc_limit":[18446744073709551615,18446744073709551615],"umask":18},"calls":[{"number":172,"args":[0,0,0,0,0],"raw_bits":1,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":178,"args":[0,0,0,0,0],"raw_bits":1,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":173,"args":[0,0,0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":174,"args":[0,0,0,0,0],"raw_bits":1001,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":175,"args":[0,0,0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":176,"args":[0,0,0,0,0],"raw_bits":2001,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":177,"args":[0,0,0,0,0],"raw_bits":2002,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":166,"args":[63,0,0,0,0],"raw_bits":18,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":63,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":148,"args":[4,8,12,0,0],"raw_bits":0,"words":[2779054080,1001,0,0,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":63,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":166,"args":[4294967807,0,0,0,0],"raw_bits":63,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":511,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":150,"args":[4,8,12,0,0],"raw_bits":0,"words":[2779054080,2001,2002,2003,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":511,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":148,"args":[4,18446744073709551615,12,0,0],"raw_bits":18446744073709551602,"words":[2779054080,1001,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":511,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":166,"args":[18446744073709551615,0,0,0,0],"raw_bits":511,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":511,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":150,"args":[18446744073709551615,8,12,0,0],"raw_bits":18446744073709551602,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":511,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":166,"args":[2,0,0,0,0],"raw_bits":511,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":2,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":148,"args":[4,4,4,0,0],"raw_bits":0,"words":[2779054080,0,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":2,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":150,"args":[4,8,18446744073709551614,0,0],"raw_bits":18446744073709551602,"words":[2779054080,2001,2002,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":2,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":172,"args":[0,0,0,0,0],"raw_bits":1,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":2,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":166,"args":[18,0,0,0,0],"raw_bits":2,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":178,"args":[0,0,0,0,0],"raw_bits":1,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":144,"args":[18446744073709551615,0,0,0,0],"raw_bits":18446744073709551594,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":144,"args":[4001,0,0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[4001,4001,4001],"fsgid_after":4001,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":144,"args":[4001,0,0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[4001,4001,4001],"fsgid_after":4001,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":150,"args":[4,8,12,0,0],"raw_bits":0,"words":[2779054080,4001,4001,4001,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[4001,4001,4001],"fsgid_after":4001,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":149,"args":[2001,2002,2003,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":152,"args":[9001,0,0,0,0],"raw_bits":2002,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":9001,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":152,"args":[18446744073709551615,0,0,0,0],"raw_bits":9001,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":9001,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":149,"args":[18446744073709551615,18446744073709551615,18446744073709551615,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":9001,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":149,"args":[18446744073709551615,2002,18446744073709551615,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":143,"args":[9001,9002,0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[9001,9002,9002],"fsgid_after":9002,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":177,"args":[0,0,0,0,0],"raw_bits":9002,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[9001,9002,9002],"fsgid_after":9002,"groups_after":[4001,4003,4007],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":159,"args":[3,4,0,0,0],"raw_bits":0,"words":[2779054080,5009,5001,5005,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,5009,5001,5005,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[9001,9002,9002],"fsgid_after":9002,"groups_after":[5001,5005,5009],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":146,"args":[0,0,0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[9001,9002,9002],"fsgid_after":9002,"groups_after":[5001,5005,5009],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[0,0,0]},{"number":149,"args":[2001,2002,2003,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[5001,5005,5009],"capabilities_after":[4433380319,4433380319,0,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[0,0,0]},{"number":91,"args":[0,8,0,0,0],"raw_bits":0,"words":[537396514,0,138412959,138413023,65,1,1,1],"input_words":[537396514,0,138412959,138413023,65,1,1,1],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[5001,5005,5009],"capabilities_after":[4433380255,4433380319,4294967361,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[0,0,0]},{"number":167,"args":[47,2,6,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[5001,5005,5009],"capabilities_after":[4433380255,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[0,0,0]},{"number":143,"args":[2003,18446744073709551615,0,0,0],"raw_bits":18446744073709551615,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[5001,5005,5009],"capabilities_after":[4433380255,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[0,0,0]},{"number":152,"args":[9001,0,0,0,0],"raw_bits":2002,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[5001,5005,5009],"capabilities_after":[4433380255,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[0,0,0]},{"number":149,"args":[9001,18446744073709551615,18446744073709551615,0,0],"raw_bits":18446744073709551615,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[5001,5005,5009],"capabilities_after":[4433380255,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[0,0,0]},{"number":143,"args":[2002,9002,0,0,0],"raw_bits":18446744073709551615,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[5001,5005,5009],"capabilities_after":[4433380255,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[0,0,0]},{"number":150,"args":[4,8,12,0,0],"raw_bits":0,"words":[2779054080,2001,2002,2003,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[5001,5005,5009],"capabilities_after":[4433380255,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[0,0,0]},{"number":176,"args":[0,0,0,0,0],"raw_bits":2001,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[5001,5005,5009],"capabilities_after":[4433380255,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[0,0,0]},{"number":144,"args":[2003,0,0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2003,2003],"fsgid_after":2003,"groups_after":[5001,5005,5009],"capabilities_after":[4433380255,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[0,0,0]},{"number":143,"args":[2003,18446744073709551615,0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2003,2003,2003],"fsgid_after":2003,"groups_after":[5001,5005,5009],"capabilities_after":[4433380255,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[0,0,0]},{"number":143,"args":[18446744073709551615,2001,0,0,0],"raw_bits":18446744073709551615,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2003,2003,2003],"fsgid_after":2003,"groups_after":[5001,5005,5009],"capabilities_after":[4433380255,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[0,0,0]},{"number":91,"args":[0,8,0,0,0],"raw_bits":0,"words":[537396514,0,138413023,138413023,65,1,1,1],"input_words":[537396514,0,138413023,138413023,65,1,1,1],"umask_after":18,"gids_after":[2003,2003,2003],"fsgid_after":2003,"groups_after":[5001,5005,5009],"capabilities_after":[4433380319,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[0,0,0]},{"number":143,"args":[9001,9002,0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[9001,9002,9002],"fsgid_after":9002,"groups_after":[5001,5005,5009],"capabilities_after":[4433380319,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[0,0,0]},{"number":90,"args":[0,8,0,0,0],"raw_bits":0,"words":[537396514,0,138413023,138413023,65,1,1,1],"input_words":[537396514,0,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[9001,9002,9002],"fsgid_after":9002,"groups_after":[5001,5005,5009],"capabilities_after":[4433380319,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[0,0,0]},{"number":149,"args":[2001,2002,2003,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[5001,5005,5009],"capabilities_after":[4433380319,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[0,0,0]},{"number":144,"args":[0,0,0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[0,0,0],"fsgid_after":0,"groups_after":[5001,5005,5009],"capabilities_after":[4433380319,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[0,0,0]},{"number":158,"args":[3,4,0,0,0],"raw_bits":3,"words":[2779054080,5001,5005,5009,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[0,0,0],"fsgid_after":0,"groups_after":[5001,5005,5009],"capabilities_after":[4433380319,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[0,0,0]},{"number":147,"args":[1001,0,0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[0,0,0],"fsgid_after":0,"groups_after":[5001,5005,5009],"capabilities_after":[4433380319,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":145,"args":[18446744073709551615,1001,0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[0,0,0],"fsgid_after":0,"groups_after":[5001,5005,5009],"capabilities_after":[0,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":1001,"uids_after":[1001,1001,0]},{"number":144,"args":[9001,0,0,0,0],"raw_bits":18446744073709551615,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[0,0,0],"fsgid_after":0,"groups_after":[5001,5005,5009],"capabilities_after":[0,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":1001,"uids_after":[1001,1001,0]},{"number":149,"args":[9001,18446744073709551615,18446744073709551615,0,0],"raw_bits":18446744073709551615,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[0,0,0],"fsgid_after":0,"groups_after":[5001,5005,5009],"capabilities_after":[0,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":1001,"uids_after":[1001,1001,0]},{"number":159,"args":[0,18446744073709551614,0,0,0],"raw_bits":18446744073709551615,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[0,0,0],"fsgid_after":0,"groups_after":[5001,5005,5009],"capabilities_after":[0,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":1001,"uids_after":[1001,1001,0]},{"number":144,"args":[0,0,0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[0,0,0],"fsgid_after":0,"groups_after":[5001,5005,5009],"capabilities_after":[0,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":1001,"uids_after":[1001,1001,0]},{"number":152,"args":[1001,0,0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[0,0,0],"fsgid_after":0,"groups_after":[5001,5005,5009],"capabilities_after":[0,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":1001,"uids_after":[1001,1001,0]},{"number":146,"args":[0,0,0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[0,0,0],"fsgid_after":0,"groups_after":[5001,5005,5009],"capabilities_after":[4433380319,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":149,"args":[0,1001,2003,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[0,1001,2003],"fsgid_after":1001,"groups_after":[5001,5005,5009],"capabilities_after":[4433380319,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":159,"args":[2,4,0,0,0],"raw_bits":0,"words":[2779054080,6003,6001,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,6003,6001,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[0,1001,2003],"fsgid_after":1001,"groups_after":[6001,6003],"capabilities_after":[4433380319,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":152,"args":[4294969299,0,0,0,0],"raw_bits":1001,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[0,1001,2003],"fsgid_after":2003,"groups_after":[6001,6003],"capabilities_after":[4433380319,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":149,"args":[18446744073709551615,18446744073709551615,18446744073709551615,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[0,1001,2003],"fsgid_after":2003,"groups_after":[6001,6003],"capabilities_after":[4433380319,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":143,"args":[18446744073709551615,18446744073709551615,0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[0,1001,2003],"fsgid_after":1001,"groups_after":[6001,6003],"capabilities_after":[4433380319,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":150,"args":[4,18446744073709551615,12,0,0],"raw_bits":18446744073709551602,"words":[2779054080,0,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[0,1001,2003],"fsgid_after":1001,"groups_after":[6001,6003],"capabilities_after":[4433380319,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":144,"args":[4294967296,0,0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[0,0,0],"fsgid_after":0,"groups_after":[6001,6003],"capabilities_after":[4433380319,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":144,"args":[8589934591,0,0,0,0],"raw_bits":18446744073709551594,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[0,0,0],"fsgid_after":0,"groups_after":[6001,6003],"capabilities_after":[4433380319,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":143,"args":[4294969297,4294969299,0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2003,2003],"fsgid_after":2003,"groups_after":[6001,6003],"capabilities_after":[4433380319,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":152,"args":[18446744073709551615,0,0,0,0],"raw_bits":2003,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2003,2003],"fsgid_after":2003,"groups_after":[6001,6003],"capabilities_after":[4433380319,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":151,"args":[1001,0,0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2003,2003],"fsgid_after":2003,"groups_after":[6001,6003],"capabilities_after":[4194752,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":1001,"uids_after":[1001,0,0]},{"number":159,"args":[1,4,0,0,0],"raw_bits":0,"words":[2779054080,7001,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,7001,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2003,2003],"fsgid_after":2003,"groups_after":[7001],"capabilities_after":[4194752,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":1001,"uids_after":[1001,0,0]},{"number":144,"args":[9002,0,0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[9002,9002,9002],"fsgid_after":9002,"groups_after":[7001],"capabilities_after":[4194752,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":1001,"uids_after":[1001,0,0]},{"number":147,"args":[18446744073709551615,0,18446744073709551615,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[9002,9002,9002],"fsgid_after":9002,"groups_after":[7001],"capabilities_after":[4194752,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":149,"args":[2001,2002,2003,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[7001],"capabilities_after":[4194752,4433380319,4294967361,2199023255551,64],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":91,"args":[0,8,0,0,0],"raw_bits":0,"words":[537396514,0,138412959,138412959,65,1,1,1],"input_words":[537396514,0,138412959,138412959,65,1,1,1],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[7001],"capabilities_after":[4433380255,4433380255,4294967361,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":143,"args":[9001,1001,0,0,0],"raw_bits":18446744073709551615,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[7001],"capabilities_after":[4433380255,4433380255,4294967361,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":159,"args":[0,18446744073709551614,0,0,0],"raw_bits":18446744073709551615,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[7001],"capabilities_after":[4433380255,4433380255,4294967361,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":91,"args":[0,8,0,0,0],"raw_bits":18446744073709551615,"words":[537396514,0,138413023,138413023,65,1,1,1],"input_words":[537396514,0,138413023,138413023,65,1,1,1],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[7001],"capabilities_after":[4433380255,4433380255,4294967361,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":147,"args":[18446744073709551615,1001,18446744073709551615,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[7001],"capabilities_after":[0,4433380255,4294967361,2199023255551,0],"securebits_after":0,"fsuid_after":1001,"uids_after":[1001,1001,0]},{"number":147,"args":[18446744073709551615,0,18446744073709551615,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[7001],"capabilities_after":[4433380255,4433380255,4294967361,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":159,"args":[0,18446744073709551614,0,0,0],"raw_bits":18446744073709551615,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[7001],"capabilities_after":[4433380255,4433380255,4294967361,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":152,"args":[9001,0,0,0,0],"raw_bits":2002,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[7001],"capabilities_after":[4433380255,4433380255,4294967361,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":90,"args":[0,8,0,0,0],"raw_bits":0,"words":[537396514,0,138412959,138412959,65,1,1,1],"input_words":[537396514,0,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[7001],"capabilities_after":[4433380255,4433380255,4294967361,2199023255551,0],"securebits_after":0,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":167,"args":[28,4,0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[7001],"capabilities_after":[4433380255,4433380255,4294967361,2199023255551,0],"securebits_after":4,"fsuid_after":0,"uids_after":[1001,0,0]},{"number":145,"args":[0,1001,0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[7001],"capabilities_after":[4433380255,4433380255,4294967361,2199023255551,0],"securebits_after":4,"fsuid_after":1001,"uids_after":[0,1001,1001]},{"number":146,"args":[9001,0,0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[7001],"capabilities_after":[4433380255,4433380255,4294967361,2199023255551,0],"securebits_after":4,"fsuid_after":9001,"uids_after":[9001,9001,9001]},{"number":143,"args":[18446744073709551615,18446744073709551615,0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[7001],"capabilities_after":[4433380255,4433380255,4294967361,2199023255551,0],"securebits_after":4,"fsuid_after":9001,"uids_after":[9001,9001,9001]},{"number":145,"args":[9002,9002,0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[7001],"capabilities_after":[4433380255,4433380255,4294967361,2199023255551,0],"securebits_after":4,"fsuid_after":9002,"uids_after":[9002,9002,9002]},{"number":149,"args":[2001,2002,2003,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[7001],"capabilities_after":[4433380255,4433380255,4294967361,2199023255551,0],"securebits_after":4,"fsuid_after":9002,"uids_after":[9002,9002,9002]},{"number":167,"args":[28,12,0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[7001],"capabilities_after":[4433380255,4433380255,4294967361,2199023255551,0],"securebits_after":12,"fsuid_after":9002,"uids_after":[9002,9002,9002]},{"number":91,"args":[0,8,0,0,0],"raw_bits":0,"words":[537396514,0,4194304,138412959,65,0,1,1],"input_words":[537396514,0,4194304,138412959,65,0,1,1],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[7001],"capabilities_after":[4194304,4433380255,4294967361,2199023255551,0],"securebits_after":12,"fsuid_after":9002,"uids_after":[9002,9002,9002]},{"number":143,"args":[2002,9001,0,0,0],"raw_bits":18446744073709551615,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[7001],"capabilities_after":[4194304,4433380255,4294967361,2199023255551,0],"securebits_after":12,"fsuid_after":9002,"uids_after":[9002,9002,9002]},{"number":145,"args":[18446744073709551615,18446744073709551615,0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[7001],"capabilities_after":[4194304,4433380255,4294967361,2199023255551,0],"securebits_after":12,"fsuid_after":9002,"uids_after":[9002,9002,9002]},{"number":150,"args":[4,4,4,0,0],"raw_bits":0,"words":[2779054080,2003,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[7001],"capabilities_after":[4194304,4433380255,4294967361,2199023255551,0],"securebits_after":12,"fsuid_after":9002,"uids_after":[9002,9002,9002]},{"number":148,"args":[4,8,12,0,0],"raw_bits":0,"words":[2779054080,9002,9002,9002,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[7001],"capabilities_after":[4194304,4433380255,4294967361,2199023255551,0],"securebits_after":12,"fsuid_after":9002,"uids_after":[9002,9002,9002]},{"number":158,"args":[1,4,0,0,0],"raw_bits":1,"words":[2779054080,7001,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[7001],"capabilities_after":[4194304,4433380255,4294967361,2199023255551,0],"securebits_after":12,"fsuid_after":9002,"uids_after":[9002,9002,9002]},{"number":90,"args":[0,8,0,0,0],"raw_bits":0,"words":[537396514,0,4194304,138412959,65,0,1,1],"input_words":[537396514,0,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[7001],"capabilities_after":[4194304,4433380255,4294967361,2199023255551,0],"securebits_after":12,"fsuid_after":9002,"uids_after":[9002,9002,9002]},{"number":167,"args":[27,0,0,0,0],"raw_bits":12,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"input_words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002,"groups_after":[7001],"capabilities_after":[4194304,4433380255,4294967361,2199023255551,0],"securebits_after":12,"fsuid_after":9002,"uids_after":[9002,9002,9002]}]}
+OSREC_LINUX_CAPTURE_DONE
+[   98.831922] reboot: Power down

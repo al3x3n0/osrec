@@ -1,0 +1,18 @@
+{
+  "repository": "https://github.com/openharmony/kernel_liteos_a",
+  "revision": "4ac7f3aed67000b47bc14d6fe79d63ada708d780",
+  "source": "syscall/misc_syscall.c",
+  "source_sha256": "9637a0255b6db7a4d88dbe01d56f580c53e9310cd1ec0bef1f8859a7dae8c6c4",
+  "function": "SysUgetrlimit",
+  "function_sha256": "41b06217f71a5b9e8c1e9c5f0a9710dbcb894055afff90dde294a731cc7e4b4a",
+  "headers": {
+    "syscall/syscall_lookup.h": "468a2f8c8ab28c8a78c988aed2a56ad4396cd5bb11287520e98e1661d65fea5e",
+    "compat/posix/src/misc.c": "1570ccc13c2d2208100285d1410bf043c6c152ba0abb2b8bbebb513015d421b7"
+  },
+  "libc_headers": {
+    "porting/liteos_a/kernel/include/sys/resource.h": "988b582648a1762759f72c297ebdd8cc2e1a528760bd375788157d9d9bf7dd00",
+    "porting/liteos_a/kernel/include/bits/alltypes.h": "b205b6b3cac09ebf04f86353287a0a899f3ece1c63975e63c9512e2daf26c27d"
+  },
+  "syscall_number": 191,
+  "native_abi": "16 bytes: two unsigned 64-bit limits; preserved in AArch64 replay"
+}

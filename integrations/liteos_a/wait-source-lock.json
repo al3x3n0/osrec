@@ -1,0 +1,52 @@
+{
+  "repository": "https://github.com/openharmony/kernel_liteos_a",
+  "revision": "4ac7f3aed67000b47bc14d6fe79d63ada708d780",
+  "sources": {
+    "syscall/time_syscall.c": "ea8125af0274ba7f22daadc19c6218a30382903563642bec8f0bb715e9aed09c",
+    "compat/posix/src/time.c": "3108f2ed423a5ca4ab3c61e5f142aa44c39de566a2a0fd2e22182b9ad3083e5b",
+    "compat/posix/include/time_posix.h": "4ed8d3977b45ed76cc1201d89d95d67dd8916ddebe5aee992632736857f442b0",
+    "kernel/base/core/los_sys.c": "4bb62b2d319c6f93404f3b03540590e9964debc019e01f6967c7e648e59ec149",
+    "kernel/base/sched/los_priority.c": "7df733ffaea30a46c90e0eaabf1e0584ae2f08115922ade90b34931026d8ac7b",
+    "kernel/base/sched/los_sched.c": "443c8012487346c1b853c5b1a9a147ac8b40827d97f30269dff61406d0651568"
+  },
+  "definitions": {
+    "SysNanoSleep": {
+      "source": "syscall/time_syscall.c",
+      "sha256": "1ae6da6d5c5fb0c19b46f3f0618bfb8abaf7218d588c33145ba4b2912af921d2"
+    },
+    "nanosleep": {
+      "source": "compat/posix/src/time.c",
+      "sha256": "91c2625468f2d31b870e74eaf145f5c4397c8cd5472aeb8d511a808bae142b55"
+    },
+    "DoNanoSleep": {
+      "source": "compat/posix/src/time.c",
+      "sha256": "146bce6c5ac4d4820de6d5c07803014d4b76069e777afabdd3a6203007983585"
+    },
+    "ValidTimeSpec": {
+      "source": "compat/posix/include/time_posix.h",
+      "sha256": "7e7538c034d1e4ff6332e6df7dd62c686b47c4404c38b175237ff412796f1741"
+    },
+    "OsNS2Tick": {
+      "source": "kernel/base/core/los_sys.c",
+      "sha256": "cfe0e2e9849250c3af5c4853dd8ab909643d008588d35360a8386e4034ca2a21"
+    },
+    "HPFDelay": {
+      "source": "kernel/base/sched/los_priority.c",
+      "sha256": "0ae711f22926a100a7da4ddab4ba92d4e95d6a7daef8ff89b48b2ebdfdb26a73"
+    },
+    "HPFWaitTimeGet": {
+      "source": "kernel/base/sched/los_priority.c",
+      "sha256": "e580774666b8db4119a45117932c25665af78dd2b92f62ffac4ed1ca0c99e174"
+    },
+    "SchedTimeoutTaskWake": {
+      "source": "kernel/base/sched/los_sched.c",
+      "sha256": "4c20fb2c8bd4e7ab61997bef85181c7b44a8a2cc1047eb6d10db7dd93e39273d"
+    }
+  },
+  "headers": {
+    "kernel/base/include/los_sched_pri.h": "d618ea6a61c736d718c1f855fe671f4513539568d1b84be4843a4d1da70dbc15",
+    "kernel/base/include/los_task_pri.h": "1f73f9bdf6e20f3d834295f337868229865caa32b3e59175a97f52d834009c19",
+    "syscall/syscall_lookup.h": "468a2f8c8ab28c8a78c988aed2a56ad4396cd5bb11287520e98e1661d65fea5e",
+    "kernel/extended/hook/include/los_hook_types.h": "7b27e25f1d6a064612c1a3956d4abf5828d35b6579cf7126ec64d3c2e65203da"
+  }
+}

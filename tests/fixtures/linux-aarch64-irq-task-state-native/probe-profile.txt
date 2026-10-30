@@ -1,0 +1,5 @@
+  osrec_task_dequeue                                        22               0
+  osrec_task_wake                                            7               0
+  osrec_task_activate                                       22               0
+  osrec_task_preempt                                        20               0
+

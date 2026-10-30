@@ -1,0 +1,19 @@
+{
+  "repository": "https://github.com/openharmony/kernel_liteos_a",
+  "revision": "4ac7f3aed67000b47bc14d6fe79d63ada708d780",
+  "source": "fs/vfs/operation/vfs_other.c",
+  "source_sha256": "02bc13d28d670911f3d19617cca802878badf69ceaf8d12a9b11fd44305aa7d2",
+  "function": "SysUmask",
+  "function_sha256": "ac2cb6eaa6d1262b69169fb0b0cfc109e41a6ea5a12c92109d0b681be5e7f334",
+  "headers": {
+    "fs/vfs/include/vnode.h": "a09e021cb5b97a091540b344277f9e7de92357ac0fda0d674970c17b1fd6b604",
+    "kernel/base/include/los_process_pri.h": "6cb70287391cd820eba9d51c43958cac671679414fb870cb21f1713f515c467f",
+    "kernel/base/include/los_task_pri.h": "1f73f9bdf6e20f3d834295f337868229865caa32b3e59175a97f52d834009c19",
+    "syscall/syscall_lookup.h": "468a2f8c8ab28c8a78c988aed2a56ad4396cd5bb11287520e98e1661d65fea5e"
+  },
+  "constants": {
+    "UMASK_FULL": 511
+  },
+  "syscall_number": 60,
+  "type_contract": "mode_t and UINT32 are unsigned 32-bit; semantic process object exposes only umask; scheduler locking is modeled"
+}

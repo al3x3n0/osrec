@@ -1,0 +1,31 @@
+# tracer: nop
+#
+# entries-in-buffer/entries-written: 18/18   #P:1
+#
+#                                _-----=> irqs-off/BH-disabled
+#                               / _----=> need-resched
+#                              | / _---=> hardirq/softirq
+#                              || / _--=> preempt-depth
+#                              ||| / _-=> migrate-disable
+#                              |||| /     delay
+#           TASK-PID     CPU#  |||||  TIMESTAMP  FUNCTION
+#              | |         |   |||||     |         |
+            init-1       [000] .....     9.527811: sys_nanosleep(rqtp: fffff0195a50, rmtp: 0)
+            init-1       [000] d.h..     9.528620: irq_handler_entry: irq=11 name=arch_timer
+            init-1       [000] dNh..     9.528804: irq_handler_exit: irq=11 ret=handled
+            init-1       [000] .N...     9.529089: hrtimer_init: hrtimer=00000000705fd2bb clockid=CLOCK_MONOTONIC mode=REL
+            init-1       [000] dN...     9.529255: hrtimer_start: hrtimer=00000000705fd2bb function=hrtimer_wakeup expires=9549238992 softexpires=9549188992 mode=REL
+            init-1       [000] d....     9.529499: sched_switch: prev_comm=init prev_pid=1 prev_prio=120 prev_state=S ==> next_comm=rcuos/0 next_pid=18 next_prio=120
+         rcuos/0-18      [000] d....     9.529617: sched_switch: prev_comm=rcuos/0 prev_pid=18 prev_prio=120 prev_state=S ==> next_comm=swapper/0 next_pid=0 next_prio=120
+          <idle>-0       [000] d.h..     9.554192: irq_handler_entry: irq=11 name=arch_timer
+          <idle>-0       [000] d.h..     9.554471: hrtimer_cancel: hrtimer=00000000705fd2bb
+          <idle>-0       [000] d.h..     9.554639: hrtimer_expire_entry: hrtimer=00000000705fd2bb function=hrtimer_wakeup now=9554316000
+          <idle>-0       [000] d.h..     9.554716: sched_waking: comm=init pid=1 prio=120 target_cpu=000
+          <idle>-0       [000] dNh..     9.554817: sched_wakeup: comm=init pid=1 prio=120 target_cpu=000
+          <idle>-0       [000] dNh..     9.554869: hrtimer_expire_exit: hrtimer=00000000705fd2bb
+          <idle>-0       [000] dNh..     9.554934: irq_handler_exit: irq=11 ret=handled
+          <idle>-0       [000] d....     9.555053: sched_switch: prev_comm=swapper/0 prev_pid=0 prev_prio=120 prev_state=R ==> next_comm=init next_pid=1 next_prio=120
+            init-1       [000] d.h..     9.555231: irq_handler_entry: irq=11 name=arch_timer
+            init-1       [000] d.h..     9.555297: irq_handler_exit: irq=11 ret=handled
+            init-1       [000] .....     9.555318: sys_nanosleep -> 0x0
+

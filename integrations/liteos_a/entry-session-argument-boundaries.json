@@ -1,0 +1,14 @@
+{
+  "format": "osrec-entry-state-boundaries-v1",
+  "boundaries": {},
+  "argument_objects": {
+    "OsProcessExitCodeSignalSet": {
+      "processCB": {
+        "kind": "object_argument",
+        "reason": "one scheduler-lock region holds the current process and its lifetime across six original helper calls, with each entry inheriting the previous post-state",
+        "implementation": "capture one continuous helper batch before the first selected umask call; restore PID 1 exitCode once after the last post-state snapshot and before scheduler unlock",
+        "snapshot_safe": true
+      }
+    }
+  }
+}

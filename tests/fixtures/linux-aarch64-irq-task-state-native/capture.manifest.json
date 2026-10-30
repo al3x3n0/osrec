@@ -1,0 +1,71 @@
+{
+  "format": "osrec-linux-irq-capture-v1",
+  "status": "native_trace_captured",
+  "identity": {
+    "kernel_release": "6.10.14-linuxkit",
+    "kernel_image_sha256": "d196f8248abdddab384e4998a9714501b2932ccfafd9b8ba45112c7dea2cfa35",
+    "kernel_config_sha256": "f6fabe8341dd01882ab1d6fa176cf2ed34c5d3c5a0451f2dfb45acfa24a2892f",
+    "architecture": "aarch64"
+  },
+  "result": {
+    "task_state_capture": true,
+    "pid": 1,
+    "tid": 1,
+    "syscall": 101,
+    "request_ns": 20000000,
+    "timer_slack_ns": 50000,
+    "raw": 0,
+    "before_ns": 4439200992,
+    "after_ns": 4478092992
+  },
+  "qemu_command": [
+    "qemu-system-aarch64",
+    "-machine",
+    "virt-9.2,gic-version=2",
+    "-cpu",
+    "cortex-a53",
+    "-accel",
+    "tcg",
+    "-smp",
+    "1",
+    "-m",
+    "512M",
+    "-nographic",
+    "-monitor",
+    "none",
+    "-nic",
+    "none",
+    "-no-reboot",
+    "-kernel",
+    "/Applications/Docker.app/Contents/Resources/linuxkit/kernel",
+    "-drive",
+    "file=/Users/al3x3n0/huawei/osrec/build/linux-irq-task-state-native-dev-v2/root.ext2,format=raw,if=none,id=root,readonly=on",
+    "-device",
+    "virtio-blk-device,drive=root",
+    "-append",
+    "console=ttyAMA0 root=/dev/vda rootfstype=ext4 ro rootwait init=/init panic=-1"
+  ],
+  "native_linux_boot": true,
+  "native_source_build_attested": false,
+  "task_state_capture": true,
+  "semihosting": false,
+  "artifact_sha256": {
+    "event-formats.json": "90dc0aefb642c60d9a387267573003595343abe7e6f61c8806901f5de2e24b68",
+    "init": "636640052487e1e2e3c6a55928fa8bb611908d31b6255b2c622586557e0bd4af",
+    "kernel.config": "f6fabe8341dd01882ab1d6fa176cf2ed34c5d3c5a0451f2dfb45acfa24a2892f",
+    "probe-definitions.txt": "d09a69bbce83fe4d2f2e7feeb974f5c7689adc335d8658403068485413cd1b01",
+    "probe-profile.txt": "b7c1b9e49bd15a2f52f61f9ddb5763bef24a5f9d7449171b0dfa5b6fc61d799c",
+    "qemu.log": "92ac7cafb74ec2411d4340bb1a367cd3c6a2a4e200098a5dfb331ad9b2fef1b4",
+    "result.json": "444055b3c2765269a85bd311e1bbd37a60c154b151242171e97f598d9faa1b16",
+    "root.ext2": "1f1579f711472a387f536d3a1aaaf74b7de2e2076728656f743f270e59dc70b5",
+    "sources/native.c": "36ab49c666818ea4fdaaa962fa9403c88d50a02921504d7cbbe606214ba05009",
+    "sources/start.S": "12b675b3fc9912aeaebac3109c65c712fa145c158c98f01446c61bbbfef93aa7",
+    "trace-stats.txt": "bfd5ab8f1124155af22849febb234818a014651a531003c77976047d37668a0a",
+    "trace.txt": "27b078e3b1798ac1ecd86d507955c1980d40c74cab014c003d0caf01da49f1dc"
+  },
+  "construction_sha256": {
+    "tools/capture_linux_irq.py": "6d462c53ee6d4c0eff11def8cbcf620d20199b99016c43c071e3c3cf2768508f",
+    "integrations/linux_aarch64/irq-wait/native.c": "36ab49c666818ea4fdaaa962fa9403c88d50a02921504d7cbbe606214ba05009",
+    "tools/minimal_ext2.py": "e4489ec565b553f176ce847fd0f393027bbd02a46ded2cb110afef75bc5515ad"
+  }
+}

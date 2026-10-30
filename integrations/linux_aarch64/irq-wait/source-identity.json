@@ -1,0 +1,9 @@
+{
+  "release": "Linux v6.10",
+  "source": "kernel/time/hrtimer.c",
+  "source_url": "https://github.com/torvalds/linux/blob/v6.10/kernel/time/hrtimer.c#L1789",
+  "function": "hrtimer_wakeup",
+  "function_sha256": "086ce92670444fbfcc7c0f23e96ab7a86759d34409fb47db3728b73337462348",
+  "excerpt_sha256": "a76a14db07efe093b2f03456096e61ab174cc008e702de37512a872596e135c9",
+  "native_source_build_attested": false
+}

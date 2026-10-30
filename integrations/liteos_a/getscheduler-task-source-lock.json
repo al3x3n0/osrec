@@ -1,0 +1,24 @@
+{
+  "repository": "https://github.com/openharmony/kernel_liteos_a",
+  "revision": "4ac7f3aed67000b47bc14d6fe79d63ada708d780",
+  "source": "syscall/process_syscall.c",
+  "source_sha256": "36a5c34f9fd5c38e4f0011e4ae207e8b22c74ecffccdce8700470f53e1ace10d",
+  "function": "SysSchedGetScheduler",
+  "function_sha256": "e427ca5fa51c0f381f156bfeff5007e354691ab8fc18babc8ceba3885cef30e2",
+  "headers": {
+    "syscall/syscall_lookup.h": "468a2f8c8ab28c8a78c988aed2a56ad4396cd5bb11287520e98e1661d65fea5e",
+    "kernel/include/los_process.h": "91ded6052ad7475e7ac6edf29f524b0321f179d4232506694bd6c42f84d2fe8d",
+    "kernel/base/include/los_process_pri.h": "6cb70287391cd820eba9d51c43958cac671679414fb870cb21f1713f515c467f",
+    "kernel/base/core/los_process.c": "ff00352ef748a4d894f52486bf36f47c37cdfd91748f9fc77bdf15cce6321ed5",
+    "kernel/base/include/los_task_pri.h": "1f73f9bdf6e20f3d834295f337868229865caa32b3e59175a97f52d834009c19",
+    "kernel/base/include/los_sched_pri.h": "d618ea6a61c736d718c1f855fe671f4513539568d1b84be4843a4d1da70dbc15",
+    "kernel/base/core/los_task.c": "63416c958f1f4837c9d42a4ff5dbaad4a64eb6e0f0115a1b9a89de4256c1a2a1",
+    "kernel/base/sched/los_priority.c": "7df733ffaea30a46c90e0eaabf1e0584ae2f08115922ade90b34931026d8ac7b",
+    "kernel/common/los_config.h": "c82ad521822a669b5db33864401b40e770f2813ab9e1d432de5127bfbecd1b08"
+  },
+  "syscall": {
+    "number": 157,
+    "name": "sched_getscheduler"
+  },
+  "dependency_contract": "task mode flag=-1 only; physical IDs with task limit 128; actual permission and forwarded schedParamGet outcomes; temporary native callback binding under syscall scheduler lock restored before unlock; dependency internals not replayed"
+}

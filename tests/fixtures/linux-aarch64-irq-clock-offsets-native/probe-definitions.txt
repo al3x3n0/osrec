@@ -1,0 +1,16 @@
+p:osrec/osrec_task_dequeue dequeue_task_fair task=p:x64 pid=p->pid:s32 state=p->__state:u32 saved=p->saved_state:u32 on_rq=p->on_rq:u32 on_cpu=p->on_cpu:u32
+p:osrec/osrec_task_wake wake_up_process task=p:x64 pid=p->pid:s32 state=p->__state:u32 saved=p->saved_state:u32 on_rq=p->on_rq:u32 on_cpu=p->on_cpu:u32
+p:osrec/osrec_task_activate activate_task task=p:x64 pid=p->pid:s32 state=p->__state:u32 saved=p->saved_state:u32 on_rq=p->on_rq:u32 on_cpu=p->on_cpu:u32
+p:osrec/osrec_task_preempt wakeup_preempt task=p:x64 pid=p->pid:s32 state=p->__state:u32 saved=p->saved_state:u32 on_rq=p->on_rq:u32 on_cpu=p->on_cpu:u32
+p:osrec/osrec_sleeper_entry do_nanosleep object=t:x64 task=t->task:x64
+p:osrec/osrec_sleeper_callback hrtimer_wakeup object=$arg1:x64 task=+64($arg1):x64
+r8:osrec/osrec_sleeper_callback_return hrtimer_wakeup object=$arg1:x64 task=+64($arg1):x64 result=$retval:s32
+r8:osrec/osrec_sleeper_return do_nanosleep object=$arg1:x64 task=+64($arg1):x64 result=$retval:s32
+p:osrec/osrec_timer_callback hrtimer_wakeup object=timer:x64 base=timer->base:x64 running=timer->base->running:x64 state=timer->state:u8
+r8:osrec/osrec_timer_return do_nanosleep object=$arg1:x64 base=+48($arg1):x64 running=+24(+48($arg1)):x64 result=$retval:s32
+p:osrec/osrec_base_callback hrtimer_wakeup object=timer:x64 base=timer->base:x64 cpu_base=timer->base->cpu_base:x64 index=timer->base->index:u32 active=timer->base->cpu_base->active_bases:u32
+r8:osrec/osrec_base_return do_nanosleep object=$arg1:x64 base=+48($arg1):x64 cpu_base=+0(+48($arg1)):x64 index=+8(+48($arg1)):u32 active=+8(+0(+48($arg1))):u32 result=$retval:s32
+p:osrec/osrec_outer_callback hrtimer_wakeup object=timer:x64 cpu_base=timer->base->cpu_base:x64 deadline=timer->base->cpu_base->softirq_expires_next:s64 activated=timer->base->cpu_base->softirq_activated
+r8:osrec/osrec_clock_return ktime_get_update_offsets_now seq=$arg1:x64 real=$arg2:x64 boot=$arg3:x64 tai=$arg4:x64 sequence=+0($arg1):u32 offs_real=+0($arg2):s64 offs_boot=+0($arg3):s64 offs_tai=+0($arg4):s64 now=$retval:s64
+p:osrec/osrec_offsets_callback hrtimer_wakeup object=$arg1:x64 cpu_base=timer->base->cpu_base:x64 sequence=+12(+0(+48($arg1))):u32 soft_real=+440(+0(+48($arg1))):s64 soft_boot=+504(+0(+48($arg1))):s64 soft_tai=+568(+0(+48($arg1))):s64
+

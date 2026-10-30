@@ -1,0 +1,43 @@
+{
+  "format": "osrec-entry-state-boundaries-v1",
+  "boundaries": {
+    "OsCurrProcessGet": {
+      "kind": "object_provider",
+      "reason": "reconstruct current process instead of traversing per-CPU scheduler state",
+      "implementation": "logical process object binding",
+      "snapshot_safe": true
+    },
+    "OsCurrTaskGet": {
+      "kind": "object_provider",
+      "reason": "reconstruct current task instead of traversing per-CPU scheduler state",
+      "implementation": "logical task object binding",
+      "snapshot_safe": true
+    },
+    "OsCurrUserGet": {
+      "kind": "object_provider",
+      "reason": "reconstruct current credentials instead of traversing process internals",
+      "implementation": "logical credential object binding",
+      "snapshot_safe": true
+    },
+    "LOS_GetCurrProcessID": {
+      "kind": "scalar_transcript",
+      "reason": "cut current-PID lookup at the replay boundary",
+      "implementation": "ordered captured scalar outcome"
+    },
+    "OsGetProcessPriority": {
+      "kind": "scalar_transcript",
+      "reason": "priority and scheduler internals are outside the replay closure",
+      "implementation": "ordered captured argument/result outcome"
+    },
+    "LOS_SpinLockSave": {
+      "kind": "ordering_model",
+      "reason": "snapshot and replay require explicit scheduler locking semantics",
+      "implementation": "capture under the real lock; replay checks balanced modeled locking"
+    },
+    "LOS_SpinUnlockRestore": {
+      "kind": "ordering_model",
+      "reason": "scheduler unlock is paired with the modeled lock",
+      "implementation": "restore-token and balanced-lock checks"
+    }
+  }
+}

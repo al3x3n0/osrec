@@ -1,0 +1,212 @@
+{"kind":"deck","id":"pr/9xk70i","name":"Deck"}
+{"kind":"layout","layoutId":"85e2a834-b145-4208-9bfa-b07018497c47","name":"Master","type":"master"}
+{"kind":"layout","layoutId":"be048422-ea32-44d6-b4d2-d04ee96a0720","name":"Title Slide","type":"title"}
+{"kind":"slide","id":"sl/0b71dc","slide":1,"title":"OSREC","textShapes":7}
+{"kind":"textbox","id":"sh/v658nuto","slide":1,"text":"OSREC","textPreview":"OSREC","textChars":5,"textLines":1,"bbox":[64,36,1472,72]}
+{"kind":"textbox","id":"sh/w7epwzu9","slide":1,"text":"Self-contained application and kernel replay","textPreview":"Self-contained application and kernel replay","textChars":44,"textLines":1,"bbox":[64,112,1472,58]}
+{"kind":"textbox","id":"sh/x8nqp4bu","slide":1,"text":"OSREC","textPreview":"OSREC","textChars":5,"textLines":1,"bbox":[64,850,120,28]}
+{"kind":"textbox","id":"sh/i9w7y9cz","slide":1,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[1490,850,46,28]}
+{"kind":"textbox","id":"sh/jup8retk","slide":1,"text":"Capture a selected execution.\nRe-execute it in an independent image.","textPreview":"Capture a selected execution. | Re-execute it in an independent image.","textChars":68,"textLines":2,"bbox":[64,258,1420,190]}
+{"kind":"textbox","id":"sh/kvy90ju5","slide":1,"text":"Architecture, data contracts, implemented profiles\nand proposed development roadmap","textPreview":"Architecture, data contracts, implemented profiles | and proposed development roadmap","textChars":83,"textLines":2,"bbox":[64,510,1300,120]}
+{"kind":"textbox","id":"sh/5w7qt4bq","slide":1,"text":"Current implementation: bounded functional replay in QEMU. RTL execution and timing validation remain pending.","textPreview":"Current implementation: bounded functional replay in QEMU. RTL execution and timing validation remain pending.","textChars":110,"textLines":1,"bbox":[64,805,1472,42]}
+{"kind":"notes","id":"nt/0b71dc","slide":1,"text":"Repository sources: /Users/al3x3n0/huawei/osrec/README.md\n/Users/al3x3n0/huawei/osrec/docs/design.md\n\n"}
+{"kind":"slide","id":"sl/1ion9c","slide":2,"title":"Solution scope","textShapes":10}
+{"kind":"textbox","id":"sh/nq9snix8","slide":2,"text":"Solution scope","textPreview":"Solution scope","textChars":14,"textLines":1,"bbox":[64,36,1472,72]}
+{"kind":"textbox","id":"sh/oritwnyt","slide":2,"text":"A recorded scenario becomes executable code with restored state and checked behavior","textPreview":"A recorded scenario becomes executable code with restored state and checked behavior","textChars":84,"textLines":1,"bbox":[64,112,1472,58]}
+{"kind":"textbox","id":"sh/9sbapsfy","slide":2,"text":"OSREC","textPreview":"OSREC","textChars":5,"textLines":1,"bbox":[64,850,120,28]}
+{"kind":"textbox","id":"sh/el0bqdgb","slide":2,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[1490,850,46,28]}
+{"kind":"textbox","id":"sh/fm9sjixw","slide":2,"text":"Capture","textPreview":"Capture","textChars":7,"textLines":1,"bbox":[64,215,1450,44]}
+{"kind":"textbox","id":"sh/0nitsnyh","slide":2,"text":"Observe selected syscalls on a native kernel and retain the state and external inputs required by the port.","textPreview":"Observe selected syscalls on a native kernel and retain the state and external inputs required by the port.","textChars":107,"textLines":1,"bbox":[64,270,1450,95]}
+{"kind":"textbox","id":"sh/1oralsf2","slide":2,"text":"Reconstruct","textPreview":"Reconstruct","textChars":11,"textLines":1,"bbox":[64,410,1450,44]}
+{"kind":"textbox","id":"sh/yhkb2xgv","slide":2,"text":"Package original selected code, application CPU/RAM, dependency models and portable kernel state.","textPreview":"Package original selected code, application CPU/RAM, dependency models and portable kernel state.","textChars":97,"textLines":1,"bbox":[64,465,1450,95]}
+{"kind":"textbox","id":"sh/jitcv2xg","slide":2,"text":"Replay and verify","textPreview":"Replay and verify","textChars":17,"textLines":1,"bbox":[64,605,1450,44]}
+{"kind":"textbox","id":"sh/7alwv6p4","slide":2,"text":"Run the image independently, recompute results and effects, and reject divergence from the declared contract.","textPreview":"Run the image independently, recompute results and effects, and reject divergence from the declared contract.","textChars":109,"textLines":1,"bbox":[64,660,1450,95]}
+{"kind":"notes","id":"nt/1ion9c","slide":2,"text":"Repository sources: /Users/al3x3n0/huawei/osrec/docs/design.md\n/Users/al3x3n0/huawei/osrec/docs/application-checkpoints.md\n\n"}
+{"kind":"slide","id":"sl/yb31ac","slide":3,"title":"System architecture","textShapes":16}
+{"kind":"textbox","id":"sh/ri903epg","slide":3,"text":"System architecture","textPreview":"System architecture","textChars":19,"textLines":1,"bbox":[64,36,1472,72]}
+{"kind":"textbox","id":"sh/sj21cjq1","slide":3,"text":"Host tools construct the image. The freestanding guest executes the replay.","textPreview":"Host tools construct the image. The freestanding guest executes the replay.","textChars":75,"textLines":1,"bbox":[64,112,1472,58]}
+{"kind":"textbox","id":"sh/tkb25o7m","slide":3,"text":"OSREC","textPreview":"OSREC","textChars":5,"textLines":1,"bbox":[64,850,120,28]}
+{"kind":"textbox","id":"sh/elkjet87","slide":3,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[1490,850,46,28]}
+{"kind":"shape","id":"sh/fmtk7yps","slide":3,"bbox":[64,270,300,230]}
+{"kind":"textbox","id":"sh/gn21g3qd","slide":3,"text":"Native workload","textPreview":"Native workload","textChars":15,"textLines":1,"bbox":[82,289,264,48]}
+{"kind":"textbox","id":"sh/1ob2987y","slide":3,"text":"Real kernel\nSelected syscalls\nRecorded observations","textPreview":"Real kernel | Selected syscalls | Recorded observations","textChars":51,"textLines":3,"bbox":[82,348,264,142]}
+{"kind":"shape","id":"sh/upgj2p83","slide":3,"bbox":[438,270,300,230]}
+{"kind":"textbox","id":"sh/vqp0bup8","slide":3,"text":"Construction","textPreview":"Construction","textChars":12,"textLines":1,"bbox":[456,289,264,48]}
+{"kind":"textbox","id":"sh/rmlcb2hk","slide":3,"text":"Reviewed closure\nContext and codec\nApplication routes","textPreview":"Reviewed closure | Context and codec | Application routes","textChars":53,"textLines":3,"bbox":[456,348,264,142]}
+{"kind":"shape","id":"sh/qlcv2xgz","slide":3,"bbox":[812,270,300,230]}
+{"kind":"textbox","id":"sh/do3edczq","slide":3,"text":"Replay image","textPreview":"Replay image","textChars":12,"textLines":1,"bbox":[830,289,264,48]}
+{"kind":"textbox","id":"sh/snud47y5","slide":3,"text":"Code and models\nEmbedded state\nValidation checks","textPreview":"Code and models | Embedded state | Validation checks","textChars":48,"textLines":3,"bbox":[830,348,264,142]}
+{"kind":"shape","id":"sh/3i1c7ih8","slide":3,"bbox":[1186,270,350,230]}
+{"kind":"textbox","id":"sh/ihsvydgn","slide":3,"text":"Execution","textPreview":"Execution","textChars":9,"textLines":1,"bbox":[1204,289,314,48]}
+{"kind":"textbox","id":"sh/5k3u9sze","slide":3,"text":"EL0 application\nLocal kernel slices\nTarget-memory result","textPreview":"EL0 application | Local kernel slices | Target-memory result","textChars":56,"textLines":3,"bbox":[1204,348,314,142]}
+{"kind":"shape","id":"sh/4jad0nyt","slide":3,"bbox":[0,0,0,0]}
+{"kind":"shape","id":"sh/ve1c3ihc","slide":3,"bbox":[0,0,0,0]}
+{"kind":"shape","id":"sh/utsvudgr","slide":3,"bbox":[0,0,0,0]}
+{"kind":"textbox","id":"sh/yp8vmdkj","slide":3,"text":"Construction data","textPreview":"Construction data","textChars":17,"textLines":1,"bbox":[64,575,700,45]}
+{"kind":"textbox","id":"sh/jqhwfi14","slide":3,"text":"Capture files and source inputs remain on the host.","textPreview":"Capture files and source inputs remain on the host.","textChars":51,"textLines":1,"bbox":[64,633,700,100]}
+{"kind":"textbox","id":"sh/krqdon2p","slide":3,"text":"Runtime independence","textPreview":"Runtime independence","textChars":20,"textLines":1,"bbox":[812,575,724,45]}
+{"kind":"textbox","id":"sh/lczeh8ja","slide":3,"text":"The guest requires no source kernel, host filesystem or semihosting.","textPreview":"The guest requires no source kernel, host filesystem or semihosting.","textChars":68,"textLines":1,"bbox":[812,633,724,100]}
+{"kind":"notes","id":"nt/yb31ac","slide":3,"text":"Repository sources: /Users/al3x3n0/huawei/osrec/docs/design.md\n/Users/al3x3n0/huawei/osrec/docs/elf-checkpoint-chains.md\n\n"}
+{"kind":"slide","id":"sl/3yxuct","slide":4,"title":"The replay contract","textShapes":5}
+{"kind":"textbox","id":"sh/ypwzm1on","slide":4,"text":"The replay contract","textPreview":"The replay contract","textChars":19,"textLines":1,"bbox":[64,36,1472,72]}
+{"kind":"textbox","id":"sh/lsnihwny","slide":4,"text":"Each port defines what the selected scenario must reproduce","textPreview":"Each port defines what the selected scenario must reproduce","textChars":59,"textLines":1,"bbox":[64,112,1472,58]}
+{"kind":"textbox","id":"sh/krehor6d","slide":4,"text":"OSREC","textPreview":"OSREC","textChars":5,"textLines":1,"bbox":[64,850,120,28]}
+{"kind":"textbox","id":"sh/7u50j654","slide":4,"text":"04","textPreview":"04","textChars":2,"textLines":1,"bbox":[1490,850,46,28]}
+{"kind":"textbox","id":"sh/9w7ilgna","slide":4,"text":"The contract bounds the claim. Output agreement alone does not prove that every dependency is represented.","textPreview":"The contract bounds the claim. Output agreement alone does not prove that every dependency is represented.","textChars":106,"textLines":1,"bbox":[64,805,1472,42]}
+{"kind":"table","id":"tb/v6pwnqpc","slide":4,"name":"","rows":6,"cols":3,"preview":"Contract item | Embedded representation | Required check","bbox":[64,200,1472,530]}
+{"kind":"notes","id":"nt/3yxuct","slide":4,"text":"Repository sources: /Users/al3x3n0/huawei/osrec/docs/design.md\n/Users/al3x3n0/huawei/osrec/docs/linux-aarch64-slices.md\n/Users/al3x3n0/huawei/osrec/docs/file-operations.md\n\n"}
+{"kind":"slide","id":"sl/esd3xt","slide":5,"title":"Construction toolchain","textShapes":5}
+{"kind":"textbox","id":"sh/5wzap8ru","slide":5,"text":"Construction toolchain","textPreview":"Construction toolchain","textChars":22,"textLines":1,"bbox":[64,36,1472,72]}
+{"kind":"textbox","id":"sh/it8rut8j","slide":5,"text":"Native capture feeds kernel export and application composition","textPreview":"Native capture feeds kernel export and application composition","textChars":62,"textLines":1,"bbox":[64,112,1472,58]}
+{"kind":"textbox","id":"sh/3uhsny94","slide":5,"text":"OSREC","textPreview":"OSREC","textChars":5,"textLines":1,"bbox":[64,850,120,28]}
+{"kind":"textbox","id":"sh/sjqt0nql","slide":5,"text":"05","textPreview":"05","textChars":2,"textLines":1,"bbox":[1490,850,46,28]}
+{"kind":"textbox","id":"sh/qx8byd8f","slide":5,"text":"run_linux_aarch64_checkpoint_pipeline.py orchestrates native capture through the C application checkpoint chain.","textPreview":"run_linux_aarch64_checkpoint_pipeline.py orchestrates native capture through the C application checkpoint chain.","textChars":112,"textLines":1,"bbox":[64,805,1472,42]}
+{"kind":"table","id":"tb/g3elgjid","slide":5,"name":"","rows":6,"cols":3,"preview":"Stage | Main tools | Output","bbox":[64,200,1472,560]}
+{"kind":"notes","id":"nt/esd3xt","slide":5,"text":"Repository sources: /Users/al3x3n0/huawei/osrec/tools/run_linux_aarch64_checkpoint_pipeline.py\n/Users/al3x3n0/huawei/osrec/tools/export_syscall_slices.py\n/Users/al3x3n0/huawei/osrec/tools/import_application_checkpoint.py\n\n"}
+{"kind":"slide","id":"sl/t4a45z","slide":6,"title":"Contextify: explicit session state","textShapes":10}
+{"kind":"textbox","id":"sh/ozm54v29","slide":6,"text":"Contextify: explicit session state","textPreview":"Contextify: explicit session state","textChars":34,"textLines":1,"bbox":[64,36,1472,72]}
+{"kind":"textbox","id":"sh/nyd4bqlo","slide":6,"text":"Move mutable static storage into a caller-owned context and thread it through direct calls","textPreview":"Move mutable static storage into a caller-owned context and thread it through direct calls","textChars":90,"textLines":1,"bbox":[64,112,1472,58]}
+{"kind":"textbox","id":"sh/2xkn2lk3","slide":6,"text":"OSREC","textPreview":"OSREC","textChars":5,"textLines":1,"bbox":[64,850,120,28]}
+{"kind":"textbox","id":"sh/xov6h03q","slide":6,"text":"06","textPreview":"06","textChars":2,"textLines":1,"bbox":[1490,850,46,28]}
+{"kind":"textbox","id":"sh/cnm58f25","slide":6,"text":"Original C","textPreview":"Original C","textChars":10,"textLines":1,"bbox":[64,210,690,45]}
+{"kind":"textbox","id":"sh/bmdofal0","slide":6,"text":"static unsigned mask = 022;\n\nunsigned SetMask(unsigned next) {\n  unsigned old = mask;\n  mask = next & 0777;\n  return old;\n}","textPreview":"static unsigned mask = 022; |  | unsigned SetMask(unsigned next) { |   unsigned old = mask; |   mask = next & 0777; |   return old; | }","textChars":123,"textLines":7,"bbox":[64,275,700,300]}
+{"kind":"textbox","id":"sh/a14n65kf","slide":6,"text":"Transformed C","textPreview":"Transformed C","textChars":13,"textLines":1,"bbox":[838,210,698,45]}
+{"kind":"textbox","id":"sh/dsbm5g3m","slide":6,"text":"struct Context { unsigned mask; };\n\nunsigned SetMask(struct Context *ctx,\n                 unsigned next) {\n  unsigned old = ctx->mask;\n  ctx->mask = next & 0777;\n  return old;\n}","textPreview":"struct Context { unsigned mask; }; |  | unsigned SetMask(struct Context *ctx, |                  unsigned next) { |   unsigned old = ctx-...","textChars":178,"textLines":8,"bbox":[838,275,698,330]}
+{"kind":"textbox","id":"sh/sr25wbm1","slide":6,"text":"Each session reconstructs its seeds once. Calls retain updates until an explicit restore.","textPreview":"Each session reconstructs its seeds once. Calls retain updates until an explicit restore.","textChars":89,"textLines":1,"bbox":[64,645,1472,64]}
+{"kind":"textbox","id":"sh/upgzq18v","slide":6,"text":"CURRENT boundaries: direct calls, prepared C closure and supported declarations. TLS, volatile state and unknown ownership need adapters.","textPreview":"CURRENT boundaries: direct calls, prepared C closure and supported declarations. TLS, volatile state and unknown ownership need adapters.","textChars":137,"textLines":1,"bbox":[64,727,1472,92]}
+{"kind":"notes","id":"nt/t4a45z","slide":6,"text":"Repository sources: /Users/al3x3n0/huawei/osrec/tools/contextify_slice.py\n/Users/al3x3n0/huawei/osrec/docs/local-static-context-state.md\n/Users/al3x3n0/huawei/osrec/docs/initialized-context-state.md\n\n"}
+{"kind":"slide","id":"sl/prqhii","slide":7,"title":"Kernel state and reference policies","textShapes":5}
+{"kind":"textbox","id":"sh/5w7mh832","slide":7,"text":"Kernel state and reference policies","textPreview":"Kernel state and reference policies","textChars":35,"textLines":1,"bbox":[64,36,1472,72]}
+{"kind":"textbox","id":"sh/itw36t4b","slide":7,"text":"Context storage and checkpoint wire encoding are separate contracts","textPreview":"Context storage and checkpoint wire encoding are separate contracts","textChars":67,"textLines":1,"bbox":[64,112,1472,58]}
+{"kind":"textbox","id":"sh/ju5kfylw","slide":7,"text":"OSREC","textPreview":"OSREC","textChars":5,"textLines":1,"bbox":[64,850,120,28]}
+{"kind":"textbox","id":"sh/w7el4jml","slide":7,"text":"07","textPreview":"07","textChars":2,"textLines":1,"bbox":[1490,850,46,28]}
+{"kind":"textbox","id":"sh/a5w32t4f","slide":7,"text":"Every field requires a reviewed policy. Arbitrary heap objects, physical addresses and raw pointers need additional contracts.","textPreview":"Every field requires a reviewed policy. Arbitrary heap objects, physical addresses and raw pointers need additional contracts.","textChars":126,"textLines":1,"bbox":[64,805,1472,42]}
+{"kind":"table","id":"tb/4zq90bqp","slide":7,"name":"","rows":7,"cols":3,"preview":"Field policy | Checkpoint representation | Restoration","bbox":[64,200,1472,560]}
+{"kind":"notes","id":"nt/prqhii","slide":7,"text":"Repository sources: /Users/al3x3n0/huawei/osrec/tools/slice_checkpoint_codec.py\n/Users/al3x3n0/huawei/osrec/docs/context-object-graphs.md\n/Users/al3x3n0/huawei/osrec/docs/context-buffer-references.md\n\n"}
+{"kind":"slide","id":"sl/qal0ga","slide":8,"title":"Application input and routing data","textShapes":5}
+{"kind":"textbox","id":"sh/c7u10r6t","slide":8,"text":"Application input and routing data","textPreview":"Application input and routing data","textChars":34,"textLines":1,"bbox":[64,36,1472,72]}
+{"kind":"textbox","id":"sh/r61k7mpo","slide":8,"text":"The ELF supplies executable bytes. Neutral metadata supplies saved state and ordered boundaries.","textPreview":"The ELF supplies executable bytes. Neutral metadata supplies saved state and ordered boundaries.","textChars":96,"textLines":1,"bbox":[64,112,1472,58]}
+{"kind":"textbox","id":"sh/qlsjy183","slide":8,"text":"OSREC","textPreview":"OSREC","textChars":5,"textLines":1,"bbox":[64,850,120,28]}
+{"kind":"textbox","id":"sh/pkj25w7i","slide":8,"text":"08","textPreview":"08","textChars":2,"textLines":1,"bbox":[1490,850,46,28]}
+{"kind":"textbox","id":"sh/3i1k3mpc","slide":8,"text":"Declared SVCs become BRK #0x5353. Repeated PCs share one physical patch and retain multiple ordered route entries.","textPreview":"Declared SVCs become BRK #0x5353. Repeated PCs share one physical patch and retain multiple ordered route entries.","textChars":114,"textLines":1,"bbox":[64,805,1472,42]}
+{"kind":"table","id":"tb/lwfu1kna","slide":8,"name":"","rows":6,"cols":2,"preview":"Input data | Normalized route package","bbox":[64,200,1472,520]}
+{"kind":"notes","id":"nt/qal0ga","slide":8,"text":"Repository sources: /Users/al3x3n0/huawei/osrec/docs/application-checkpoints.md\n/Users/al3x3n0/huawei/osrec/tools/import_application_checkpoint.py\n\n"}
+{"kind":"slide","id":"sl/khvd9f","slide":9,"title":"Returning syscall slices","textShapes":17}
+{"kind":"textbox","id":"sh/c3idsf2l","slide":9,"text":"Returning syscall slices","textPreview":"Returning syscall slices","textChars":24,"textLines":1,"bbox":[64,36,1472,72]}
+{"kind":"textbox","id":"sh/b29cja10","slide":9,"text":"The local EL1 gateway executes a selected kernel body and resumes the EL0 application","textPreview":"The local EL1 gateway executes a selected kernel body and resumes the EL0 application","textChars":85,"textLines":1,"bbox":[64,112,1472,58]}
+{"kind":"textbox","id":"sh/q10bq5kf","slide":9,"text":"OSREC","textPreview":"OSREC","textChars":5,"textLines":1,"bbox":[64,850,120,28]}
+{"kind":"textbox","id":"sh/p0ruh0ju","slide":9,"text":"09","textPreview":"09","textChars":2,"textLines":1,"bbox":[1490,850,46,28]}
+{"kind":"shape","id":"sh/ozitov2p","slide":9,"bbox":[64,250,330,220]}
+{"kind":"textbox","id":"sh/3ypcfq14","slide":9,"text":"EL0 frame","textPreview":"EL0 frame","textChars":9,"textLines":1,"bbox":[82,269,294,48]}
+{"kind":"textbox","id":"sh/2dgbm5kj","slide":9,"text":"Live registers\nExpected syscall PC\nSaved CPU state","textPreview":"Live registers | Expected syscall PC | Saved CPU state","textChars":50,"textLines":3,"bbox":[82,328,294,132]}
+{"kind":"shape","id":"sh/9wbut4je","slide":9,"bbox":[449,250,330,220]}
+{"kind":"textbox","id":"sh/8v2d0z2t","slide":9,"text":"Invocation","textPreview":"Invocation","textChars":10,"textLines":1,"bbox":[467,269,294,48]}
+{"kind":"textbox","id":"sh/atsjmd4n","slide":9,"text":"ordinal and number\nargs[6]\nUser-memory view","textPreview":"ordinal and number | args[6] | User-memory view","textChars":43,"textLines":3,"bbox":[467,328,294,132]}
+{"kind":"shape","id":"sh/bu10fil8","slide":9,"bbox":[834,250,330,220]}
+{"kind":"textbox","id":"sh/wva1onmt","slide":9,"text":"Kernel slice","textPreview":"Kernel slice","textChars":12,"textLines":1,"bbox":[852,269,294,48]}
+{"kind":"textbox","id":"sh/xw32hs3e","slide":9,"text":"Original body\nSession context\nReviewed models","textPreview":"Original body | Session context | Reviewed models","textChars":45,"textLines":3,"bbox":[852,328,294,132]}
+{"kind":"shape","id":"sh/m5sjit4r","slide":9,"bbox":[1219,250,317,220]}
+{"kind":"textbox","id":"sh/n610ry5c","slide":9,"text":"Return","textPreview":"Return","textChars":6,"textLines":1,"bbox":[1237,269,281,48]}
+{"kind":"textbox","id":"sh/o7a1k3mx","slide":9,"text":"raw i64 result\nstatus and diagnostic\nUpdated context/RAM","textPreview":"raw i64 result | status and diagnostic | Updated context/RAM","textChars":56,"textLines":3,"bbox":[1237,328,281,132]}
+{"kind":"shape","id":"sh/98jid8n2","slide":9,"bbox":[0,0,0,0]}
+{"kind":"shape","id":"sh/61cjux4v","slide":9,"bbox":[0,0,0,0]}
+{"kind":"shape","id":"sh/72lkn2lg","slide":9,"bbox":[0,0,0,0]}
+{"kind":"textbox","id":"sh/judozqhg","slide":9,"text":"Linux register ABI","textPreview":"Linux register ABI","textChars":18,"textLines":1,"bbox":[64,565,720,44]}
+{"kind":"textbox","id":"sh/it476lgb","slide":9,"text":"x8 selects the syscall. x0–x5 supply arguments. The raw result returns in x0.","textPreview":"x8 selects the syscall. x0–x5 supply arguments. The raw result returns in x0.","textChars":77,"textLines":1,"bbox":[64,620,720,105]}
+{"kind":"textbox","id":"sh/5wv610zm","slide":9,"text":"Continuation","textPreview":"Continuation","textChars":12,"textLines":1,"bbox":[834,565,702,44]}
+{"kind":"textbox","id":"sh/4vmp8vy1","slide":9,"text":"Restore the application frame and resume at the original SVC PC plus four.","textPreview":"Restore the application frame and resume at the original SVC PC plus four.","textChars":74,"textLines":1,"bbox":[834,620,702,105]}
+{"kind":"textbox","id":"sh/ryd83axs","slide":9,"text":"Runtime C structures contain target pointers. They are distinct from portable checkpoint records.","textPreview":"Runtime C structures contain target pointers. They are distinct from portable checkpoint records.","textChars":97,"textLines":1,"bbox":[64,805,1472,42]}
+{"kind":"notes","id":"nt/khvd9f","slide":9,"text":"Repository sources: /Users/al3x3n0/huawei/osrec/include/osrec/aarch64_frame.h\n/Users/al3x3n0/huawei/osrec/include/osrec/syscall_slice.h\n/Users/al3x3n0/huawei/osrec/runtime/aarch64_gateway.c\n\n"}
+{"kind":"slide","id":"sl/ap1c78","slide":10,"title":"Kernel checkpoint binary format","textShapes":5}
+{"kind":"textbox","id":"sh/8nat0fqt","slide":10,"text":"Kernel checkpoint binary format","textPreview":"Kernel checkpoint binary format","textChars":31,"textLines":1,"bbox":[64,36,1472,72]}
+{"kind":"textbox","id":"sh/nm1sra98","slide":10,"text":"A 64-byte header binds the generated payload to its schema and execution position","textPreview":"A 64-byte header binds the generated payload to its schema and execution position","textChars":81,"textLines":1,"bbox":[64,112,1472,58]}
+{"kind":"textbox","id":"sh/mlsry58n","slide":10,"text":"OSREC","textPreview":"OSREC","textChars":5,"textLines":1,"bbox":[64,850,120,28]}
+{"kind":"textbox","id":"sh/xs3axk7a","slide":10,"text":"10","textPreview":"10","textChars":2,"textLines":1,"bbox":[1490,850,46,28]}
+{"kind":"textbox","id":"sh/vqlsvapk","slide":10,"text":"Little-endian target encoding. A rejected load leaves the destination state and session unchanged.","textPreview":"Little-endian target encoding. A rejected load leaves the destination state and session unchanged.","textChars":98,"textLines":1,"bbox":[64,805,1472,42]}
+{"kind":"table","id":"tb/pcnaxgvu","slide":10,"name":"","rows":7,"cols":3,"preview":"Byte offsets | Encoding | Meaning","bbox":[64,200,1472,540]}
+{"kind":"notes","id":"nt/ap1c78","slide":10,"text":"Repository sources: /Users/al3x3n0/huawei/osrec/runtime/slice_checkpoint.c\n/Users/al3x3n0/huawei/osrec/include/osrec/slice_checkpoint.h\n/Users/al3x3n0/huawei/osrec/tools/slice_checkpoint_codec.py\n\n"}
+{"kind":"slide","id":"sl/n5do3r","slide":11,"title":"Joint checkpoints and fresh-image resume","textShapes":15}
+{"kind":"textbox","id":"sh/9wvuh03y","slide":11,"text":"Joint checkpoints and fresh-image resume","textPreview":"Joint checkpoints and fresh-image resume","textChars":40,"textLines":1,"bbox":[64,36,1472,72]}
+{"kind":"textbox","id":"sh/mt4bmlkn","slide":11,"text":"Save application CPU/RAM together with the portable kernel record at a supported boundary","textPreview":"Save application CPU/RAM together with the portable kernel record at a supported boundary","textChars":89,"textLines":1,"bbox":[64,112,1472,58]}
+{"kind":"textbox","id":"sh/nudcfql8","slide":11,"text":"OSREC","textPreview":"OSREC","textChars":5,"textLines":1,"bbox":[64,850,120,28]}
+{"kind":"textbox","id":"sh/wz6tsv2p","slide":11,"text":"11","textPreview":"11","textChars":2,"textLines":1,"bbox":[1490,850,46,28]}
+{"kind":"shape","id":"sh/x0ful03a","slide":11,"bbox":[64,235,410,230]}
+{"kind":"textbox","id":"sh/ax4bqlkj","slide":11,"text":"Pause before next call","textPreview":"Pause before next call","textChars":22,"textLines":1,"bbox":[82,254,374,48]}
+{"kind":"textbox","id":"sh/vyxcjql4","slide":11,"text":"Live CPU frame\nApplication RAM\nKernel next ordinal","textPreview":"Live CPU frame | Application RAM | Kernel next ordinal","textChars":50,"textLines":3,"bbox":[82,313,374,142]}
+{"kind":"shape","id":"sh/c32tgb2l","slide":11,"bbox":[595,235,410,230]}
+{"kind":"textbox","id":"sh/d4bu9g3q","slide":11,"text":"Export joint package","textPreview":"Export joint package","textChars":20,"textLines":1,"bbox":[613,254,374,48]}
+{"kind":"textbox","id":"sh/tgjq14fy","slide":11,"text":"kernel.bin\ncheckpoint.json\napplication/ and manifest","textPreview":"kernel.bin | checkpoint.json | application/ and manifest","textChars":52,"textLines":3,"bbox":[613,313,374,142]}
+{"kind":"shape","id":"sh/sfa9szed","slide":11,"bbox":[1126,235,410,230]}
+{"kind":"textbox","id":"sh/re18zuxs","slide":11,"text":"Restore fresh image","textPreview":"Restore fresh image","textChars":19,"textLines":1,"bbox":[1144,254,374,48]}
+{"kind":"textbox","id":"sh/6dsrqpw7","slide":11,"text":"Reconstruct seeds\nOverlay saved values\nRebind references","textPreview":"Reconstruct seeds | Overlay saved values | Rebind references","textChars":56,"textLines":3,"bbox":[1144,313,374,142]}
+{"kind":"shape","id":"sh/143a54fu","slide":11,"bbox":[0,0,0,0]}
+{"kind":"shape","id":"sh/gju9wze9","slide":11,"bbox":[0,0,0,0]}
+{"kind":"textbox","id":"sh/fi1s3ux4","slide":11,"text":"Checkpoint identity","textPreview":"Checkpoint identity","textChars":19,"textLines":1,"bbox":[64,545,650,45]}
+{"kind":"textbox","id":"sh/ehsru9wj","slide":11,"text":"Schema and archive hashes bind the kernel. Application hashes bind routes and memory. Generation and parent identity bind the chain.","textPreview":"Schema and archive hashes bind the kernel. Application hashes bind routes and memory. Generation and parent identity bind the chain.","textChars":132,"textLines":1,"bbox":[64,605,670,145]}
+{"kind":"textbox","id":"sh/p83a9of6","slide":11,"text":"Example Linux minimal chain","textPreview":"Example Linux minimal chain","textChars":27,"textLines":1,"bbox":[834,545,702,45]}
+{"kind":"textbox","id":"sh/o7u90jel","slide":11,"text":"0, 8, 15, 19, 20 completed calls\nEach resumed interval starts from its saved ordinal.\nThe final suffix checks completion.","textPreview":"0, 8, 15, 19, 20 completed calls | Each resumed interval starts from its saved ordinal. | The final suffix checks completion.","textChars":121,"textLines":3,"bbox":[834,605,702,145]}
+{"kind":"textbox","id":"sh/ob2twnmx","slide":11,"text":"QMP observes stopped memory externally. The replay guest itself uses no host services.","textPreview":"QMP observes stopped memory externally. The replay guest itself uses no host services.","textChars":86,"textLines":1,"bbox":[64,805,1472,42]}
+{"kind":"notes","id":"nt/n5do3r","slide":11,"text":"Repository sources: /Users/al3x3n0/huawei/osrec/docs/elf-checkpoint-chains.md\n/Users/al3x3n0/huawei/osrec/tools/application_pause.py\n/Users/al3x3n0/huawei/osrec/tools/application_checkpoint_chain.py\n\n"}
+{"kind":"slide","id":"sl/a63a8d","slide":12,"title":"Implemented kernel profiles","textShapes":6}
+{"kind":"textbox","id":"sh/7axk72xc","slide":12,"text":"Implemented kernel profiles","textPreview":"Implemented kernel profiles","textChars":27,"textLines":1,"bbox":[64,36,1472,72]}
+{"kind":"textbox","id":"sh/8b61g7ex","slide":12,"text":"Current coverage is explicit and bounded by each reviewed port","textPreview":"Current coverage is explicit and bounded by each reviewed port","textChars":62,"textLines":1,"bbox":[64,112,1472,58]}
+{"kind":"textbox","id":"sh/9cf29cfi","slide":12,"text":"OSREC","textPreview":"OSREC","textChars":5,"textLines":1,"bbox":[64,850,120,28]}
+{"kind":"textbox","id":"sh/yl4jaxwv","slide":12,"text":"12","textPreview":"12","textChars":2,"textLines":1,"bbox":[1490,850,46,28]}
+{"kind":"textbox","id":"sh/kn61c7e1","slide":12,"text":"Native source identity caveat","textPreview":"Native source identity caveat","textChars":29,"textLines":1,"bbox":[64,720,1472,45]}
+{"kind":"textbox","id":"sh/lofi5sfm","slide":12,"text":"Linux uses reviewed upstream bodies checked against LinuxKit. Exact native source-build attestation remains false. LiteOS capture is ARMv7 with selected C recompiled for AArch64.","textPreview":"Linux uses reviewed upstream bodies checked against LinuxKit. Exact native source-build attestation remains false. LiteOS capture is ARMv...","textChars":178,"textLines":1,"bbox":[64,770,1472,70]}
+{"kind":"table","id":"tb/2pcrux8b","slide":12,"name":"","rows":4,"cols":3,"preview":"Profile | Native scenario | Portable replay state","bbox":[64,200,1472,475]}
+{"kind":"notes","id":"nt/a63a8d","slide":12,"text":"Repository sources: /Users/al3x3n0/huawei/osrec/docs/linux-aarch64-slices.md\n/Users/al3x3n0/huawei/osrec/docs/file-operations.md\n\nCounts below come from documented profiles, not a new benchmark run. Linux upstream v6.10 bodies are behaviorally checked against LinuxKit 6.10.14-linuxkit. Exact native-source rebuild attestation is false. LiteOS native capture runs ARMv7 and selected C bodies are recompiled for AArch64."}
+{"kind":"slide","id":"sl/qcax02","slide":13,"title":"Validation and retained evidence","textShapes":5}
+{"kind":"textbox","id":"sh/rq10vulo","slide":13,"text":"Validation and retained evidence","textPreview":"Validation and retained evidence","textChars":32,"textLines":1,"bbox":[64,36,1472,72]}
+{"kind":"textbox","id":"sh/sra14z2t","slide":13,"text":"A published package carries both executable inputs and checks of the declared behavior","textPreview":"A published package carries both executable inputs and checks of the declared behavior","textChars":86,"textLines":1,"bbox":[64,112,1472,58]}
+{"kind":"textbox","id":"sh/dcjix43e","slide":13,"text":"OSREC","textPreview":"OSREC","textChars":5,"textLines":1,"bbox":[64,850,120,28]}
+{"kind":"textbox","id":"sh/il8zypkr","slide":13,"text":"13","textPreview":"13","textChars":2,"textLines":1,"bbox":[1490,850,46,28]}
+{"kind":"textbox","id":"sh/4nqh0z2x","slide":13,"text":"These are functional checks under the port contract. RTL timing and general dependency completeness remain separate claims.","textPreview":"These are functional checks under the port contract. RTL timing and general dependency completeness remain separate claims.","textChars":123,"textLines":1,"bbox":[64,805,1472,42]}
+{"kind":"table","id":"tb/6p8zmp4r","slide":13,"name":"","rows":6,"cols":3,"preview":"Layer | What it checks | Retained evidence","bbox":[64,200,1472,540]}
+{"kind":"notes","id":"nt/qcax02","slide":13,"text":"Repository sources: /Users/al3x3n0/huawei/osrec/docs/elf-checkpoint-chains.md\n/Users/al3x3n0/huawei/osrec/tools/verify_syscall_slices.py\n/Users/al3x3n0/huawei/osrec/tools/run_linux_aarch64_checkpoint_pipeline.py\n\n"}
+{"kind":"slide","id":"sl/sd76dz","slide":14,"title":"Analysis tools and proof boundaries","textShapes":6}
+{"kind":"textbox","id":"sh/elkru1gf","slide":14,"text":"Analysis tools and proof boundaries","textPreview":"Analysis tools and proof boundaries","textChars":35,"textLines":1,"bbox":[64,36,1472,72]}
+{"kind":"textbox","id":"sh/1ovqpgf6","slide":14,"text":"Analysis supports construction and observation reduction within declared models","textPreview":"Analysis supports construction and observation reduction within declared models","textChars":79,"textLines":1,"bbox":[64,112,1472,58]}
+{"kind":"textbox","id":"sh/gnm9wbyl","slide":14,"text":"OSREC","textPreview":"OSREC","textChars":5,"textLines":1,"bbox":[64,850,120,28]}
+{"kind":"textbox","id":"sh/3qd8rqxc","slide":14,"text":"14","textPreview":"14","textChars":2,"textLines":1,"bbox":[1490,850,46,28]}
+{"kind":"textbox","id":"sh/psvqtgf2","slide":14,"text":"Proof rule","textPreview":"Proof rule","textChars":10,"textLines":1,"bbox":[64,720,1472,45]}
+{"kind":"textbox","id":"sh/orm90byx","slide":14,"text":"Equal retained observations must imply equal declared outputs and effects. A separate reconstruction check reruns the code using those observations.","textPreview":"Equal retained observations must imply equal declared outputs and effects. A separate reconstruction check reruns the code using those ob...","textChars":148,"textLines":1,"bbox":[64,774,1472,64]}
+{"kind":"table","id":"tb/nalgf294","slide":14,"name":"","rows":4,"cols":3,"preview":"Tool | Implemented purpose | CURRENT boundary","bbox":[64,200,1472,460]}
+{"kind":"notes","id":"nt/sd76dz","slide":14,"text":"Repository sources: /Users/al3x3n0/huawei/osrec/docs/entry-state-analysis.md\n/Users/al3x3n0/huawei/osrec/docs/el0-analysis.md\n/Users/al3x3n0/huawei/osrec/docs/trace-analysis.md\n/Users/al3x3n0/huawei/osrec/compiler/Planner.cpp\n\n"}
+{"kind":"slide","id":"sl/4xthky","slide":15,"title":"CURRENT limitations","textShapes":5}
+{"kind":"textbox","id":"sh/qxsvuhk3","slide":15,"text":"CURRENT limitations","textPreview":"CURRENT limitations","textChars":19,"textLines":1,"bbox":[64,36,1472,72]}
+{"kind":"textbox","id":"sh/d0je5wje","slide":15,"text":"Each current boundary has a proposed development direction","textPreview":"Each current boundary has a proposed development direction","textChars":58,"textLines":1,"bbox":[64,112,1472,58]}
+{"kind":"textbox","id":"sh/czadwr2t","slide":15,"text":"OSREC","textPreview":"OSREC","textChars":5,"textLines":1,"bbox":[64,850,120,28]}
+{"kind":"textbox","id":"sh/z21w7m1k","slide":15,"text":"15","textPreview":"15","textChars":2,"textLines":1,"bbox":[1490,850,46,28]}
+{"kind":"textbox","id":"sh/l43e9wjq","slide":15,"text":"Future solutions are development proposals. Each extension requires a defined replay contract and validation.","textPreview":"Future solutions are development proposals. Each extension requires a defined replay contract and validation.","textChars":109,"textLines":1,"bbox":[64,810,1472,42]}
+{"kind":"table","id":"tb/fi5g7elw","slide":15,"name":"","rows":10,"cols":3,"preview":"Area | CURRENT limitation | Future solution (proposed)","bbox":[64,185,1472,610]}
+{"kind":"notes","id":"nt/4xthky","slide":15,"text":"Repository sources: /Users/al3x3n0/huawei/osrec/docs/design.md\n/Users/al3x3n0/huawei/osrec/docs/application-checkpoints.md\n/Users/al3x3n0/huawei/osrec/tools/contextify_slice.py\n/Users/al3x3n0/huawei/osrec/docs/context-object-graphs.md\n\nFuture solutions are proposals, not implemented capabilities or delivery commitments."}
+{"kind":"slide","id":"sl/b8e57a","slide":16,"title":"Proposed development roadmap","textShapes":5}
+{"kind":"textbox","id":"sh/ax4nm9of","slide":16,"text":"Proposed development roadmap","textPreview":"Proposed development roadmap","textChars":28,"textLines":1,"bbox":[64,36,1472,72]}
+{"kind":"textbox","id":"sh/x0v6h476","slide":16,"text":"Sequence extensions by their dependency on reliable state and replay contracts","textPreview":"Sequence extensions by their dependency on reliable state and replay contracts","textChars":78,"textLines":1,"bbox":[64,112,1472,58]}
+{"kind":"textbox","id":"sh/wzm5oz6l","slide":16,"text":"OSREC","textPreview":"OSREC","textChars":5,"textLines":1,"bbox":[64,850,120,28]}
+{"kind":"textbox","id":"sh/nud4bup4","slide":16,"text":"16","textPreview":"16","textChars":2,"textLines":1,"bbox":[1490,850,46,28]}
+{"kind":"textbox","id":"sh/9wvmd47u","slide":16,"text":"Near-term priority: broaden proven coverage and state fidelity before general concurrency or timing claims.","textPreview":"Near-term priority: broaden proven coverage and state fidelity before general concurrency or timing claims.","textChars":107,"textLines":1,"bbox":[64,805,1472,42]}
+{"kind":"table","id":"tb/jadgzyl0","slide":16,"name":"","rows":5,"cols":3,"preview":"Phase | Proposed work | Acceptance gate","bbox":[64,200,1472,535]}
+{"kind":"notes","id":"nt/b8e57a","slide":16,"text":"Repository sources: /Users/al3x3n0/huawei/osrec/docs/design.md\n/Users/al3x3n0/huawei/osrec/docs/entry-state-analysis.md\n\nThis roadmap is a proposed prioritization. It adds no dates, effort estimates or measured performance targets. Explicit build identity remains the default even if migration is later introduced."}
+{"kind":"slide","id":"sl/8bntd7","slide":17,"title":"Acceptance criteria for extensions","textShapes":5}
+{"kind":"textbox","id":"sh/dcrat8by","slide":17,"text":"Acceptance criteria for extensions","textPreview":"Acceptance criteria for extensions","textChars":34,"textLines":1,"bbox":[64,36,1472,72]}
+{"kind":"textbox","id":"sh/qp0bytsn","slide":17,"text":"Proposed gates preserve explicit scope as capabilities expand","textPreview":"Proposed gates preserve explicit scope as capabilities expand","textChars":61,"textLines":1,"bbox":[64,112,1472,58]}
+{"kind":"textbox","id":"sh/ra9sryts","slide":17,"text":"OSREC","textPreview":"OSREC","textChars":5,"textLines":1,"bbox":[64,850,120,28]}
+{"kind":"textbox","id":"sh/0f2t43ap","slide":17,"text":"17","textPreview":"17","textChars":2,"textLines":1,"bbox":[1490,850,46,28]}
+{"kind":"textbox","id":"sh/yd0b2dsj","slide":17,"text":"There is no numeric performance promise yet. Define budgets after measuring the supported workload.","textPreview":"There is no numeric performance promise yet. Define budgets after measuring the supported workload.","textChars":99,"textLines":1,"bbox":[64,805,1472,42]}
+{"kind":"table","id":"tb/4vm9ovah","slide":17,"name":"","rows":6,"cols":2,"preview":"Gate | Evidence required","bbox":[64,200,1472,540]}
+{"kind":"notes","id":"nt/8bntd7","slide":17,"text":"Repository sources: /Users/al3x3n0/huawei/osrec/docs/design.md\n/Users/al3x3n0/huawei/osrec/docs/trace-analysis.md\n/Users/al3x3n0/huawei/osrec/docs/elf-checkpoint-chains.md\n\n"}
+{"kind":"slide","id":"sl/1spqxl","slide":18,"title":"Operational handoff","textShapes":11}
+{"kind":"textbox","id":"sh/zixs7u98","slide":18,"text":"Operational handoff","textPreview":"Operational handoff","textChars":19,"textLines":1,"bbox":[64,36,1472,72]}
+{"kind":"textbox","id":"sh/kj6t0zat","slide":18,"text":"Use the current pipeline to produce a complete, reviewable replay package","textPreview":"Use the current pipeline to produce a complete, reviewable replay package","textChars":73,"textLines":1,"bbox":[64,112,1472,58]}
+{"kind":"textbox","id":"sh/lkfa94ry","slide":18,"text":"OSREC","textPreview":"OSREC","textChars":5,"textLines":1,"bbox":[64,850,120,28]}
+{"kind":"textbox","id":"sh/mlob29sj","slide":18,"text":"18","textPreview":"18","textChars":2,"textLines":1,"bbox":[1490,850,46,28]}
+{"kind":"textbox","id":"sh/76hsbu94","slide":18,"text":"Native Linux capture and full pipeline","textPreview":"Native Linux capture and full pipeline","textChars":38,"textLines":1,"bbox":[64,205,1472,45]}
+{"kind":"textbox","id":"sh/87qt4zap","slide":18,"text":"python3 tools/run_linux_aarch64_checkpoint_pipeline.py \\\n  --kernel-image /path/to/arm64/Image --out build/my-pipeline","textPreview":"python3 tools/run_linux_aarch64_checkpoint_pipeline.py \\ |   --kernel-image /path/to/arm64/Image --out build/my-pipeline","textChars":118,"textLines":2,"bbox":[64,265,1472,105]}
+{"kind":"textbox","id":"sh/98zad4ra","slide":18,"text":"Offline verification","textPreview":"Offline verification","textChars":20,"textLines":1,"bbox":[64,420,1472,45]}
+{"kind":"textbox","id":"sh/u98b69sv","slide":18,"text":"python3 tools/run_linux_aarch64_checkpoint_pipeline.py \\\n  --verify build/my-pipeline","textPreview":"python3 tools/run_linux_aarch64_checkpoint_pipeline.py \\ |   --verify build/my-pipeline","textChars":85,"textLines":2,"bbox":[64,480,1472,105]}
+{"kind":"textbox","id":"sh/vahsfe9g","slide":18,"text":"Customer ELF or saved checkpoint","textPreview":"Customer ELF or saved checkpoint","textChars":32,"textLines":1,"bbox":[64,635,1472,45]}
+{"kind":"textbox","id":"sh/rqtg3uds","slide":18,"text":"run_application_checkpoint_chain.py accepts --elf with --checkpoint,\nor --resume-checkpoint with matching --slices.","textPreview":"run_application_checkpoint_chain.py accepts --elf with --checkpoint, | or --resume-checkpoint with matching --slices.","textChars":115,"textLines":2,"bbox":[64,695,1472,80]}
+{"kind":"textbox","id":"sh/qpkzupc7","slide":18,"text":"Handoff contains native evidence, pinned port inputs, replay images, joint checkpoints and verification reports.","textPreview":"Handoff contains native evidence, pinned port inputs, replay images, joint checkpoints and verification reports.","textChars":112,"textLines":1,"bbox":[64,805,1472,42]}
+{"kind":"notes","id":"nt/1spqxl","slide":18,"text":"Repository sources: /Users/al3x3n0/huawei/osrec/docs/linux-aarch64-slices.md\n/Users/al3x3n0/huawei/osrec/docs/elf-checkpoint-chains.md\n/Users/al3x3n0/huawei/osrec/tools/run_application_checkpoint_chain.py\n\n"}

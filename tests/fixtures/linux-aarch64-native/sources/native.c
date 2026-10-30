@@ -1,0 +1,44 @@
+#include "osrec_application.h"
+extern uint32_t app_words[8];
+extern uint64_t app_returns[20];
+void osrec_application_main(void);
+static char output[8192];static size_t used;
+static void append(char c){if(used<sizeof(output))output[used++]=c;}
+static void string(const char *p){while(*p)append(*p++);}
+static void number(uint64_t n){char digits[20];unsigned i=0;do{digits[i++]=(char)('0'+n%10);n/=10;}while(n);while(i)append(digits[--i]);}
+static void scalar(uint64_t n){number(n);append(',');}
+static void flush(void)
+{
+    size_t sent=0;
+    while(sent<used){int64_t n=osrec_app_syscall(64,1,(uintptr_t)output+sent,used-sent,0,0,0);if(n<=0)return;sent+=(size_t)n;}
+    used=0;
+}
+static void halt(void){for(;;)__asm__ volatile("wfe");}
+static void fail(void){string("OSREC_LINUX_CAPTURE_FAILED\n");flush();halt();}
+void osrec_native_record(unsigned i,uint64_t syscall,const uint64_t *args)
+{
+    if(i)append(',');string("{\"number\":");number(syscall);string(",\"args\":[");
+    for(unsigned j=0;j<3;++j){if(j)append(',');uint64_t value=args[j];if(syscall==148 || syscall==150)value=!value ? UINT64_MAX : value==1 ? UINT64_MAX-1 : value-(uintptr_t)app_words;number(value);}
+    string("],\"raw_bits\":");number(app_returns[i]);string(",\"words\":[");
+    for(unsigned j=0;j<8;++j){if(j)append(',');number(app_words[j]);}
+    string("],\"umask_after\":");uint64_t mask=(uint64_t)osrec_app_syscall(166,022,0,0,0,0,0);number(mask);
+    osrec_app_syscall(166,mask,0,0,0,0,0);append('}');
+}
+void osrec_native_main(void)
+{
+    /* Prepare one non-root identity with distinct real/effective/saved IDs.
+     * Saved UID zero allows this PID-1 capture process to regain reboot rights. */
+    if(osrec_app_syscall(149,2001,2002,2003,0,0,0) || osrec_app_syscall(147,1001,1002,0,0,0,0))fail();
+    osrec_app_syscall(166,022,0,0,0,0,0);
+    string("OSREC_LINUX_CAPTURE {\"initial\":{\"pid\":");number((uint64_t)osrec_app_syscall(178,0,0,0,0,0,0));
+    string(",\"tgid\":");number((uint64_t)osrec_app_syscall(172,0,0,0,0,0,0));
+    string(",\"ppid\":");number((uint64_t)osrec_app_syscall(173,0,0,0,0,0,0));
+    string(",\"uids\":[");scalar(1001);scalar(1002);number(0);
+    string("],\"gids\":[");scalar(2001);scalar(2002);number(2003);
+    string("],\"umask\":18},\"calls\":[");
+    osrec_application_main();string("]}\n");flush();
+    if(osrec_app_syscall(147,UINT64_MAX,0,UINT64_MAX,0,0,0))fail();
+    string("OSREC_LINUX_CAPTURE_DONE\n");flush();
+    osrec_app_syscall(142,UINT64_C(0xfee1dead),UINT64_C(0x28121969),UINT64_C(0x4321fedc),0,0,0);
+    halt();
+}

@@ -1,0 +1,533 @@
+{
+ "format": "osrec-klee-state-batch-v1",
+ "description": "KLEE state discovery over the Linux 6.10 arm64 fd-control slice (file-io plus fcntl, pread64, pwrite64, ftruncate): state-changing boundaries captured by svc_boundary.py from a workload run with RLIMIT_NOFILE at the model constant 8 (the binding checks it), with expected results.",
+ "defaults": {
+  "slice": "build/linux-fd-control-port-20261030c/kernel",
+  "binding": "integrations/linux_aarch64/fd-control/live-binding.json",
+  "contracts": "integrations/linux_aarch64/fd-control/analysis-contracts.json",
+  "max_time": 1200
+ },
+ "entries": [
+  {
+   "name": "fcntl-getfd",
+   "boundary": "build/linux-svc-state-20261030b/observe-fcntl-getfd/boundary.json",
+   "boundary_sha256": "18af9fbda729c8d8c485ec9523c5076ee12b90cd293abe3b554ec681bb98b3ef",
+   "tier": "quick",
+   "args": [],
+   "expect": {
+    "complete": true,
+    "required": [
+     "file_pool[1].f_mode",
+     "files.count.counter",
+     "files.fdtab.close_on_exec[0]"
+    ],
+    "control_without_effect": [],
+    "split_inputs": [],
+    "validation": "consistent",
+    "not_demonstrated": [
+     "file_pool[1].f_mode",
+     "files.count.counter"
+    ]
+   }
+  },
+  {
+   "name": "fcntl-setfd",
+   "boundary": "build/linux-svc-state-20261030b/observe-fcntl-setfd/boundary.json",
+   "boundary_sha256": "3f157fc3dccaf315954255345d72b9ac61d36aaf842d51a4cdd8f04ee5991be1",
+   "tier": "quick",
+   "args": [],
+   "expect": {
+    "complete": true,
+    "required": [
+     "file_pool[1].f_mode",
+     "files.count.counter",
+     "files.fdtab.close_on_exec[0]"
+    ],
+    "control_without_effect": [],
+    "split_inputs": [],
+    "validation": "consistent",
+    "not_demonstrated": [
+     "file_pool[1].f_mode",
+     "files.count.counter"
+    ]
+   }
+  },
+  {
+   "name": "fcntl-getfd-alias",
+   "boundary": "build/linux-svc-state-20261030b/observe-fcntl-getfd-alias/boundary.json",
+   "boundary_sha256": "76d27530c2b57749909ff3ea58d9e719bb6c5b4158e54b0cc4cd388577532139",
+   "tier": "quick",
+   "args": [],
+   "expect": {
+    "complete": true,
+    "required": [
+     "file_pool[1].f_mode",
+     "files.count.counter",
+     "files.fdtab.close_on_exec[0]"
+    ],
+    "control_without_effect": [],
+    "split_inputs": [],
+    "validation": "consistent",
+    "not_demonstrated": [
+     "file_pool[1].f_mode",
+     "files.count.counter"
+    ]
+   }
+  },
+  {
+   "name": "fcntl-clearfd",
+   "boundary": "build/linux-svc-state-20261030b/observe-fcntl-clearfd/boundary.json",
+   "boundary_sha256": "0efdba54d13b8776cdb1f6a089033a8f5373b5eab8ead75c572290081cfbc6b9",
+   "tier": "quick",
+   "args": [],
+   "expect": {
+    "complete": true,
+    "required": [
+     "file_pool[1].f_mode",
+     "files.count.counter",
+     "files.fdtab.close_on_exec[0]"
+    ],
+    "control_without_effect": [],
+    "split_inputs": [],
+    "validation": "consistent",
+    "not_demonstrated": [
+     "file_pool[1].f_mode",
+     "files.count.counter"
+    ]
+   }
+  },
+  {
+   "name": "fcntl-getfl",
+   "boundary": "build/linux-svc-state-20261030b/observe-fcntl-getfl/boundary.json",
+   "boundary_sha256": "bb913c09d0111fe1412bce896ef1a487fc0038e25daf3e5e399f9511626baf5a",
+   "tier": "quick",
+   "args": [],
+   "expect": {
+    "complete": true,
+    "required": [
+     "file_pool[1].f_flags",
+     "file_pool[1].f_mode",
+     "files.count.counter"
+    ],
+    "control_without_effect": [],
+    "split_inputs": [],
+    "validation": "consistent",
+    "not_demonstrated": [
+     "file_pool[1].f_mode",
+     "files.count.counter"
+    ]
+   }
+  },
+  {
+   "name": "fcntl-dupfd",
+   "boundary": "build/linux-svc-state-20261030b/observe-fcntl-dupfd/boundary.json",
+   "boundary_sha256": "ed907b3e684f601a617111571bd4ca1b979d6510c3e820442f03559fe8991c02",
+   "tier": "quick",
+   "args": [],
+   "expect": {
+    "complete": true,
+    "required": [
+     "file_pool[1].f_count",
+     "file_pool[1].f_mode",
+     "files.count.counter",
+     "files.fdtab.close_on_exec[0]"
+    ],
+    "control_without_effect": [],
+    "split_inputs": [],
+    "validation": "consistent",
+    "not_demonstrated": [
+     "files.count.counter"
+    ]
+   }
+  },
+  {
+   "name": "fcntl-dupfd-limit",
+   "boundary": "build/linux-svc-state-20261030b/observe-fcntl-dupfd-limit/boundary.json",
+   "boundary_sha256": "51953fd768125d28fd356cae45dc615f2b124532a34bd9277769863ac1c8fe51",
+   "tier": "quick",
+   "args": [],
+   "expect": {
+    "complete": true,
+    "required": [],
+    "control_without_effect": [
+     "file_pool[1].f_mode",
+     "files.count.counter"
+    ],
+    "split_inputs": [],
+    "validation": "consistent",
+    "not_demonstrated": []
+   }
+  },
+  {
+   "name": "fcntl-dupfd-cloexec",
+   "boundary": "build/linux-svc-state-20261030b/observe-fcntl-dupfd-cloexec/boundary.json",
+   "boundary_sha256": "efbe4c320af7530180974a0d9e3247abb4f237f8710e1b175015cb2125b5d39f",
+   "tier": "quick",
+   "args": [
+    "--split-field",
+    "files.next_fd:0:5"
+   ],
+   "expect": {
+    "complete": true,
+    "required": [
+     "file_pool[1].f_count",
+     "file_pool[1].f_mode",
+     "files.count.counter",
+     "files.fdtab.close_on_exec[0]"
+    ],
+    "control_without_effect": [],
+    "split_inputs": [
+     "files.next_fd"
+    ],
+    "validation": "consistent",
+    "not_demonstrated": [
+     "files.count.counter",
+     "files.next_fd"
+    ]
+   }
+  },
+  {
+   "name": "fcntl-ebadf",
+   "boundary": "build/linux-svc-state-20261030b/observe-fcntl-ebadf/boundary.json",
+   "boundary_sha256": "d202dcfbefb9b78bdfc7c55e876f908e0a8b5a96241bfe76e793b2c525fa685d",
+   "tier": "quick",
+   "args": [],
+   "expect": {
+    "complete": true,
+    "required": [],
+    "control_without_effect": [
+     "files.count.counter"
+    ],
+    "split_inputs": [],
+    "validation": "consistent",
+    "not_demonstrated": []
+   }
+  },
+  {
+   "name": "fcntl-clearfd-alias",
+   "boundary": "build/linux-svc-state-20261030b/observe-fcntl-clearfd-alias/boundary.json",
+   "boundary_sha256": "ae141982fddb0735b3ec964745acff603d40437c5bea83b56fce7adb2bc440d5",
+   "tier": "quick",
+   "args": [],
+   "expect": {
+    "complete": true,
+    "required": [
+     "file_pool[1].f_mode",
+     "files.count.counter",
+     "files.fdtab.close_on_exec[0]"
+    ],
+    "control_without_effect": [],
+    "split_inputs": [],
+    "validation": "consistent",
+    "not_demonstrated": [
+     "file_pool[1].f_mode",
+     "files.count.counter"
+    ]
+   }
+  },
+  {
+   "name": "pread",
+   "boundary": "build/linux-svc-state-20261030b/observe-pread/boundary.json",
+   "boundary_sha256": "092171238a84f1a60fe728c9081dac5d088784aca28d9fcc8d07db0bf27f4f15",
+   "tier": "long",
+   "args": [
+    "--split-field",
+    "inode_pool[1].i_size:0:64"
+   ],
+   "expect": {
+    "complete": false,
+    "required": [
+     "file_data.bytes",
+     "file_pool[1].f_flags",
+     "file_pool[1].f_mode",
+     "file_pool[1].object_id",
+     "files.count.counter",
+     "inode_pool[1].i_flags",
+     "inode_pool[1].i_mode",
+     "task.ioac.rchar",
+     "task.ioac.syscr",
+     "user_object.1"
+    ],
+    "control_without_effect": [],
+    "split_inputs": [
+     "inode_pool[1].i_size"
+    ],
+    "validation": "partial",
+    "not_demonstrated": [
+     "file_pool[1].f_flags",
+     "files.count.counter",
+     "inode_pool[1].i_flags",
+     "inode_pool[1].i_mode"
+    ]
+   }
+  },
+  {
+   "name": "pread-negative",
+   "boundary": "build/linux-svc-state-20261030b/observe-pread-negative/boundary.json",
+   "boundary_sha256": "d746005668cd8f2819ace727094291dd76c9b70a335b62dc57102ae51a7bf8a2",
+   "tier": "quick",
+   "args": [],
+   "expect": {
+    "complete": true,
+    "required": [],
+    "control_without_effect": [],
+    "split_inputs": [],
+    "validation": "consistent",
+    "not_demonstrated": []
+   }
+  },
+  {
+   "name": "pread-all",
+   "boundary": "build/linux-svc-state-20261030b/observe-pread-all/boundary.json",
+   "boundary_sha256": "289df8bfb131699945270fa4825b0e7b21a8fbf97c256109c1473cd0c5431a74",
+   "tier": "long",
+   "args": [
+    "--split-field",
+    "inode_pool[1].i_size:0:64"
+   ],
+   "expect": {
+    "complete": false,
+    "required": [
+     "file_data.bytes",
+     "file_pool[1].f_flags",
+     "file_pool[1].f_mode",
+     "file_pool[1].object_id",
+     "files.count.counter",
+     "inode_pool[1].i_flags",
+     "inode_pool[1].i_mode",
+     "task.ioac.rchar",
+     "task.ioac.syscr",
+     "user_object.1"
+    ],
+    "control_without_effect": [],
+    "split_inputs": [
+     "inode_pool[1].i_size"
+    ],
+    "validation": "partial",
+    "not_demonstrated": [
+     "file_pool[1].f_flags",
+     "files.count.counter",
+     "inode_pool[1].i_flags",
+     "inode_pool[1].i_mode"
+    ]
+   }
+  },
+  {
+   "name": "pwrite",
+   "boundary": "build/linux-svc-state-20261030b/observe-pwrite/boundary.json",
+   "boundary_sha256": "1ffd31516f3cfa76f675aabbf952bbebd5dabf2559e73b5cc9abdc1117258ca4",
+   "tier": "long",
+   "args": [],
+   "expect": {
+    "complete": false,
+    "required": [
+     "file_pool[1].f_flags",
+     "file_pool[1].f_iocb_flags",
+     "file_pool[1].f_mode",
+     "file_pool[1].object_id",
+     "files.count.counter",
+     "inode_pool[1].i_flags",
+     "inode_pool[1].i_mode",
+     "inode_pool[1].i_size",
+     "task.ioac.syscw"
+    ],
+    "control_without_effect": [],
+    "split_inputs": [],
+    "validation": "partial",
+    "not_demonstrated": [
+     "file_pool[1].f_flags",
+     "files.count.counter",
+     "inode_pool[1].i_mode"
+    ]
+   }
+  },
+  {
+   "name": "pwrite-extend",
+   "boundary": "build/linux-svc-state-20261030b/observe-pwrite-extend/boundary.json",
+   "boundary_sha256": "8019db242645de9d168467b28077d15d07d86dfb2f917bf16b1b318bab1f603f",
+   "tier": "long",
+   "args": [],
+   "expect": {
+    "complete": false,
+    "required": [
+     "file_pool[1].f_iocb_flags",
+     "file_pool[1].f_mode",
+     "file_pool[1].object_id",
+     "files.count.counter",
+     "inode_pool[1].i_flags",
+     "inode_pool[1].i_mode",
+     "task.ioac.syscw"
+    ],
+    "control_without_effect": [],
+    "split_inputs": [],
+    "validation": "partial",
+    "not_demonstrated": [
+     "files.count.counter",
+     "inode_pool[1].i_mode"
+    ]
+   }
+  },
+  {
+   "name": "pwrite-restore",
+   "boundary": "build/linux-svc-state-20261030b/observe-pwrite-restore/boundary.json",
+   "boundary_sha256": "89304a574c3e38a97e648dbc6e34db9f1190dedc82636a60ba6d5eb35abe2cab",
+   "tier": "long",
+   "args": [],
+   "expect": {
+    "complete": false,
+    "required": [
+     "file_pool[1].f_flags",
+     "file_pool[1].f_iocb_flags",
+     "file_pool[1].f_mode",
+     "file_pool[1].object_id",
+     "files.count.counter",
+     "inode_pool[1].i_flags",
+     "inode_pool[1].i_mode",
+     "inode_pool[1].i_size",
+     "task.ioac.syscw"
+    ],
+    "control_without_effect": [],
+    "split_inputs": [],
+    "validation": "partial",
+    "not_demonstrated": [
+     "file_pool[1].f_flags",
+     "files.count.counter",
+     "inode_pool[1].i_mode"
+    ]
+   }
+  },
+  {
+   "name": "ftruncate-shrink",
+   "boundary": "build/linux-svc-state-20261030b/observe-ftruncate-shrink/boundary.json",
+   "boundary_sha256": "5144e9e14bde17ac08d806f6d7308b66ba4a8e6a76268153ba40f3a5615d9048",
+   "tier": "long",
+   "args": [],
+   "expect": {
+    "complete": true,
+    "required": [
+     "file_data.bytes",
+     "file_pool[1].f_mode",
+     "file_pool[1].object_id",
+     "files.count.counter",
+     "inode_pool[1].append",
+     "inode_pool[1].i_flags",
+     "inode_pool[1].i_mode",
+     "inode_pool[1].i_size",
+     "inode_pool[1].osrec_shmem.alloced",
+     "inode_pool[1].osrec_shmem.fallocend",
+     "inode_pool[1].osrec_shmem.seals",
+     "inode_pool[1].osrec_shmem.swapped"
+    ],
+    "control_without_effect": [],
+    "split_inputs": [],
+    "validation": "consistent",
+    "not_demonstrated": [
+     "files.count.counter"
+    ]
+   }
+  },
+  {
+   "name": "ftruncate-grow",
+   "boundary": "build/linux-svc-state-20261030b/observe-ftruncate-grow/boundary.json",
+   "boundary_sha256": "cd358eb1af2ef661c26a3350145d065b7cdae0888a26f5a293f1e623969f5f31",
+   "tier": "long",
+   "args": [],
+   "expect": {
+    "complete": true,
+    "required": [
+     "file_data.bytes",
+     "file_pool[1].f_mode",
+     "file_pool[1].object_id",
+     "files.count.counter",
+     "inode_pool[1].append",
+     "inode_pool[1].i_flags",
+     "inode_pool[1].i_mode",
+     "inode_pool[1].i_size",
+     "inode_pool[1].osrec_shmem.alloced",
+     "inode_pool[1].osrec_shmem.fallocend",
+     "inode_pool[1].osrec_shmem.seals",
+     "inode_pool[1].osrec_shmem.swapped"
+    ],
+    "control_without_effect": [],
+    "split_inputs": [],
+    "validation": "consistent",
+    "not_demonstrated": [
+     "file_data.bytes",
+     "files.count.counter",
+     "inode_pool[1].i_size",
+     "inode_pool[1].osrec_shmem.alloced",
+     "inode_pool[1].osrec_shmem.fallocend",
+     "inode_pool[1].osrec_shmem.swapped"
+    ]
+   }
+  },
+  {
+   "name": "ftruncate-negative",
+   "boundary": "build/linux-svc-state-20261030b/observe-ftruncate-negative/boundary.json",
+   "boundary_sha256": "9c75131645916b45f305e76bd8520678b137fe34f1723741c55e4348b1dd8def",
+   "tier": "quick",
+   "args": [],
+   "expect": {
+    "complete": true,
+    "required": [],
+    "control_without_effect": [],
+    "split_inputs": [],
+    "validation": "consistent",
+    "not_demonstrated": []
+   }
+  },
+  {
+   "name": "ftruncate-console",
+   "boundary": "build/linux-svc-state-20261030b/observe-ftruncate-console/boundary.json",
+   "boundary_sha256": "382376d36b0e93da4bb1851d997f5b1488b2084f596ca478f2238a30896810a3",
+   "tier": "quick",
+   "args": [],
+   "expect": {
+    "complete": true,
+    "required": [
+     "file_pool[0].f_mode",
+     "inode_pool[0].append",
+     "inode_pool[0].i_mode"
+    ],
+    "control_without_effect": [
+     "files.count.counter"
+    ],
+    "split_inputs": [],
+    "validation": "consistent",
+    "not_demonstrated": [
+     "inode_pool[0].append"
+    ]
+   }
+  },
+  {
+   "name": "ftruncate-restore",
+   "boundary": "build/linux-svc-state-20261030b/observe-ftruncate-restore/boundary.json",
+   "boundary_sha256": "fc2959603d34cc07221eb9cede5f8e470d11bb6b83dd76377547c37141ef0899",
+   "tier": "long",
+   "args": [],
+   "expect": {
+    "complete": true,
+    "required": [
+     "file_data.bytes",
+     "file_pool[1].f_mode",
+     "file_pool[1].object_id",
+     "files.count.counter",
+     "inode_pool[1].append",
+     "inode_pool[1].i_flags",
+     "inode_pool[1].i_mode",
+     "inode_pool[1].i_size",
+     "inode_pool[1].osrec_shmem.alloced",
+     "inode_pool[1].osrec_shmem.fallocend",
+     "inode_pool[1].osrec_shmem.seals",
+     "inode_pool[1].osrec_shmem.swapped"
+    ],
+    "control_without_effect": [],
+    "split_inputs": [],
+    "validation": "consistent",
+    "not_demonstrated": [
+     "files.count.counter"
+    ]
+   }
+  }
+ ]
+}

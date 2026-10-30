@@ -1,0 +1,142 @@
+/* Standalone replay of one scoped live LiteOS-A nanosleep.
+ * Scheduler, clock and user-copy boundaries below are explicit sequential models.
+ */
+#include <stdint.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#define STATIC static
+#define INLINE inline
+#define LITE_OS_SEC_TEXT_MINOR
+#define TRUE 1
+#define FALSE 0
+#define LOS_OK 0
+#define LOS_ERRNO_TSK_YIELD_NOT_ENOUGH_TASK UINT32_C(0x0200021c)
+#define OS_SYS_NS_PER_SECOND 1000000000
+#define OS_MAX_VALUE UINT32_MAX
+#define LOSCFG_BASE_CORE_TICK_PER_SECOND 1000
+#define OS_TASK_STATUS_INIT 1
+#define OS_TASK_STATUS_READY 2
+#define OS_TASK_STATUS_RUNNING 4
+#define OS_TASK_STATUS_SUSPENDED 8
+#define OS_TASK_STATUS_PENDING 16
+#define OS_TASK_STATUS_DELAY 32
+#define OS_TASK_STATUS_TIMEOUT 64
+#define OS_TASK_STATUS_PEND_TIME 128
+#define OS_TASK_STATUS_BLOCKED (1|16|32|128)
+#define OS_SYS_CYCLE_TO_US(v) ((v)/50)
+#define EDF_WAIT_FOREVER 1
+#define EDF_UNUSED 0
+#define timespec osrec_timespec
+#define nanosleep osrec_nanosleep
+typedef uint64_t UINT64;
+typedef uint32_t UINT32;
+typedef uint16_t UINT16;
+typedef int32_t INT32;
+typedef int BOOL;
+typedef void VOID;
+struct timespec {int64_t tv_sec;int32_t tv_nsec;uint32_t padding;};
+typedef struct {UINT64 finishTime;UINT32 flags;} SchedEDF;
+typedef struct {int unused;} SchedRunqueue;
+typedef struct LosTaskCB LosTaskCB;
+struct model_ops {VOID (*enqueue)(SchedRunqueue *,LosTaskCB *);};
+struct LosTaskCB {UINT32 taskID,taskStatus;UINT64 waitTime,startTime;int64_t timeSlice;
+    unsigned char sp[32];int pendList;void *taskMux;struct model_ops *ops;const char *taskName;};
+static LosTaskCB task;
+static struct timespec user_request;
+static unsigned position,depth,current,away,woken,resumed,deadline_checks,copy_calls,lock_depth;
+static UINT32 irq_stack[4];
+static int g_taskSpin;
+static void diverged(void){fputs("live wait replay diverged\n",stderr);exit(1);}
+#define REQUIRE(value) do{if(!(value))diverged();}while(0)
+/* @CAPTURE@ */
+static UINT64 wide(unsigned lo){return (UINT64)checkpoint[lo]|((UINT64)checkpoint[lo+1]<<32);}
+static UINT32 *event(unsigned kind)
+{
+    REQUIRE(position<sizeof(events)/sizeof(events[0]));UINT32 *e=events[position];
+    REQUIRE(e[0]==position && e[1]==kind && e[2]==current && e[5]==depth && (e[8]&31)==19);
+    return e;
+}
+static void subject(const UINT32 *e)
+{REQUIRE(e[3]==task.taskID && e[4]==task.taskStatus && e[9]==task.taskStatus);}
+static void OsSchedResched(void);
+static UINT32 HPFDelay(LosTaskCB *,UINT64);
+static UINT64 HPFWaitTimeGet(LosTaskCB *);
+static UINT32 LOS_TaskDelay(UINT32);
+static int LOS_ArchCopyFromUser(void *,const void *,size_t);
+static int LOS_ArchCopyToUser(void *,const void *,size_t);
+static int get_errno(void){return errno;}
+static int OsSchedPolicyIsEDF(LosTaskCB *t){REQUIRE(t==&task);return 0;}
+static void LOS_SpinLock(int *p){REQUIRE(p==&g_taskSpin && !lock_depth);++lock_depth;}
+static void LOS_SpinUnlock(int *p){REQUIRE(p==&g_taskSpin && lock_depth==1);--lock_depth;}
+static void LOS_ListDelete(int *p){(void)p;diverged();}
+static void OsTaskWakeClearPendMask(LosTaskCB *p){(void)p;diverged();}
+static void PrintExcInfo(const char *text,...){(void)text;diverged();}
+/* @ORIGINAL@ */
+static void enqueue(SchedRunqueue *rq,LosTaskCB *t)
+{
+    (void)rq;REQUIRE(t==&task && lock_depth==1 && depth && away && !woken);
+    t->taskStatus&=~OS_TASK_STATUS_BLOCKED;t->taskStatus|=OS_TASK_STATUS_READY;
+    woken=1;
+}
+static void OsSchedResched(void)
+{
+    REQUIRE(task.taskStatus&OS_TASK_STATUS_DELAY);
+    while(position<sizeof(events)/sizeof(events[0]) && events[position][1]!=7){
+        UINT32 kind=events[position][1];
+        if(kind==3){
+            if(events[position][7]==task.taskID){
+                REQUIRE(woken && !depth && away && !resumed);
+                task.taskStatus&=~OS_TASK_STATUS_READY;
+            }
+            UINT32 *e=event(3);REQUIRE(!depth && e[6]==current && e[7]==e[3] && e[9]==task.taskStatus);
+            if(current==task.taskID){REQUIRE(!away && !woken);task.taskStatus&=~OS_TASK_STATUS_RUNNING;away=1;}
+            current=e[7];
+            if(current==task.taskID){subject(e);task.taskStatus|=OS_TASK_STATUS_RUNNING;resumed=1;task.startTime=wide(22);}
+        }else if(kind==9){
+            UINT32 *e=event(9);REQUIRE(away && !woken && !deadline_checks);subject(e);
+            task.startTime=wide(24);UINT64 result=HPFWaitTimeGet(&task);
+            REQUIRE(result==((UINT64)e[6]|((UINT64)e[7]<<32)) && result==wide(26));++deadline_checks;
+        }else if(kind==4){
+            REQUIRE(depth<4 && current!=task.taskID);++depth;
+            UINT32 *e=event(4);REQUIRE(!e[3] && !e[4] && !e[7] && e[9]==task.taskStatus);
+            irq_stack[depth-1]=e[6];
+        }else if(kind==6){
+            UINT32 *e=event(6);UINT64 now=(UINT64)e[6]|((UINT64)e[7]<<32);
+            REQUIRE(depth && deadline_checks==1 && now>=task.waitTime && now==wide(29));
+            BOOL need=FALSE;SchedRunqueue rq={0};SchedTimeoutTaskWake(&rq,now,&task,&need);
+            REQUIRE(need && woken && !lock_depth);subject(e);
+        }else if(kind==5){
+            UINT32 *e=event(5);REQUIRE(depth && e[6]==irq_stack[depth-1] && !e[3] && !e[4] && !e[7] && e[9]==task.taskStatus);--depth;
+        }else diverged();
+        ++position;
+    }
+    REQUIRE(resumed && woken && !depth && current==task.taskID);
+}
+static UINT32 LOS_TaskDelay(UINT32 ticks)
+{
+    REQUIRE(ticks==20);UINT64 cycles=(UINT64)ticks*(checkpoint[28]/checkpoint[10]);
+    UINT32 *e=event(2);subject(e);REQUIRE(cycles==((UINT64)e[6]|((UINT64)e[7]<<32)));++position;
+    UINT32 result=HPFDelay(&task,cycles);
+    e=event(7);subject(e);REQUIRE(e[6]==result && !e[7]);++position;return result;
+}
+static int LOS_ArchCopyFromUser(void *out,const void *in,size_t size)
+{
+    REQUIRE(in==&user_request && size==sizeof(user_request));++copy_calls;memcpy(out,in,size);return 0;
+}
+static int LOS_ArchCopyToUser(void *out,const void *in,size_t size)
+{(void)out;(void)in;(void)size;diverged();return -1;}
+int main(void)
+{
+    struct model_ops ops={enqueue};task.taskID=checkpoint[1];task.taskStatus=checkpoint[3];
+    task.waitTime=wide(11);task.startTime=wide(13);task.ops=&ops;current=task.taskID;
+    user_request.tv_sec=checkpoint[7];user_request.tv_nsec=(int32_t)checkpoint[8];
+    REQUIRE(sizeof(user_request)==checkpoint[9]);UINT32 *e=event(1);subject(e);REQUIRE(!e[6] && !e[7]);++position;
+    int ret=SysNanoSleep(&user_request,NULL);
+    e=event(8);subject(e);REQUIRE((UINT32)ret==e[6] && !e[7]);++position;
+    REQUIRE(position==sizeof(events)/sizeof(events[0]) && !ret && copy_calls==1 && deadline_checks==1);
+    REQUIRE(task.taskStatus==checkpoint[15] && task.waitTime==wide(20) && task.startTime==wide(22));
+    printf("live wait replay verified: %u events\n",position);return 0;
+}

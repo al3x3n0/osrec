@@ -1,0 +1,9 @@
+{
+  "format": "osrec-el0-boundaries-v1",
+  "boundaries": {
+    "kernel_clock": {
+      "reason": "clock input comes from the captured scenario",
+      "implementation": "proposed transcript-backed clock model; not yet implemented by this analyzer"
+    }
+  }
+}

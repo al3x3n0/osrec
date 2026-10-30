@@ -1,0 +1,207 @@
+{
+  "format": "osrec-synthetic-context-graph-capture-v1",
+  "number": 8589934694,
+  "calls": [
+    {
+      "operation": 1,
+      "value": 4294967307
+    },
+    {
+      "operation": 1,
+      "value": 8589934599
+    },
+    {
+      "operation": 2,
+      "value": 5
+    },
+    {
+      "operation": 3,
+      "value": 0
+    },
+    {
+      "operation": 1,
+      "value": 12884901897
+    },
+    {
+      "operation": 4,
+      "value": 0
+    }
+  ],
+  "states": [
+    {
+      "nodes": [
+        {
+          "value": 0,
+          "live": 0,
+          "generation": 0,
+          "next": 0
+        },
+        {
+          "value": 0,
+          "live": 0,
+          "generation": 0,
+          "next": 0
+        },
+        {
+          "value": 0,
+          "live": 0,
+          "generation": 0,
+          "next": 0
+        }
+      ],
+      "head": 0,
+      "tail": 0,
+      "result": 0
+    },
+    {
+      "nodes": [
+        {
+          "value": 4294967307,
+          "live": 1,
+          "generation": 1,
+          "next": 0
+        },
+        {
+          "value": 0,
+          "live": 0,
+          "generation": 0,
+          "next": 0
+        },
+        {
+          "value": 0,
+          "live": 0,
+          "generation": 0,
+          "next": 0
+        }
+      ],
+      "head": 1,
+      "tail": 1,
+      "result": 4294967307
+    },
+    {
+      "nodes": [
+        {
+          "value": 4294967307,
+          "live": 1,
+          "generation": 1,
+          "next": 2
+        },
+        {
+          "value": 8589934599,
+          "live": 1,
+          "generation": 1,
+          "next": 1
+        },
+        {
+          "value": 0,
+          "live": 0,
+          "generation": 0,
+          "next": 0
+        }
+      ],
+      "head": 1,
+      "tail": 2,
+      "result": 4294967307
+    },
+    {
+      "nodes": [
+        {
+          "value": 4294967312,
+          "live": 1,
+          "generation": 1,
+          "next": 2
+        },
+        {
+          "value": 8589934599,
+          "live": 1,
+          "generation": 1,
+          "next": 1
+        },
+        {
+          "value": 0,
+          "live": 0,
+          "generation": 0,
+          "next": 0
+        }
+      ],
+      "head": 1,
+      "tail": 2,
+      "result": 4294967312
+    },
+    {
+      "nodes": [
+        {
+          "value": 0,
+          "live": 0,
+          "generation": 1,
+          "next": 0
+        },
+        {
+          "value": 8589934599,
+          "live": 1,
+          "generation": 1,
+          "next": 0
+        },
+        {
+          "value": 0,
+          "live": 0,
+          "generation": 0,
+          "next": 0
+        }
+      ],
+      "head": 2,
+      "tail": 2,
+      "result": 8589934599
+    },
+    {
+      "nodes": [
+        {
+          "value": 12884901897,
+          "live": 1,
+          "generation": 2,
+          "next": 2
+        },
+        {
+          "value": 8589934599,
+          "live": 1,
+          "generation": 1,
+          "next": 1
+        },
+        {
+          "value": 0,
+          "live": 0,
+          "generation": 0,
+          "next": 0
+        }
+      ],
+      "head": 2,
+      "tail": 1,
+      "result": 8589934599
+    },
+    {
+      "nodes": [
+        {
+          "value": 12884901897,
+          "live": 1,
+          "generation": 2,
+          "next": 2
+        },
+        {
+          "value": 8589934599,
+          "live": 1,
+          "generation": 1,
+          "next": 1
+        },
+        {
+          "value": 0,
+          "live": 0,
+          "generation": 0,
+          "next": 0
+        }
+      ],
+      "head": 1,
+      "tail": 2,
+      "result": 12884901897
+    }
+  ]
+}

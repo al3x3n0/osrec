@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/openharmony/kernel_liteos_a",
+  "revision": "4ac7f3aed67000b47bc14d6fe79d63ada708d780",
+  "source": "syscall/process_syscall.c",
+  "source_sha256": "36a5c34f9fd5c38e4f0011e4ae207e8b22c74ecffccdce8700470f53e1ace10d",
+  "function": "SysGetPID",
+  "function_sha256": "aba62b77be9db221ab56c8254c7dabe137283cd8eb68c9d0f3d54db8067778ea",
+  "headers": {
+    "kernel/base/include/los_sched_pri.h": "d618ea6a61c736d718c1f855fe671f4513539568d1b84be4843a4d1da70dbc15",
+    "kernel/base/include/los_process_pri.h": "6cb70287391cd820eba9d51c43958cac671679414fb870cb21f1713f515c467f"
+  },
+  "dependency_contract": "LOS_GetCurrProcessID returns the captured unsigned 32-bit process ID; no scheduler or process discovery is replayed"
+}

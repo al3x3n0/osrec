@@ -1,0 +1,409 @@
+[    0.000000] Booting Linux on physical CPU 0x0000000000 [0x410fd034]
+[    0.000000] Linux version 6.10.14-linuxkit (root@buildkitsandbox) (gcc (Alpine 13.2.1_git20240309) 13.2.1 20240309, GNU ld (GNU Binutils) 2.42) #1 SMP Thu Oct 24 19:28:55 UTC 2024
+[    0.000000] random: crng init done
+[    0.000000] Machine model: linux,dummy-virt
+[    0.000000] Zone ranges:
+[    0.000000]   DMA      [mem 0x0000000040000000-0x000000005fffffff]
+[    0.000000]   DMA32    empty
+[    0.000000]   Normal   empty
+[    0.000000] Movable zone start for each node
+[    0.000000] Early memory node ranges
+[    0.000000]   node   0: [mem 0x0000000040000000-0x000000005fffffff]
+[    0.000000] Initmem setup node 0 [mem 0x0000000040000000-0x000000005fffffff]
+[    0.000000] psci: probing for conduit method from DT.
+[    0.000000] psci: PSCIv1.1 detected in firmware.
+[    0.000000] psci: Using standard PSCI v0.2 function IDs
+[    0.000000] psci: Trusted OS migration not required
+[    0.000000] psci: SMC Calling Convention v1.0
+[    0.000000] percpu: Embedded 34 pages/cpu s99240 r8192 d31832 u139264
+[    0.000000] Detected VIPT I-cache on CPU0
+[    0.000000] alternatives: applying boot alternatives
+[    0.000000] Kernel command line: console=ttyAMA0 root=/dev/vda rootfstype=ext4 ro rootwait init=/init panic=-1
+[    0.000000] Dentry cache hash table entries: 65536 (order: 7, 524288 bytes, linear)
+[    0.000000] Inode-cache hash table entries: 32768 (order: 6, 262144 bytes, linear)
+[    0.000000] Built 1 zonelists, mobility grouping on.  Total pages: 131072
+[    0.000000] mem auto-init: stack:all(zero), heap alloc:off, heap free:off
+[    0.000000] software IO TLB: SWIOTLB bounce buffer size adjusted to 0MB
+[    0.000000] software IO TLB: area num 1.
+[    0.000000] software IO TLB: mapped [mem 0x000000005f580000-0x000000005f600000] (0MB)
+[    0.000000] Memory: 472668K/524288K available (19136K kernel code, 2822K rwdata, 10692K rodata, 6336K init, 748K bss, 51620K reserved, 0K cma-reserved)
+[    0.000000] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=1, Nodes=1
+[    0.000000] ftrace: allocating 57269 entries in 224 pages
+[    0.000000] ftrace: allocated 224 pages with 3 groups
+[    0.000000] trace event string verifier disabled
+[    0.000000] rcu: Hierarchical RCU implementation.
+[    0.000000] rcu: 	RCU restricting CPUs from NR_CPUS=24 to nr_cpu_ids=1.
+[    0.000000] 	Rude variant of Tasks RCU enabled.
+[    0.000000] 	Tracing variant of Tasks RCU enabled.
+[    0.000000] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.000000] rcu: Adjusting geometry for rcu_fanout_leaf=16, nr_cpu_ids=1
+[    0.000000] RCU Tasks Rude: Setting shift to 0 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=1.
+[    0.000000] RCU Tasks Trace: Setting shift to 0 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=1.
+[    0.000000] NR_IRQS: 64, nr_irqs: 64, preallocated irqs: 0
+[    0.000000] Root IRQ handler: gic_handle_irq
+[    0.000000] GICv2m: range[mem 0x08020000-0x08020fff], SPI[80:143]
+[    0.000000] rcu: 	Offload RCU callbacks from CPUs: 0.
+[    0.000000] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    0.000000] arch_timer: cp15 timer(s) running at 62.50MHz (virt).
+[    0.000000] clocksource: arch_sys_counter: mask: 0x1ffffffffffffff max_cycles: 0x1cd42e208c, max_idle_ns: 881590405314 ns
+[    0.000087] sched_clock: 57 bits at 63MHz, resolution 16ns, wraps every 4398046511096ns
+[    0.483458] Console: colour dummy device 80x25
+[    0.491044] Calibrating delay loop (skipped), value calculated using timer frequency.. 125.00 BogoMIPS (lpj=62500)
+[    0.496943] pid_max: default: 32768 minimum: 301
+[    0.788107] LSM: initializing lsm=capability,bpf
+[    0.788627] LSM support for eBPF active
+[    0.873424] Mount-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    0.873635] Mountpoint-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    1.778143] cacheinfo: Unable to detect cache hierarchy for CPU 0
+[    2.675712] rcu: Hierarchical SRCU implementation.
+[    2.675842] rcu: 	Max phase no-delay instances is 400.
+[    3.097963] smp: Bringing up secondary CPUs ...
+[    3.098206] smp: Brought up 1 node, 1 CPU
+[    3.098343] SMP: Total of 1 processors activated.
+[    3.098485] CPU: All CPU(s) started at EL1
+[    3.098687] CPU features: detected: 32-bit EL0 Support
+[    3.098796] CPU features: detected: CRC32 instructions
+[    3.276485] alternatives: applying system-wide alternatives
+[    6.103588] devtmpfs: initialized
+[    6.889389] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1911260446275000 ns
+[    6.890531] futex hash table entries: 256 (order: 2, 16384 bytes, linear)
+[    6.891461] 22784 pages in range for non-PLT usage
+[    6.891748] 514304 pages in range for PLT usage
+[    7.257121] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    7.314482] DMA: preallocated 128 KiB GFP_KERNEL pool for atomic allocations
+[    7.315070] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA pool for atomic allocations
+[    7.315211] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA32 pool for atomic allocations
+[    7.315777] audit: initializing netlink subsys (disabled)
+[    7.325580] audit: type=2000 audit(0.313:1): state=initialized audit_enabled=0 res=1
+[    7.328322] cpuidle: using governor menu
+[    7.574585] hw-breakpoint: found 6 breakpoint and 4 watchpoint registers.
+[    7.579614] ASID allocator initialised with 65536 entries
+[    7.581796] Serial: AMBA PL011 UART driver
+[    9.401138] 9000000.pl011: ttyAMA0 at MMIO 0x9000000 (irq = 13, base_baud = 0) is a PL011 rev1
+[    9.424608] printk: legacy console [ttyAMA0] enabled
+[   11.072672] HugeTLB: registered 1.00 GiB page size, pre-allocated 0 pages
+[   11.073178] HugeTLB: 0 KiB vmemmap can be freed for a 1.00 GiB page
+[   11.073513] HugeTLB: registered 32.0 MiB page size, pre-allocated 0 pages
+[   11.073808] HugeTLB: 0 KiB vmemmap can be freed for a 32.0 MiB page
+[   11.074079] HugeTLB: registered 2.00 MiB page size, pre-allocated 0 pages
+[   11.074380] HugeTLB: 0 KiB vmemmap can be freed for a 2.00 MiB page
+[   11.074651] HugeTLB: registered 64.0 KiB page size, pre-allocated 0 pages
+[   11.074962] HugeTLB: 0 KiB vmemmap can be freed for a 64.0 KiB page
+[   12.651311] raid6: skipped pq benchmark and selected neonx8
+[   12.652505] raid6: using neon recovery algorithm
+[   12.745236] SCSI subsystem initialized
+[   12.749558] usbcore: registered new interface driver usbfs
+[   12.750078] usbcore: registered new interface driver hub
+[   12.750518] usbcore: registered new device driver usb
+[   12.751310] pps_core: LinuxPPS API ver. 1 registered
+[   12.751725] pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+[   14.425389] vgaarb: loaded
+[   14.439924] clocksource: Switched to clocksource arch_sys_counter
+[   14.497073] VFS: Disk quotas dquot_6.6.0
+[   14.498832] VFS: Dquot-cache hash table entries: 512 (order 0, 4096 bytes)
+[   14.505675] netfs: FS-Cache loaded
+[   14.990498] CacheFiles: Loaded
+[   18.221017] NET: Registered PF_INET protocol family
+[   18.223032] IP idents hash table entries: 8192 (order: 4, 65536 bytes, linear)
+[   26.008753] tcp_listen_portaddr_hash hash table entries: 256 (order: 0, 4096 bytes, linear)
+[   26.017399] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[   26.018269] TCP established hash table entries: 4096 (order: 3, 32768 bytes, linear)
+[   26.077152] TCP bind hash table entries: 4096 (order: 5, 131072 bytes, linear)
+[   26.077909] TCP: Hash tables configured (established 4096 bind 4096)
+[   26.176750] UDP hash table entries: 256 (order: 1, 8192 bytes, linear)
+[   26.276432] UDP-Lite hash table entries: 256 (order: 1, 8192 bytes, linear)
+[   26.717280] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[   27.186515] RPC: Registered named UNIX socket transport module.
+[   27.187249] RPC: Registered udp transport module.
+[   27.200602] RPC: Registered tcp transport module.
+[   27.200953] RPC: Registered tcp-with-tls transport module.
+[   27.201254] RPC: Registered tcp NFSv4.1 backchannel transport module.
+[   27.201660] NET: Registered PF_XDP protocol family
+[   27.209507] PCI: CLS 0 bytes, default 64
+[   28.668759] workingset: timestamp_bits=46 max_order=17 bucket_order=0
+[   28.671707] zbud: loaded
+[   28.689523] squashfs: version 4.0 (2009/01/31) Phillip Lougher
+[   29.215350] NFS: Registering the id_resolver key type
+[   29.276944] Key type id_resolver registered
+[   29.277637] Key type id_legacy registered
+[   29.285020] nfs4filelayout_init: NFSv4 File Layout Driver Registering...
+[   29.380353] nfs4flexfilelayout_init: NFSv4 Flexfile Layout Driver Registering...
+[   30.130184] Key type cifs.idmap registered
+[   30.138744] fuse: init (API version 7.40)
+[   30.286790] SGI XFS with security attributes, no debug enabled
+[   30.397996] 9p: Installing v9fs 9p2000 file system support
+[   32.068222] NET: Registered PF_ALG protocol family
+[   32.069959] xor: measuring software checksum speed
+[   32.071949]    8regs           :  3694 MB/sec
+[   32.073617]    32regs          :  3891 MB/sec
+[   32.088541]    arm64_neon      :   225 MB/sec
+[   32.088994] xor: using function: 32regs (3891 MB/sec)
+[   32.089407] Key type asymmetric registered
+[   32.090037] Asymmetric key parser 'x509' registered
+[   32.094748] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 251)
+[   32.400727] io scheduler mq-deadline registered
+[   32.495932] io scheduler kyber registered
+[   32.814382] pl061_gpio 9030000.pl061: PL061 GPIO chip registered
+[   32.905348] pci-host-generic 4010000000.pcie: host bridge /pcie@10000000 ranges:
+[   33.070208] pci-host-generic 4010000000.pcie:       IO 0x003eff0000..0x003effffff -> 0x0000000000
+[   33.073257] pci-host-generic 4010000000.pcie:      MEM 0x0010000000..0x003efeffff -> 0x0010000000
+[   33.074120] pci-host-generic 4010000000.pcie:      MEM 0x8000000000..0xffffffffff -> 0x8000000000
+[   33.147507] pci-host-generic 4010000000.pcie: Memory resource size exceeds max for 32 bits
+[   33.348491] pci-host-generic 4010000000.pcie: ECAM at [mem 0x4010000000-0x401fffffff] for [bus 00-ff]
+[   33.500090] pci-host-generic 4010000000.pcie: PCI host bridge to bus 0000:00
+[   33.500763] pci_bus 0000:00: root bus resource [bus 00-ff]
+[   33.501123] pci_bus 0000:00: root bus resource [io  0x0000-0xffff]
+[   33.578640] pci_bus 0000:00: root bus resource [mem 0x10000000-0x3efeffff]
+[   33.581196] pci_bus 0000:00: root bus resource [mem 0x8000000000-0xffffffffff]
+[   33.593970] pci 0000:00:00.0: [1b36:0008] type 00 class 0x060000 conventional PCI endpoint
+[   35.019682] Serial: 8250/16550 driver, 4 ports, IRQ sharing enabled
+[   38.125930] brd: module loaded
+[   39.996063] loop: module loaded
+[   48.022359] virtio_blk virtio0: 1/0/0 default/read/poll queues
+[   48.217199] virtio_blk virtio0: [vda] 4096 512-byte logical blocks (2.10 MB/2.00 MiB)
+[   52.132809] wireguard: WireGuard 1.0.0 loaded. See www.wireguard.com for information.
+[   52.133630] wireguard: Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
+[   52.168784] tun: Universal TUN/TAP device driver, 1.6
+[   52.812666] PPP generic driver version 2.4.2
+[   52.827018] PPP BSD Compression module registered
+[   52.897726] PPP Deflate Compression module registered
+[   53.020376] PPP MPPE Compression module registered
+[   53.060146] NET: Registered PF_PPPOX protocol family
+[   53.327069] PPTP driver version 0.8.5
+[   53.978958] usbcore: registered new interface driver cdc_acm
+[   53.979362] cdc_acm: USB Abstract Control Model driver for USB modems and ISDN adapters
+[   53.979830] usbcore: registered new interface driver usblp
+[   54.001488] usbcore: registered new interface driver cdc_wdm
+[   54.007232] usbcore: registered new interface driver usbtmc
+[   54.009245] usbcore: registered new interface driver uas
+[   54.009820] usbcore: registered new interface driver usb-storage
+[   54.010269] usbcore: registered new interface driver ums-alauda
+[   54.010657] usbcore: registered new interface driver ums-cypress
+[   54.011036] usbcore: registered new interface driver ums-datafab
+[   54.011364] usbcore: registered new interface driver ums_eneub6250
+[   54.011646] usbcore: registered new interface driver ums-freecom
+[   54.011925] usbcore: registered new interface driver ums-isd200
+[   54.012197] usbcore: registered new interface driver ums-jumpshot
+[   54.012482] usbcore: registered new interface driver ums-karma
+[   54.012767] usbcore: registered new interface driver ums-onetouch
+[   54.013040] usbcore: registered new interface driver ums-realtek
+[   54.018529] usbcore: registered new interface driver ums-sddr09
+[   54.018858] usbcore: registered new interface driver ums-sddr55
+[   54.047737] usbcore: registered new interface driver ums-usbat
+[   54.217776] usbcore: registered new interface driver usbserial_generic
+[   54.218283] usbserial: USB Serial support registered for generic
+[   54.218599] usbcore: registered new interface driver aircable
+[   54.218846] usbserial: USB Serial support registered for aircable
+[   54.219112] usbcore: registered new interface driver ark3116
+[   54.219340] usbserial: USB Serial support registered for ark3116
+[   54.219597] usbcore: registered new interface driver belkin_sa
+[   54.219818] usbserial: USB Serial support registered for Belkin / Peracom / GoHubs USB Serial Adapter
+[   54.220166] usbcore: registered new interface driver ch341
+[   54.220376] usbserial: USB Serial support registered for ch341-uart
+[   54.220635] usbcore: registered new interface driver cp210x
+[   54.223251] usbserial: USB Serial support registered for cp210x
+[   54.223909] usbcore: registered new interface driver cyberjack
+[   54.224446] usbserial: USB Serial support registered for Reiner SCT Cyberjack USB card reader
+[   54.225547] usbcore: registered new interface driver cypress_m8
+[   54.228382] usbserial: USB Serial support registered for DeLorme Earthmate USB
+[   54.229000] usbserial: USB Serial support registered for HID->COM RS232 Adapter
+[   54.229584] usbserial: USB Serial support registered for Nokia CA-42 V2 Adapter
+[   54.230330] usbcore: registered new interface driver usb_debug
+[   54.230595] usbserial: USB Serial support registered for debug
+[   54.230826] usbserial: USB Serial support registered for xhci_dbc
+[   54.231127] usbcore: registered new interface driver digi_acceleport
+[   54.231540] usbserial: USB Serial support registered for Digi 2 port USB adapter
+[   54.231831] usbserial: USB Serial support registered for Digi 4 port USB adapter
+[   54.232174] usbcore: registered new interface driver io_edgeport
+[   54.232400] usbserial: USB Serial support registered for Edgeport 2 port adapter
+[   54.232670] usbserial: USB Serial support registered for Edgeport 4 port adapter
+[   54.232941] usbserial: USB Serial support registered for Edgeport 8 port adapter
+[   54.233278] usbserial: USB Serial support registered for EPiC device
+[   54.233544] usbcore: registered new interface driver io_ti
+[   54.311739] usbserial: USB Serial support registered for Edgeport TI 1 port adapter
+[   54.312170] usbserial: USB Serial support registered for Edgeport TI 2 port adapter
+[   55.038069] usbcore: registered new interface driver empeg
+[   55.038675] usbserial: USB Serial support registered for empeg
+[   55.039475] usbcore: registered new interface driver f81534a_ctrl
+[   55.039769] usbcore: registered new interface driver f81232
+[   55.039990] usbserial: USB Serial support registered for f81232
+[   55.040201] usbserial: USB Serial support registered for f81534a
+[   55.040447] usbcore: registered new interface driver f81534
+[   55.040682] usbserial: USB Serial support registered for Fintek F81532/F81534
+[   55.040946] usbcore: registered new interface driver ftdi_sio
+[   55.054312] usbserial: USB Serial support registered for FTDI USB Serial Device
+[   55.107611] usbcore: registered new interface driver garmin_gps
+[   55.108710] usbserial: USB Serial support registered for Garmin GPS usb/tty
+[   55.111662] usbcore: registered new interface driver ipaq
+[   55.162311] usbserial: USB Serial support registered for PocketPC PDA
+[   55.344485] usbcore: registered new interface driver ipw
+[   55.522281] usbserial: USB Serial support registered for IPWireless converter
+[   55.537174] usbcore: registered new interface driver ir_usb
+[   55.547710] usbserial: USB Serial support registered for IR Dongle
+[   55.548117] usbcore: registered new interface driver iuu_phoenix
+[   55.548368] usbserial: USB Serial support registered for iuu_phoenix
+[   55.548684] usbcore: registered new interface driver keyspan
+[   55.548909] usbserial: USB Serial support registered for Keyspan - (without firmware)
+[   55.549186] usbserial: USB Serial support registered for Keyspan 1 port adapter
+[   55.549442] usbserial: USB Serial support registered for Keyspan 2 port adapter
+[   55.549704] usbserial: USB Serial support registered for Keyspan 4 port adapter
+[   55.549988] usbcore: registered new interface driver keyspan_pda
+[   55.550200] usbserial: USB Serial support registered for Keyspan PDA
+[   55.550421] usbserial: USB Serial support registered for Keyspan PDA - (prerenumeration)
+[   55.550723] usbcore: registered new interface driver kl5kusb105
+[   55.550930] usbserial: USB Serial support registered for KL5KUSB105D / PalmConnect
+[   55.551211] usbcore: registered new interface driver kobil_sct
+[   55.551422] usbserial: USB Serial support registered for KOBIL USB smart card terminal
+[   55.552313] usbcore: registered new interface driver mct_u232
+[   55.552844] usbserial: USB Serial support registered for MCT U232
+[   55.565626] usbcore: registered new interface driver metro_usb
+[   55.738257] usbserial: USB Serial support registered for Metrologic USB to Serial
+[   55.775288] usbcore: registered new interface driver mos7720
+[   55.775641] usbserial: USB Serial support registered for Moschip 2 port adapter
+[   55.777765] usbcore: registered new interface driver mos7840
+[   55.778267] usbserial: USB Serial support registered for Moschip 7840/7820 USB Serial Driver
+[   55.778822] usbcore: registered new interface driver mxuport
+[   55.910720] usbserial: USB Serial support registered for MOXA UPort
+[   55.981864] usbcore: registered new interface driver navman
+[   55.982468] usbserial: USB Serial support registered for navman
+[   55.983018] usbcore: registered new interface driver omninet
+[   56.004962] usbserial: USB Serial support registered for ZyXEL - omni.net usb
+[   56.081131] usbcore: registered new interface driver opticon
+[   56.081409] usbserial: USB Serial support registered for opticon
+[   56.081652] usbcore: registered new interface driver option
+[   56.081841] usbserial: USB Serial support registered for GSM modem (1-port)
+[   56.082104] usbcore: registered new interface driver oti6858
+[   56.082296] usbserial: USB Serial support registered for oti6858
+[   56.084126] usbcore: registered new interface driver pl2303
+[   56.084335] usbserial: USB Serial support registered for pl2303
+[   56.084547] usbcore: registered new interface driver qcaux
+[   56.084729] usbserial: USB Serial support registered for qcaux
+[   56.084934] usbcore: registered new interface driver qcserial
+[   56.085119] usbserial: USB Serial support registered for Qualcomm USB modem
+[   56.085367] usbcore: registered new interface driver quatech2
+[   56.085574] usbserial: USB Serial support registered for Quatech 2nd gen USB to Serial Driver
+[   56.085984] usbcore: registered new interface driver safe_serial
+[   56.086810] usbserial: USB Serial support registered for safe_serial
+[   56.087094] usbcore: registered new interface driver sierra
+[   56.087290] usbserial: USB Serial support registered for Sierra USB modem
+[   56.092132] usbcore: registered new interface driver usb_serial_simple
+[   56.092584] usbserial: USB Serial support registered for carelink
+[   56.092823] usbserial: USB Serial support registered for flashloader
+[   56.093068] usbserial: USB Serial support registered for funsoft
+[   56.093290] usbserial: USB Serial support registered for google
+[   56.093495] usbserial: USB Serial support registered for hp4x
+[   56.093900] usbserial: USB Serial support registered for kaufmann
+[   56.133092] usbserial: USB Serial support registered for libtransistor
+[   56.142387] usbserial: USB Serial support registered for moto_modem
+[   56.142861] usbserial: USB Serial support registered for motorola_tetra
+[   56.143241] usbserial: USB Serial support registered for nokia
+[   56.143596] usbserial: USB Serial support registered for novatel_gps
+[   56.351644] usbserial: USB Serial support registered for siemens_mpi
+[   56.404929] usbserial: USB Serial support registered for suunto
+[   56.410947] usbserial: USB Serial support registered for vivopay
+[   56.411613] usbserial: USB Serial support registered for zio
+[   56.412083] usbcore: registered new interface driver spcp8x5
+[   56.412404] usbserial: USB Serial support registered for SPCP8x5
+[   56.485711] usbcore: registered new interface driver ssu100
+[   56.486424] usbserial: USB Serial support registered for Quatech SSU-100 USB to Serial Driver
+[   56.511297] usbcore: registered new interface driver symbolserial
+[   56.596350] usbserial: USB Serial support registered for symbol
+[   56.596734] usbcore: registered new interface driver ti_usb_3410_5052
+[   56.666149] usbserial: USB Serial support registered for TI USB 3410 1 port adapter
+[   56.666915] usbserial: USB Serial support registered for TI USB 5052 2 port adapter
+[   56.667706] usbcore: registered new interface driver upd78f0730
+[   56.668154] usbserial: USB Serial support registered for upd78f0730
+[   56.668627] usbcore: registered new interface driver visor
+[   56.668980] usbserial: USB Serial support registered for Handspring Visor / Palm OS
+[   56.669447] usbserial: USB Serial support registered for Sony Clie 5.0
+[   56.734420] usbserial: USB Serial support registered for Sony Clie 3.5
+[   56.758028] usbcore: registered new interface driver wishbone_serial
+[   56.788366] usbserial: USB Serial support registered for wishbone_serial
+[   56.893955] usbcore: registered new interface driver whiteheat
+[   56.917574] usbserial: USB Serial support registered for Connect Tech - WhiteHEAT - (prerenumeration)
+[   56.919335] usbserial: USB Serial support registered for Connect Tech - WhiteHEAT
+[   56.919737] usbcore: registered new interface driver xr_serial
+[   56.926132] usbserial: USB Serial support registered for xr_serial
+[   56.926951] usbcore: registered new interface driver xsens_mt
+[   56.927904] usbserial: USB Serial support registered for xsens_mt
+[   57.397550] vhci_hcd vhci_hcd.0: USB/IP Virtual Host Controller
+[   57.405254] vhci_hcd vhci_hcd.0: new USB bus registered, assigned bus number 1
+[   57.407154] vhci_hcd: created sysfs vhci_hcd.0
+[   58.677484] usb usb1: New USB device found, idVendor=1d6b, idProduct=0002, bcdDevice= 6.10
+[   58.682251] usb usb1: New USB device strings: Mfr=3, Product=2, SerialNumber=1
+[   58.682993] usb usb1: Product: USB/IP Virtual Host Controller
+[   58.683310] usb usb1: Manufacturer: Linux 6.10.14-linuxkit vhci_hcd
+[   58.683811] usb usb1: SerialNumber: vhci_hcd.0
+[   59.509673] hub 1-0:1.0: USB hub found
+[   59.817705] hub 1-0:1.0: 8 ports detected
+[   61.435976] vhci_hcd vhci_hcd.0: USB/IP Virtual Host Controller
+[   62.104818] vhci_hcd vhci_hcd.0: new USB bus registered, assigned bus number 2
+[   62.106967] usb usb2: We don't know the algorithms for LPM for this host, disabling LPM.
+[   62.125775] usb usb2: New USB device found, idVendor=1d6b, idProduct=0003, bcdDevice= 6.10
+[   62.248225] usb usb2: New USB device strings: Mfr=3, Product=2, SerialNumber=1
+[   62.248833] usb usb2: Product: USB/IP Virtual Host Controller
+[   62.364884] usb usb2: Manufacturer: Linux 6.10.14-linuxkit vhci_hcd
+[   62.365589] usb usb2: SerialNumber: vhci_hcd.0
+[   62.685788] hub 2-0:1.0: USB hub found
+[   62.686337] hub 2-0:1.0: 8 ports detected
+[   63.447652] mousedev: PS/2 mouse device common for all mice
+[   64.383750] rtc-pl031 9010000.pl031: registered as rtc0
+[   64.465660] rtc-pl031 9010000.pl031: setting system clock to 2026-10-13T13:21:26 UTC (1791897686)
+[   64.502134] i2c_dev: i2c /dev entries driver
+[   64.525986] device-mapper: ioctl: 4.48.0-ioctl (2023-03-01) initialised: dm-devel@lists.linux.dev
+[   64.792955] usbcore: registered new interface driver usbhid
+[   64.846938] usbhid: USB HID core driver
+[   65.414614] hw perfevents: enabled with armv8_pmuv3 PMU driver, 7 counters available
+[   65.504616] GACT probability on
+[   65.505198] Mirror/redirect action on
+[   65.509228] Simple TC action Loaded
+[   65.527598] netem: version 1.3
+[   65.528062] u32 classifier
+[   65.528212]     Performance counters on
+[   65.528529]     input device check on
+[   65.633689]     Actions configured
+[   65.985970] xt_time: kernel timezone is -0000
+[   66.165050] IPVS: Registered protocols (TCP, UDP)
+[   66.208937] IPVS: Connection hash table configured (size=4096, memory=32Kbytes)
+[   66.211183] IPVS: ipvs loaded.
+[   66.211487] IPVS: [rr] scheduler registered.
+[   66.216149] IPVS: [wrr] scheduler registered.
+[   66.241993] IPVS: [sh] scheduler registered.
+[   66.252482] ipip: IPv4 and MPLS over IPv4 tunneling driver
+[   66.499563] gre: GRE over IPv4 demultiplexor driver
+[   66.500157] ip_gre: GRE over IPv4 tunneling driver
+[   66.518496] IPv4 over IPsec tunneling driver
+[   66.529043] Initializing XFRM netlink socket
+[   66.587915] NET: Registered PF_INET6 protocol family
+[   67.876903] Segment Routing with IPv6
+[   68.005601] In-situ OAM (IOAM) with IPv6
+[   68.019722] mip6: Mobile IPv6
+[   68.149380] sit: IPv6, IPv4 and MPLS over IPv4 tunneling driver
+[   68.320688] ip6_gre: GRE over IPv6 tunneling driver
+[   68.583254] NET: Registered PF_PACKET protocol family
+[   68.586414] NET: Registered PF_KEY protocol family
+[   68.607447] Bridge firewalling registered
+[   68.654647] l2tp_core: L2TP core driver, V2.0
+[   68.660438] l2tp_ppp: PPPoL2TP kernel driver, V2.0
+[   68.692920] 8021q: 802.1Q VLAN Support v1.8
+[   68.932519] sctp: Hash tables configured (bind 256/256)
+[   69.073526] 9pnet: Installing 9P2000 support
+[   69.102063] Key type dns_resolver registered
+[   69.102706] openvswitch: Open vSwitch switching datapath
+[   70.144104] NET: Registered PF_VSOCK protocol family
+[   70.148655] mpls_gso: MPLS GSO support
+[   71.524711] registered taskstats version 1
+[   72.536216] Key type .fscrypt registered
+[   72.536555] Key type fscrypt-provisioning registered
+[   73.220089] Btrfs loaded, zoned=no, fsverity=no
+[   73.228519] Key type encrypted registered
+[   73.533483] gtp: GTP module loaded (pdp ctx size 128 bytes)
+[  104.592880] clk: Disabling unused clocks
+[  105.958383] EXT4-fs (vda): mounted filesystem 6f737265-632d-6c69-6e75-782d726f6f74 ro without journal. Quota mode: none.
+[  105.965899] VFS: Mounted root (ext4 filesystem) readonly on device 254:0.
+[  105.974694] devtmpfs: mounted
+[  107.362781] Freeing unused kernel memory: 6336K
+[  107.366470] Run /init as init process
+OSREC_LINUX_CAPTURE {"profile":"credentials","initial":{"pid":1,"tgid":1,"ppid":0,"uids":[1001,1002,0],"gids":[2001,2002,2003],"umask":18},"calls":[{"number":172,"args":[0,0,0],"raw_bits":1,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002},{"number":178,"args":[0,0,0],"raw_bits":1,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002},{"number":173,"args":[0,0,0],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002},{"number":174,"args":[0,0,0],"raw_bits":1001,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002},{"number":175,"args":[0,0,0],"raw_bits":1002,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002},{"number":176,"args":[0,0,0],"raw_bits":2001,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002},{"number":177,"args":[0,0,0],"raw_bits":2002,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002},{"number":166,"args":[63,0,0],"raw_bits":18,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":63,"gids_after":[2001,2002,2003],"fsgid_after":2002},{"number":148,"args":[4,8,12],"raw_bits":0,"words":[2779054080,1001,1002,0,2779054084,2779054085,2779054086,2779054087],"umask_after":63,"gids_after":[2001,2002,2003],"fsgid_after":2002},{"number":166,"args":[4294967807,0,0],"raw_bits":63,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":511,"gids_after":[2001,2002,2003],"fsgid_after":2002},{"number":150,"args":[4,8,12],"raw_bits":0,"words":[2779054080,2001,2002,2003,2779054084,2779054085,2779054086,2779054087],"umask_after":511,"gids_after":[2001,2002,2003],"fsgid_after":2002},{"number":148,"args":[4,18446744073709551615,12],"raw_bits":18446744073709551602,"words":[2779054080,1001,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":511,"gids_after":[2001,2002,2003],"fsgid_after":2002},{"number":166,"args":[18446744073709551615,0,0],"raw_bits":511,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":511,"gids_after":[2001,2002,2003],"fsgid_after":2002},{"number":150,"args":[18446744073709551615,8,12],"raw_bits":18446744073709551602,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":511,"gids_after":[2001,2002,2003],"fsgid_after":2002},{"number":166,"args":[2,0,0],"raw_bits":511,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":2,"gids_after":[2001,2002,2003],"fsgid_after":2002},{"number":148,"args":[4,4,4],"raw_bits":0,"words":[2779054080,0,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":2,"gids_after":[2001,2002,2003],"fsgid_after":2002},{"number":150,"args":[4,8,18446744073709551614],"raw_bits":18446744073709551602,"words":[2779054080,2001,2002,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":2,"gids_after":[2001,2002,2003],"fsgid_after":2002},{"number":172,"args":[0,0,0],"raw_bits":1,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":2,"gids_after":[2001,2002,2003],"fsgid_after":2002},{"number":166,"args":[18,0,0],"raw_bits":2,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002},{"number":178,"args":[0,0,0],"raw_bits":1,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002},{"number":149,"args":[3000,18446744073709551615,18446744073709551615],"raw_bits":18446744073709551615,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002},{"number":149,"args":[18446744073709551615,18446744073709551615,18446744073709551615],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2002,2003],"fsgid_after":2002},{"number":149,"args":[18446744073709551615,2001,18446744073709551615],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2001,2003],"fsgid_after":2001},{"number":177,"args":[0,0,0],"raw_bits":2001,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2001,2003],"fsgid_after":2001},{"number":150,"args":[4,8,12],"raw_bits":0,"words":[2779054080,2001,2001,2003,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2001,2003],"fsgid_after":2001},{"number":149,"args":[4294969299,2003,2001],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2003,2003,2001],"fsgid_after":2003},{"number":176,"args":[0,0,0],"raw_bits":2003,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2003,2003,2001],"fsgid_after":2003},{"number":150,"args":[4,8,12],"raw_bits":0,"words":[2779054080,2003,2003,2001,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2003,2003,2001],"fsgid_after":2003},{"number":149,"args":[18446744073709551615,2002,18446744073709551615],"raw_bits":18446744073709551615,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2003,2003,2001],"fsgid_after":2003},{"number":149,"args":[18446744073709551615,2001,18446744073709551615],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2003,2001,2001],"fsgid_after":2001},{"number":177,"args":[0,0,0],"raw_bits":2001,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2003,2001,2001],"fsgid_after":2001},{"number":150,"args":[4,8,12],"raw_bits":0,"words":[2779054080,2003,2001,2001,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2003,2001,2001],"fsgid_after":2001},{"number":149,"args":[2001,2003,2003],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2003,2003],"fsgid_after":2003},{"number":150,"args":[4,8,18446744073709551614],"raw_bits":18446744073709551602,"words":[2779054080,2001,2003,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2003,2003],"fsgid_after":2003},{"number":149,"args":[18446744073709551615,2001,18446744073709551615],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2001,2003],"fsgid_after":2001},{"number":150,"args":[4,8,12],"raw_bits":0,"words":[2779054080,2001,2001,2003,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2001,2003],"fsgid_after":2001},{"number":149,"args":[18446744073709551615,18446744073709551615,18446744073709551615],"raw_bits":0,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2001,2003],"fsgid_after":2001},{"number":166,"args":[63,0,0],"raw_bits":18,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":63,"gids_after":[2001,2001,2003],"fsgid_after":2001},{"number":174,"args":[0,0,0],"raw_bits":1001,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":63,"gids_after":[2001,2001,2003],"fsgid_after":2001},{"number":166,"args":[18,0,0],"raw_bits":63,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2001,2003],"fsgid_after":2001},{"number":176,"args":[0,0,0],"raw_bits":2001,"words":[2779054080,2779054081,2779054082,2779054083,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2001,2003],"fsgid_after":2001},{"number":150,"args":[4,8,12],"raw_bits":0,"words":[2779054080,2001,2001,2003,2779054084,2779054085,2779054086,2779054087],"umask_after":18,"gids_after":[2001,2001,2003],"fsgid_after":2001}]}
+OSREC_LINUX_CAPTURE_DONE
+[  109.677486] reboot: Power down

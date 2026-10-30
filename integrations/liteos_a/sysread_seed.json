@@ -1,0 +1,15 @@
+{
+  "format": "osrec-liteos-a-sysread-seed-v1",
+  "provenance": "synthetic model seed; not captured from a running kernel",
+  "user_memory_bytes": 8,
+  "user_fd": 3,
+  "system_fd": 17,
+  "device_payload_hex": "41424344",
+  "environment_mode": 0,
+  "symbolic_bounds": {
+    "user_fd_max": 4,
+    "request_bytes_max": 9,
+    "null_buffer_max": 1,
+    "environment_mode_max": 2
+  }
+}

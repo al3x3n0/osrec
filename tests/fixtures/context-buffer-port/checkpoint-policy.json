@@ -1,0 +1,65 @@
+{
+  "format": "osrec-slice-checkpoint-schema-v1",
+  "fields": {
+    "buffers": {
+      "type": "Buffer[2]",
+      "policy": "elements",
+      "element": {
+        "type": "Buffer",
+        "policy": "members",
+        "members": {
+          "words": {
+            "type": "uint32_t[4]",
+            "policy": "persist"
+          },
+          "guard": {
+            "type": "uint64_t",
+            "policy": "persist"
+          }
+        }
+      }
+    },
+    "cursor": {
+      "type": "uint32_t *",
+      "policy": "context_buffer_reference",
+      "targets": [
+        "buffers[0].words",
+        "buffers[1].words"
+      ],
+      "nullable": true,
+      "allow_one_past": true
+    },
+    "alias": {
+      "type": "uint32_t *",
+      "policy": "context_buffer_reference",
+      "targets": [
+        "buffers[0].words",
+        "buffers[1].words"
+      ],
+      "nullable": true,
+      "allow_one_past": false
+    },
+    "end": {
+      "type": "uint32_t *",
+      "policy": "context_buffer_reference",
+      "targets": [
+        "buffers[0].words",
+        "buffers[1].words"
+      ],
+      "nullable": true,
+      "allow_one_past": true
+    },
+    "osrec_local_BufferStep_calls_0": {
+      "type": "uint64_t",
+      "policy": "persist"
+    },
+    "osrec_private_0_visits": {
+      "type": "uint64_t",
+      "policy": "persist"
+    },
+    "osrec_private_1_visits": {
+      "type": "uint64_t",
+      "policy": "persist"
+    }
+  }
+}

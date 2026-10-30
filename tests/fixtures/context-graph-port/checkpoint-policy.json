@@ -1,0 +1,61 @@
+{
+  "format": "osrec-slice-checkpoint-schema-v1",
+  "fields": {
+    "nodes": {
+      "type": "Node[3]",
+      "policy": "elements",
+      "element": {
+        "type": "Node",
+        "policy": "members",
+        "members": {
+          "value": {
+            "type": "uint64_t",
+            "policy": "persist"
+          },
+          "live": {
+            "type": "uint32_t",
+            "policy": "persist"
+          },
+          "generation": {
+            "type": "uint32_t",
+            "policy": "persist"
+          },
+          "next": {
+            "type": "struct Node *",
+            "policy": "context_reference",
+            "targets": [
+              "nodes[0]",
+              "nodes[1]",
+              "nodes[2]"
+            ],
+            "nullable": true
+          }
+        }
+      }
+    },
+    "head": {
+      "type": "Node *",
+      "policy": "context_reference",
+      "targets": [
+        "nodes[0]",
+        "nodes[1]",
+        "nodes[2]"
+      ],
+      "nullable": true
+    },
+    "tail": {
+      "type": "Node *",
+      "policy": "context_reference",
+      "targets": [
+        "nodes[0]",
+        "nodes[1]",
+        "nodes[2]"
+      ],
+      "nullable": true
+    },
+    "calls": {
+      "type": "uint64_t",
+      "policy": "persist"
+    }
+  }
+}

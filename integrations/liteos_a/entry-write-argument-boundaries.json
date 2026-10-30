@@ -1,0 +1,14 @@
+{
+  "format": "osrec-entry-state-boundaries-v1",
+  "boundaries": {},
+  "argument_objects": {
+    "OsProcessExitCodeSignalSet": {
+      "processCB": {
+        "kind": "object_argument",
+        "reason": "capture adapter holds the real scheduler lock and the current process lifetime across entry, original helper execution, post-state capture and restoration",
+        "implementation": "six controlled signal-bit updates on PID 1; restore entry exitCode before releasing the scheduler lock",
+        "snapshot_safe": true
+      }
+    }
+  }
+}

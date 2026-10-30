@@ -1,0 +1,37 @@
+{
+  "format": "osrec-svc-boundary-contract-v1",
+  "name": "linux-aarch64-svc0",
+  "isa": "aarch64",
+  "trap": {
+    "word": 3556769793,
+    "bytes": 4,
+    "user_mode": "EL0t"
+  },
+  "number_register": "x8",
+  "argument_registers": ["x0", "x1", "x2", "x3", "x4", "x5"],
+  "result_register": "x0",
+  "preserved_registers": ["x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "x18", "x19", "x20", "x21", "x22", "x23", "x24", "x25", "x26", "x27", "x28", "x29", "x30", "user_sp"],
+  "user_stack_register": "SP_EL0",
+  "entry": {
+    "vector_base_register": "VBAR",
+    "synchronous_vector_offset": 1024,
+    "asynchronous_vector_offsets": [1152, 1280, 1408],
+    "kernel_mode": "EL1h",
+    "syndrome_register": "ESR_EL1",
+    "syndrome_class": 21,
+    "return_address_register": "ELR_EL1",
+    "saved_status_register": "SPSR_EL1"
+  },
+  "return": {
+    "continuation": "trap-plus-bytes",
+    "user_mode": "EL0t"
+  },
+  "kernel_anchor": {
+    "name": "current",
+    "register": "SP_EL0",
+    "minimum": 18446462598732840960,
+    "max_entry_steps": 512
+  },
+  "kernel_memory_visibility": "kernel-mode-only",
+  "notes": "Linux arm64 v6.10: svc #0 from AArch64 EL0, x8 number, x0-x5 arguments, x0 result, all other GPRs preserved. Kernel entry stores current in SP_EL0. Kernel memory is read only while the CPU is in EL1 (KPTI/EL0 permission regime)."
+}

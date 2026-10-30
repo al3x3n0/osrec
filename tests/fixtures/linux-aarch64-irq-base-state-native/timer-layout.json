@@ -1,0 +1,9 @@
+{
+  "source": "native-sysfs-btf",
+  "timer_type_id": 388,
+  "timer_size": 64,
+  "base_type_id": 392,
+  "base_size": 64,
+  "base_offset": 48,
+  "running_offset": 24
+}

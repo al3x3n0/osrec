@@ -1,0 +1,19 @@
+{
+  "release": "Linux v6.10",
+  "source": "kernel/time/hrtimer.c",
+  "source_url": "https://github.com/torvalds/linux/blob/v6.10/kernel/time/hrtimer.c#L1012",
+  "file": "timer_queue.c",
+  "excerpt_sha256": "7afb11f235306eaeaa0c59247dab39a890df48026946ec14267bed9820ed3499",
+  "extraction": "Selected complete definitions with internal comments omitted; declarations and statements unchanged",
+  "functions": [
+    {
+      "name": "enqueue_hrtimer",
+      "source_line": 1012
+    },
+    {
+      "name": "__remove_hrtimer",
+      "source_line": 1035
+    }
+  ],
+  "native_source_build_attested": false
+}

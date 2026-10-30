@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/openharmony/kernel_liteos_a.git",
+  "revision": "4ac7f3aed67000b47bc14d6fe79d63ada708d780",
+  "source": "syscall/fs_syscall.c",
+  "source_sha256": "bcc88620c1f02ef1ca0deaf47a5424d7d6e1bcbf28a4395f86b65d90a36b84ab",
+  "function": "SysRead",
+  "function_sha256": "29e91f18abf1ffcd038caad20b5944d816675ce2c066ad866de0a81268475752"
+}

@@ -1,0 +1,8 @@
+{
+  "source": "native-sysfs-btf",
+  "btf_bytes": 6239103,
+  "type_id": 33724,
+  "size": 72,
+  "task_offset": 64,
+  "timer_offset": 0
+}

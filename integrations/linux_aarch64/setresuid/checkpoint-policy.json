@@ -1,0 +1,320 @@
+{
+  "format": "osrec-slice-checkpoint-schema-v1",
+  "fields": {
+    "user_ns": {
+      "type": "struct user_namespace",
+      "policy": "members",
+      "members": {
+        "initial": {
+          "type": "uint32_t",
+          "policy": "persist"
+        },
+        "setgroups_allowed": {
+          "type": "uint32_t",
+          "policy": "persist"
+        }
+      }
+    },
+    "fs": {
+      "type": "struct fs_struct",
+      "policy": "members",
+      "members": {
+        "umask": {
+          "type": "int",
+          "policy": "persist"
+        }
+      }
+    },
+    "parent": {
+      "type": "struct task_struct",
+      "policy": "members",
+      "members": {
+        "pid": {
+          "type": "int32_t",
+          "policy": "persist"
+        },
+        "tgid": {
+          "type": "int32_t",
+          "policy": "persist"
+        },
+        "real_parent": {
+          "type": "struct task_struct *",
+          "policy": "transient"
+        },
+        "fs": {
+          "type": "struct fs_struct *",
+          "policy": "transient"
+        },
+        "cred": {
+          "type": "struct cred *",
+          "policy": "transient"
+        },
+        "flags": {
+          "type": "uint32_t",
+          "policy": "persist"
+        }
+      }
+    },
+    "task": {
+      "type": "struct task_struct",
+      "policy": "members",
+      "members": {
+        "pid": {
+          "type": "int32_t",
+          "policy": "persist"
+        },
+        "tgid": {
+          "type": "int32_t",
+          "policy": "persist"
+        },
+        "real_parent": {
+          "type": "struct task_struct *",
+          "policy": "self_reference",
+          "target": "parent"
+        },
+        "fs": {
+          "type": "struct fs_struct *",
+          "policy": "self_reference",
+          "target": "fs"
+        },
+        "cred": {
+          "type": "struct cred *",
+          "policy": "context_reference",
+          "targets": [
+            "credential_pool[0]",
+            "credential_pool[1]"
+          ],
+          "nullable": false
+        },
+        "flags": {
+          "type": "uint32_t",
+          "policy": "persist"
+        }
+      }
+    },
+    "current": {
+      "type": "struct task_struct *",
+      "policy": "self_reference",
+      "target": "task"
+    },
+    "active_memory": {
+      "type": "struct osrec_user_memory",
+      "policy": "transient"
+    },
+    "rcu_depth": {
+      "type": "int",
+      "policy": "transient"
+    },
+    "credential_pool": {
+      "type": "struct cred[2]",
+      "policy": "elements",
+      "element": {
+        "type": "struct cred",
+        "policy": "members",
+        "members": {
+          "uid": {
+            "type": "uint32_t",
+            "policy": "persist"
+          },
+          "euid": {
+            "type": "uint32_t",
+            "policy": "persist"
+          },
+          "suid": {
+            "type": "uint32_t",
+            "policy": "persist"
+          },
+          "gid": {
+            "type": "uint32_t",
+            "policy": "persist"
+          },
+          "egid": {
+            "type": "uint32_t",
+            "policy": "persist"
+          },
+          "sgid": {
+            "type": "uint32_t",
+            "policy": "persist"
+          },
+          "user_ns": {
+            "type": "struct user_namespace *",
+            "policy": "self_reference",
+            "target": "user_ns"
+          },
+          "fsuid": {
+            "type": "uint32_t",
+            "policy": "persist"
+          },
+          "fsgid": {
+            "type": "uint32_t",
+            "policy": "persist"
+          },
+          "group_info": {
+            "type": "struct group_info *",
+            "policy": "context_reference",
+            "targets": [
+              "group_pool[0]",
+              "group_pool[1]"
+            ],
+            "nullable": false
+          },
+          "cap_effective": {
+            "type": "kernel_cap_t",
+            "policy": "members",
+            "members": {
+              "val": {
+                "type": "uint64_t",
+                "policy": "persist"
+              }
+            }
+          },
+          "cap_permitted": {
+            "type": "kernel_cap_t",
+            "policy": "members",
+            "members": {
+              "val": {
+                "type": "uint64_t",
+                "policy": "persist"
+              }
+            }
+          },
+          "cap_inheritable": {
+            "type": "kernel_cap_t",
+            "policy": "members",
+            "members": {
+              "val": {
+                "type": "uint64_t",
+                "policy": "persist"
+              }
+            }
+          },
+          "cap_bset": {
+            "type": "kernel_cap_t",
+            "policy": "members",
+            "members": {
+              "val": {
+                "type": "uint64_t",
+                "policy": "persist"
+              }
+            }
+          },
+          "cap_ambient": {
+            "type": "kernel_cap_t",
+            "policy": "members",
+            "members": {
+              "val": {
+                "type": "uint64_t",
+                "policy": "persist"
+              }
+            }
+          },
+          "securebits": {
+            "type": "uint32_t",
+            "policy": "persist"
+          },
+          "user": {
+            "type": "struct user_struct *",
+            "policy": "context_reference",
+            "targets": [
+              "user_pool[0]",
+              "user_pool[1]",
+              "user_pool[2]",
+              "user_pool[3]"
+            ],
+            "nullable": false
+          },
+          "ucounts": {
+            "type": "struct ucounts *",
+            "policy": "context_reference",
+            "targets": [
+              "ucounts_pool[0]",
+              "ucounts_pool[1]",
+              "ucounts_pool[2]",
+              "ucounts_pool[3]"
+            ],
+            "nullable": false
+          }
+        }
+      }
+    },
+    "credential_generation": {
+      "type": "uint64_t",
+      "policy": "persist"
+    },
+    "credential_slot_generation": {
+      "type": "uint64_t[2]",
+      "policy": "persist"
+    },
+    "pending_credential": {
+      "type": "struct cred *",
+      "policy": "transient"
+    },
+    "allocated_group": {
+      "type": "struct group_info *",
+      "policy": "transient"
+    },
+    "group_pool": {
+      "type": "struct group_info[2]",
+      "policy": "elements",
+      "element": {
+        "type": "struct group_info",
+        "policy": "members",
+        "members": {
+          "usage": {
+            "type": "int32_t",
+            "policy": "persist"
+          },
+          "ngroups": {
+            "type": "int32_t",
+            "policy": "persist"
+          },
+          "gid": {
+            "type": "uint32_t[4]",
+            "policy": "persist"
+          }
+        }
+      }
+    },
+    "user_pool": {
+      "type": "struct user_struct[4]",
+      "policy": "elements",
+      "element": {
+        "type": "struct user_struct",
+        "policy": "members",
+        "members": {
+          "uid": {
+            "type": "uint32_t",
+            "policy": "persist"
+          },
+          "usage": {
+            "type": "int32_t",
+            "policy": "persist"
+          }
+        }
+      }
+    },
+    "ucounts_pool": {
+      "type": "struct ucounts[4]",
+      "policy": "elements",
+      "element": {
+        "type": "struct ucounts",
+        "policy": "members",
+        "members": {
+          "uid": {
+            "type": "uint32_t",
+            "policy": "persist"
+          },
+          "usage": {
+            "type": "int32_t",
+            "policy": "persist"
+          },
+          "ns": {
+            "type": "struct user_namespace *",
+            "policy": "self_reference",
+            "target": "user_ns"
+          }
+        }
+      }
+    }
+  }
+}

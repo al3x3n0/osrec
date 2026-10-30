@@ -1,0 +1,15 @@
+{
+  "release": "Linux v6.10",
+  "source": "kernel/time/hrtimer.c",
+  "source_url": "https://github.com/torvalds/linux/blob/v6.10/kernel/time/hrtimer.c#L1606",
+  "file": "timer_driver.c",
+  "excerpt_sha256": "b66442397616bb61a68243d2e3c930e1b62caf5d47c067b8b9db1cfb3e9a42e4",
+  "extraction": "Selected complete definition with internal comments omitted; declarations and statements unchanged",
+  "functions": [
+    {
+      "name": "__hrtimer_run_queues",
+      "source_line": 1606
+    }
+  ],
+  "native_source_build_attested": false
+}

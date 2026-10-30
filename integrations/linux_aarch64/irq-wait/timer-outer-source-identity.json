@@ -1,0 +1,15 @@
+{
+  "release": "Linux v6.10",
+  "source": "kernel/time/hrtimer.c",
+  "source_url": "https://github.com/torvalds/linux/blob/v6.10/kernel/time/hrtimer.c#L1755",
+  "file": "timer_outer.c",
+  "excerpt_sha256": "965f6771b29c36cf8fbdeab40b29e8a68d7f8daa35fe4e078172ad4afebe2a32",
+  "extraction": "Selected complete definition with internal comments omitted; declarations and statements unchanged",
+  "functions": [
+    {
+      "name": "hrtimer_run_queues",
+      "source_line": 1755
+    }
+  ],
+  "native_source_build_attested": false
+}

@@ -1,0 +1,11 @@
+{
+  "source": "native-sysfs-btf",
+  "cpu_type_id": 726,
+  "cpu_size": 576,
+  "base_type_id": 392,
+  "base_size": 64,
+  "array_offset": 64,
+  "array_count": 8,
+  "offset_offset": 56,
+  "sequence_offset": 12
+}

@@ -1,0 +1,31 @@
+{
+  "frame": {
+    "tpidr_el0": 4886718345,
+    "tpidrro_el0": 46118400018
+  },
+  "objects": [
+    {
+      "symbol": "app_output",
+      "bytes": 16,
+      "id": 1
+    }
+  ],
+  "assertions": [
+    {
+      "symbol": "app_returns",
+      "data": "40302010000000008070605000000000c0b0a0900000000001f0e0d00000000004000000010000000000000000000000"
+    },
+    {
+      "symbol": "app_count",
+      "data": "0600000000000000"
+    },
+    {
+      "symbol": "app_failed",
+      "data": "0000000000000000"
+    },
+    {
+      "symbol": "app_output",
+      "data": "0000000000000000a5a5a5a5a5a5a5a5"
+    }
+  ]
+}

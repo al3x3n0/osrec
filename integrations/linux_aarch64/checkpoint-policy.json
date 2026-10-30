@@ -1,0 +1,128 @@
+{
+  "format": "osrec-slice-checkpoint-schema-v1",
+  "fields": {
+    "user_ns": {
+      "type": "struct user_namespace",
+      "policy": "members",
+      "members": {
+        "initial": {
+          "type": "uint32_t",
+          "policy": "persist"
+        }
+      }
+    },
+    "fs": {
+      "type": "struct fs_struct",
+      "policy": "members",
+      "members": {
+        "umask": {
+          "type": "int",
+          "policy": "persist"
+        }
+      }
+    },
+    "creds": {
+      "type": "struct cred",
+      "policy": "members",
+      "members": {
+        "uid": {
+          "type": "uint32_t",
+          "policy": "persist"
+        },
+        "euid": {
+          "type": "uint32_t",
+          "policy": "persist"
+        },
+        "suid": {
+          "type": "uint32_t",
+          "policy": "persist"
+        },
+        "gid": {
+          "type": "uint32_t",
+          "policy": "persist"
+        },
+        "egid": {
+          "type": "uint32_t",
+          "policy": "persist"
+        },
+        "sgid": {
+          "type": "uint32_t",
+          "policy": "persist"
+        },
+        "user_ns": {
+          "type": "struct user_namespace *",
+          "policy": "self_reference",
+          "target": "user_ns"
+        }
+      }
+    },
+    "parent": {
+      "type": "struct task_struct",
+      "policy": "members",
+      "members": {
+        "pid": {
+          "type": "int32_t",
+          "policy": "persist"
+        },
+        "tgid": {
+          "type": "int32_t",
+          "policy": "persist"
+        },
+        "real_parent": {
+          "type": "struct task_struct *",
+          "policy": "transient"
+        },
+        "fs": {
+          "type": "struct fs_struct *",
+          "policy": "transient"
+        },
+        "cred": {
+          "type": "struct cred *",
+          "policy": "transient"
+        }
+      }
+    },
+    "task": {
+      "type": "struct task_struct",
+      "policy": "members",
+      "members": {
+        "pid": {
+          "type": "int32_t",
+          "policy": "persist"
+        },
+        "tgid": {
+          "type": "int32_t",
+          "policy": "persist"
+        },
+        "real_parent": {
+          "type": "struct task_struct *",
+          "policy": "self_reference",
+          "target": "parent"
+        },
+        "fs": {
+          "type": "struct fs_struct *",
+          "policy": "self_reference",
+          "target": "fs"
+        },
+        "cred": {
+          "type": "struct cred *",
+          "policy": "self_reference",
+          "target": "creds"
+        }
+      }
+    },
+    "current": {
+      "type": "struct task_struct *",
+      "policy": "self_reference",
+      "target": "task"
+    },
+    "active_memory": {
+      "type": "struct osrec_user_memory",
+      "policy": "transient"
+    },
+    "rcu_depth": {
+      "type": "int",
+      "policy": "transient"
+    }
+  }
+}

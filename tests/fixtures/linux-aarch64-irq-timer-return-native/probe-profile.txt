@@ -1,0 +1,11 @@
+  osrec_task_dequeue                                        27               0
+  osrec_task_wake                                            9               0
+  osrec_task_activate                                       26               0
+  osrec_task_preempt                                        24               0
+  osrec_sleeper_entry                                        1               0
+  osrec_sleeper_callback                                     1               0
+  osrec_sleeper_callback_return                              1               0
+  osrec_sleeper_return                                       1               0
+  osrec_timer_callback                                       1               0
+  osrec_timer_return                                         1               0
+

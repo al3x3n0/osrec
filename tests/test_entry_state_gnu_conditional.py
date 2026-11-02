@@ -51,7 +51,9 @@ unsigned root(void){return (first()?:second())->value;}'''
     def test_first_operand_pointer_mutation_remains_blocked(self):
         body='unsigned root(void){struct Obj*p=left();return (p++?:right())->value;}'
         with tempfile.TemporaryDirectory() as tmp:
-            p=Analyzer(self.parse(Path(tmp),body),POLICY).analyze('root');self.assertIn('pointer_arithmetic',{r['kind'] for r in p['blockers']})
+            # p++ leaves p a derived pointer (unproven step): the dereference of its value blocks.
+            p=Analyzer(self.parse(Path(tmp),body),POLICY).analyze('root')
+            self.assertIn('dereference of a derived pointer (unproven offset) needs a checked span',{r['detail'] for r in p['blockers']})
             with self.assertRaises(ValueError):capture_header([p])
 
     def test_nested_operators_keep_all_origins_and_fresh_root_isolation(self):

@@ -46,7 +46,10 @@ class StridedCursorLoopTests(unittest.TestCase):
         p=self.positive(MODEL+'void root(void){unsigned*p=current()->a;for(unsigned i=0;i<3;i++){p+=2;unsigned*q=p;*q+=i;}}')
         self.assertEqual({r['path'] for r in p['entry_reads']},{'current()->a['+str(i)+']' for i in (2,4,6)})
     def test_nonliteral_zero_wrapped_and_self_assignment_steps_stay_blocked(self):
-        for update in ('p+=n;','p+=i;','p+=0;','p+=-1u;','p+=-2;','p=p+2;'):
+        # A zero step keeps the cursor on its first element; that offset is proven.
+        p=self.plan(MODEL+'void root(unsigned n){unsigned*p=current()->a;for(unsigned i=0;i<2;i++){*p+=i;p+=0;}}')
+        self.assertFalse(p['blockers'],p['blockers']);self.assertEqual({w['path'] for w in p['state_writes']},{'current()->a[0]'})
+        for update in ('p+=n;','p+=i;','p+=-1u;','p+=-2;','p=p+2;'):
             with self.subTest(update=update):
                 p=self.plan(MODEL+'void root(unsigned n){unsigned*p=current()->a;for(unsigned i=0;i<2;i++){*p+=i;'+update+'}}')
                 self.assertTrue(p['blockers']);self.assertNotIn('pointer_update_proofs',p)

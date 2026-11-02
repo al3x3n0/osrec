@@ -186,20 +186,25 @@ static unsigned char *user_byte(uintptr_t address,uint32_t access)
     if(!region || address<region->user_address || address-region->user_address>=32)return 0;
     return osrec_user_memory_resolve(&active_memory,address,1,access);
 }
-static void page_span(const unsigned char *p,unsigned long n)
+/* The kernel side of every user copy here is the 64-byte store or, for a copy
+ * to user memory only, the zero page's bytes (kmap_local_page). The span must lie
+ * inside one of them; any other pointer fails. The footprint analysis relies on
+ * this check (the copies are checked-span boundaries in analysis-contracts.json). */
+static void page_span(const unsigned char *p,unsigned long n,int store)
 {
     if(p>=file_data.bytes && p<file_data.bytes+64)linux_assert(n>(size_t)(file_data.bytes+64-p));
-    else if(p>=zero_bytes && p<zero_bytes+64)linux_assert(n>(size_t)(zero_bytes+64-p));
+    else if(!store && p>=zero_bytes && p<zero_bytes+64)linux_assert(n>(size_t)(zero_bytes+64-p));
+    else linux_assert(1);
 }
 unsigned long __arch_copy_to_user(void __user *to,const void *from,unsigned long n)
 {
-    const unsigned char *source=from;unsigned long copied=0;page_span(source,n);
+    const unsigned char *source=from;unsigned long copied=0;page_span(source,n,0);
     for(;copied<n;++copied){unsigned char *at=user_byte((uintptr_t)to+copied,OSREC_MEMORY_WRITE);if(!at)break;*at=source[copied];}
     return n-copied;
 }
 unsigned long __arch_copy_from_user(void *to,const void __user *from,unsigned long n)
 {
-    unsigned char *target=to;unsigned long copied=0;page_span(target,n);
+    unsigned char *target=to;unsigned long copied=0;page_span(target,n,1);
     for(;copied<n;++copied){const unsigned char *at=user_byte((uintptr_t)from+copied,OSREC_MEMORY_READ);if(!at)break;target[copied]=*at;}
     return n-copied;
 }

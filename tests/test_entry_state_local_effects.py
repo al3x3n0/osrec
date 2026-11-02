@@ -70,8 +70,9 @@ unsigned parameter(unsigned n,unsigned (*p)[n]){return n;}
             tree=self.parse(Path(tmp),{'input.c':source})
             for root in forms:
                 with self.subTest(root=root):
-                    plan=self.blocked(tree,root,'pointer_arithmetic')
-                    self.assertIn('unresolved_pointer_origin',{b['kind'] for b in plan['blockers']})
+                    # A step without a proven offset leaves a derived pointer: its dereference blocks.
+                    plan=self.blocked(tree,root,'dynamic_extent')
+                    self.assertIn('dereference of a derived pointer (unproven offset) needs a checked span',{b['detail'] for b in plan['blockers']})
 
     def test_pointer_results_fields_and_helper_returns(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -80,8 +81,10 @@ unsigned result(void){struct Obj *p=current();return (++p)->value;}
 unsigned helper(void){return move()->value;}
 unsigned field(void){current()->next++;return current()->next->value;}
 '''})
-            for root in ('result','helper','field'):
-                with self.subTest(root=root):self.blocked(tree,root,'pointer_arithmetic')
+            for root in ('result','helper'):
+                with self.subTest(root=root):self.blocked(tree,root,'dynamic_extent')
+            # A stepped pointer stored back into non-automatic memory still needs an escape model.
+            with self.subTest(root='field'):self.blocked(tree,'field','pointer_arithmetic')
 
     def test_unevaluated_and_discarded_effects_do_not_poison_aliases(self):
         with tempfile.TemporaryDirectory() as tmp:

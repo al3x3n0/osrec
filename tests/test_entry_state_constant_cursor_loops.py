@@ -45,7 +45,10 @@ class ConstantCursorLoopTests(unittest.TestCase):
             with self.subTest(bound=bound):
                 p=self.plan(MODEL+declarations+'void root(void){unsigned*p=current()->a;for(unsigned i=0;i<'+bound+';i++)*p++=i;}')
                 self.assertTrue(p['blockers']);self.assertNotIn('pointer_update_proofs',p)
-        for step in ('0','1U/0U','1U<<32','0xffffffffU+2U','(unsigned char)257','fixed'):
+        # A zero step keeps the cursor on its first element; that offset is proven.
+        p=self.plan(MODEL+declarations+'void root(void){unsigned*p=current()->a;for(unsigned i=0;i<4;i++){*p=1;p+=0;}}')
+        self.assertFalse(p['blockers'],p['blockers']);self.assertEqual({w['path'] for w in p['state_writes']},{'current()->a[0]'})
+        for step in ('1U/0U','1U<<32','0xffffffffU+2U','(unsigned char)257','fixed'):
             with self.subTest(step=step):
                 p=self.plan(MODEL+declarations+'void root(void){unsigned*p=current()->a;for(unsigned i=0;i<4;i++){*p=1;p+='+step+';}}')
                 self.assertTrue(p['blockers']);self.assertNotIn('pointer_update_proofs',p)

@@ -54,7 +54,13 @@ class ConstGraph:
         if key not in self._definitions:
             nodes=self.analyzer._global_declarations.get(name,[]);result=None
             definitions=[n for n in nodes if n.get('init')]
-            if len(definitions)==1 and all(not n.get('tls') and (not require_const or type_of(n).startswith('const ')) and
+            # A lone internal-linkage const object without an initializer is a tentative
+            # definition: zero-filled and never modifiable.
+            tentative=(not definitions and len(nodes)==1 and nodes[0].get('storageClass')=='static' and type_of(nodes[0]).startswith('const ') and
+                not nodes[0].get('tls') and not re.search(r'\bvolatile\b',type_of(nodes[0])) and
+                {c.get('kind') for c in children(nodes[0]) if c.get('kind','').endswith('Attr')}<=ATTRIBUTES)
+            if tentative:result=(nodes[0],ZERO)
+            elif len(definitions)==1 and all(not n.get('tls') and (not require_const or type_of(n).startswith('const ')) and
                     not re.search(r'\bvolatile\b',type_of(n)) and
                     {c.get('kind') for c in children(n) if c.get('kind','').endswith('Attr')}<=ATTRIBUTES for n in nodes):
                 node=definitions[0];parts=[c for c in children(node) if not c.get('kind','').endswith('Attr')]
@@ -209,7 +215,7 @@ class ConstGraph:
             target=self.value(value)
             if target is None:return None
             initializer={'kind':'address_constant','value':target}
-        elif canonical=='global:'+name and arithmetic_scalar(self.resolve_type(declared,unit)):
+        elif (canonical=='global:'+name or self.definition(name)[1] is ZERO) and arithmetic_scalar(self.resolve_type(declared,unit)):
             # Numeric members of records keep the numeric-record evidence and its policy;
             # only a whole scalar object (for example one marked unused) is covered here.
             if value is ZERO:initializer={'kind':'ImplicitValueInitExpr','type':{'qualType':plain(declared)}}

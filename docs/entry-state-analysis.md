@@ -1033,6 +1033,92 @@ Each changed case was checked against C's semantics. The affine-index,
 constant-expression, comparison, constant-bound, enum-operator, guarded-loop
 and loop tests now assert these results.
 
+### Derived pointers, checked spans and decided branches (2026-11-02)
+
+The original Linux user-copy chain (`copy_page_to_iter`, `_copy_to_iter`,
+`iterate_and_advance`, `copy_to_user_iter`, `raw_copy_to_user`) needed three
+more rules.
+
+**Derived pointers.** `p + n` or `p - n` where `n`'s bound cannot be proven no
+longer blocks where it is formed. It yields a `derived-pointer` value that
+records the array or object `p` points into. `p++`, `p--`, `p += n` and
+`p -= n` on a local pointer produce the same value; `++p` evaluates to it and
+`p++` to the previous value.
+
+Every use that could touch memory still blocks:
+- a dereference (`dynamic_extent`: "dereference of a derived pointer");
+- a store into non-automatic memory or an aggregate initializer;
+- a return from the root;
+- a boundary argument other than a checked span.
+
+Comparisons and differences of derived pointers access no memory; a difference
+is an integer of unknown value. A value loaded through a derived pointer is
+unresolved. An offset that is proven stays with the bounded-pointer rules, so
+a proven out-of-bounds formation such as `a - 1` still reports
+`pointer_arithmetic`. Bounded pointers through a record element now resolve
+`p->m` to that element's member.
+
+**Checked spans.** A `memory_model` boundary may list `spans`:
+`{pointer, length, access, objects}`. Such a span is a contract that the model
+fails at run time unless `[pointer, pointer + length)` lies inside one of the
+listed objects. Each value of the pointer argument then selects as follows:
+- **Derived from, or pointing into, a listed array:** the whole array is read
+  or written.
+- **Known origin that isn't listed:** the call never completes, so the value
+  contributes nothing.
+- **Unknown origin:** blocks unless every listed object is already reached.
+
+Each use is recorded in `checked_span_proofs`. In the `fd-control` slice:
+- `__arch_copy_to_user` lists `file_data.bytes` and the zero page's bytes.
+- `__arch_copy_from_user` lists `file_data.bytes` only.
+- `page_span` in `models.c` now fails on any pointer outside the listed
+  objects. Before, it checked only spans that started inside them.
+
+**Decided branches.** An `if` or `?:` whose condition the interval evaluator
+decides in the current call context visits only the taken arm. When that arm
+always leaves the block, the statements after it are skipped too, unless a
+label or case can enter them. Each decision is listed in
+`decided_branch_proofs` with its evidence.
+
+To decide `iter_is_ubuf(iter)`, the evaluator gained:
+- **Integer fields of automatic records:** the union of every write is
+  recorded. That includes a whole-object store such as
+  `*i = (struct iov_iter){.iter_type = ITER_UBUF, ...}`. Increments, compound
+  updates and escapes to unanalyzed code make the field unknown. A read uses
+  the union only where a write dominates it, as for pointer fields.
+- **Pointer context:** the evaluator reads such fields through the pointer
+  values of the current call, and carries pointer arguments into callees.
+- **Operators and types:** `__builtin_expect` is transparent. `!` and
+  decidable comparisons fold. Enumerated types evaluate in a range that holds
+  both `int` and `unsigned int`.
+
+A lone `static const` object with no initializer is a tentative definition:
+zero-filled and immutable, so its elements carry constant evidence.
+
+On the `fd-control` slice:
+
+| Call | Blockers before | Blockers after |
+|---|---|---|
+| `pread64` | 232 | 180 |
+| `pwrite64` | timed out at 1 h | 174 |
+| `fcntl` | 6 | 6 |
+
+The user-copy chain has no blockers left. The remaining ones are in folio,
+xarray and shmem code: error pointers, tagged xarray entries, and the
+`XAS_RESTART`/NULL states of `xa_node`, which the flow-insensitive
+automatic-record store merges. Some are also the 500-context limit.
+
+`tests/test_entry_state_checked_spans.py` covers:
+- checked spans: selected, rejected and unknown origins, writes, and contract
+  validation;
+- blocked uses of derived pointers;
+- decided branches, including the cases that must stay undecided.
+
+Tests that expected pointer mutations or unproven formations to block at the
+formation now assert where the derived value blocks instead: in the local
+effects, GNU conditional, kernel idiom, pointer arithmetic and hook-list tests.
+A zero step (`p += 0`) is proven.
+
 ## Run the live pipeline
 
 The prepared LiteOS demo supports generated snapshot instrumentation:

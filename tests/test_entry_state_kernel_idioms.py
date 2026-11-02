@@ -126,8 +126,10 @@ static struct fd to_fd(unsigned long v){return (struct fd){(struct File *)(v & ~
             tree=basic.EntryStateTests().parse(Path(tmp),tagged_null+put+'unsigned root(unsigned i){struct fd f=to_fd(get_pos(i));fdput(f);return 0;}')[0]
             p=Analyzer(tree,{'task':{'kind':'object_provider','reason':'fixture','implementation':'fixture','snapshot_safe':True}}).analyze('root')
         self.assertIn('unresolved_pointer_origin',self.kinds(p))
+        # A flag test that is always false makes the call unreachable: the decided branch is skipped.
         p=self.plan(put.replace('fd.flags & 1','fd.flags & 0')+'unsigned root(unsigned i){struct fd f=to_fd(get_pos(i));fdput(f);return 0;}')
-        self.assertIn('unresolved_pointer_origin',self.kinds(p))
+        self.assertFalse(p['blockers'],p['blockers'])
+        self.assertEqual([(d['function'],d['outcome']) for d in p['decided_branch_proofs']],[('fdput',0)])
 
     def test_memory_model_argument_effects_enter_the_footprint(self):
         policy={'task':{'kind':'object_provider','reason':'fixture','implementation':'fixture','snapshot_safe':True},
@@ -177,7 +179,8 @@ unsigned long mask_nospec(unsigned long index,unsigned long size);
         p=self.plan(text,state_ranges=self.RANGE,pointer_extents=self.EXTENT)
         self.assertFalse(p['blockers'],p['blockers'])
         self.assertEqual({r['path'] for r in p['entry_reads'] if r['path'].endswith('->mode')},{'task()->table->fd[%d]->mode'%k for k in range(4)})
-        self.assertIn('pointer_arithmetic',self.kinds(self.plan(text,state_ranges=self.RANGE)))
+        # Without the extent contract the element pointer is only derived: its dereference blocks.
+        self.assertIn('dereference of a derived pointer (unproven offset) needs a checked span',{b['detail'] for b in self.plan(text,state_ranges=self.RANGE)['blockers']})
 
     def test_read_once_views_keep_element_provenance(self):
         vol={'classification':'sequential_snapshot','reason':'r','validated_by':'v'}

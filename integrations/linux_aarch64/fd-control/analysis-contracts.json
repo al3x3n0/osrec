@@ -12,6 +12,37 @@
    "result": "external_memory",
    "reason": "OSREC runtime translation of an admitted user address to replay memory",
    "implementation": "include/osrec/syscall_slice.h user-memory contract, populated from the SVC boundary's admitted user objects"
+  },
+  "osrec_kernel___arch_copy_to_user": {
+   "kind": "memory_model",
+   "spans": [
+    {
+     "pointer": 2,
+     "length": 3,
+     "access": "read",
+     "objects": [
+      "argument:ctx->file_data.bytes",
+      "global:zero_bytes"
+     ]
+    }
+   ],
+   "reason": "copies to user memory: reads its kernel source span; user bytes go through the replay user-memory contract and are not kernel entry state",
+   "implementation": "models.c __arch_copy_to_user: page_span fails unless [pointer, pointer + n) lies inside file_data.bytes or zero_bytes, then copies byte by byte through user_byte"
+  },
+  "osrec_kernel___arch_copy_from_user": {
+   "kind": "memory_model",
+   "spans": [
+    {
+     "pointer": 1,
+     "length": 3,
+     "access": "write",
+     "objects": [
+      "argument:ctx->file_data.bytes"
+     ]
+    }
+   ],
+   "reason": "copies from user memory: writes its kernel destination span; user bytes go through the replay user-memory contract and are not kernel entry state",
+   "implementation": "models.c __arch_copy_from_user: page_span fails unless [pointer, pointer + n) lies inside file_data.bytes, then copies byte by byte through user_byte"
   }
  },
  "state_ranges": [

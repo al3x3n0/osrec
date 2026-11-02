@@ -51,7 +51,10 @@ class HookListTests(unittest.TestCase):
         for text in variants:
             with self.subTest(text=text[-200:]):
                 plan,_=self.analyze(text)
-                self.assertIn('pointer_arithmetic',{b['kind'] for b in plan['blockers']},plan['blockers'])
+                # container_of is not proven: its result is only a derived address, and walking
+                # the list through it blocks.
+                self.assertFalse([p for p in plan.get('container_proofs',[]) if p['kind']=='container_of_member_address'])
+                self.assertIn('dereference of a derived pointer (unproven offset) needs a checked span',{b['detail'] for b in plan['blockers']},plan['blockers'])
 
     def test_goto_retry_and_definition_union_bound_an_index(self):
         plan,_=self.analyze('''struct T{unsigned max;void*slot[64];unsigned next;};struct T*current(void);

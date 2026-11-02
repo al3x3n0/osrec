@@ -18,6 +18,7 @@ cannot wrap. Calls with available bodies are evaluated from their return
 expressions with argument intervals. Every interval is a may-value bound for
 proofs; execution keeps the original expressions and effects.
 """
+import re
 from entry_state import children,walk,unwrap,type_of,callee
 
 WIDE={'_Bool':(0,1),'char':(-0x80,0xff),'signed char':(-0x80,0x7f),'unsigned char':(0,0xff),
@@ -44,6 +45,9 @@ def integer_type(typ):
     if not isinstance(typ,str):return None
     words=[w for w in typ.split() if w not in ('const','volatile')]
     name=' '.join(words);name=SPELLINGS.get(name,name)
+    # An enumerated type's integer type is implementation-defined (int or unsigned int here):
+    # evaluate it in a range that holds both.
+    if len(words)==2 and words[0]=='enum':return 'long long'
     return name if name in WIDE else None
 
 def parens(node):
@@ -442,7 +446,7 @@ class ArgumentRanges:
 class Values:
     """Integer intervals for proofs in the analyzer's current call context."""
     def __init__(self,analyzer):
-        self.analyzer=analyzer;self.proof=None;self.assumed={};self.active=set()
+        self.analyzer=analyzer;self.proof=None;self.assumed={};self.active=set();self.pointer_env=[];self.call_stack=[]
     def facts_for(self,name):
         cache=self.analyzer._function_facts
         if name not in cache:cache[name]=FunctionFacts(self.analyzer.functions[name])
@@ -505,7 +509,10 @@ class Values:
         if typ is None:return None
         if kind=='UnaryOperator' and len(terms)==1:
             op=node.get('opcode')
-            if op=='!':return (0,1)
+            if op=='!':
+                inner=self.value(terms[0],name,facts,parameters,depth) if integer_type(type_of(terms[0])) else None
+                if inner is None:return (0,1)
+                return (1,1) if inner==(0,0) else (0,0) if inner[0]>0 or inner[1]<0 else (0,1)
             inner=self.value(terms[0],name,facts,parameters,depth)
             if inner is None:return WIDE[typ]
             if op=='+':return self.fit(*inner,node)
@@ -547,6 +554,20 @@ class Values:
                 raise Unproven('automatic variable may be read before initialization')
             union=self.definitions(target,key,name,facts,parameters,depth)
             return self.fit(*union,target) if union is not None else WIDE[typ]
+        if target.get('kind')=='MemberExpr' and children(target) and self.pointer_env:
+            # A field of an automatic record, read through the pointer values of this context.
+            stack=self.call_stack[-1] if self.call_stack else None
+            if stack:
+                paths=self.analyzer.storage_paths(target,self.pointer_env[-1],stack)
+                found=[]
+                for path in paths:
+                    key=self.analyzer.auto_key(path) if re.match(r'^(?:\*\()*auto:\d+',path) else None
+                    value=self.analyzer.auto_scalar_read(key[0],key[1],target,stack) if key else None
+                    if value is None:found=None;break
+                    found.append(value)
+                if found:
+                    self.note('definitions',dict(kind='automatic_record_field',field=target.get('name'),bounds=[min(v[0] for v in found),max(v[1] for v in found)]))
+                    return self.fit(min(v[0] for v in found),max(v[1] for v in found),target) or WIDE[typ]
         if target.get('kind')=='MemberExpr' and children(target):
             contract=self.analyzer.state_range(target)
             if contract is not None:
@@ -653,6 +674,7 @@ class Values:
         return WIDE[typ]
     def call(self,node,name,facts,parameters,depth):
         target=callee(node);typ=integer_type(type_of(node))
+        if target=='__builtin_expect' and len(children(node))==3:return self.value(children(node)[1],name,facts,parameters,depth+1)
         function=self.analyzer.functions.get(target)
         if function is None or self.analyzer.boundary(target) or depth>=MAX_DEPTH:return WIDE[typ]
         callee_facts=self.facts_for(target)
@@ -665,7 +687,16 @@ class Values:
                     if converted is not None:bound[parameter['id']]=converted
         returns=[n for n in walk(function) if n.get('kind')=='ReturnStmt']
         if not returns or any(not children(r) for r in returns):return WIDE[typ]
-        values=[self.value(children(r)[0],target,callee_facts,bound,depth+1) for r in returns]
+        # Pointer arguments carry their alias values into the callee (fields of automatic records).
+        entered=False
+        if self.pointer_env and self.call_stack and target not in self.call_stack[-1]:
+            env=self.pointer_env[-1];stack=self.call_stack[-1];callee_env={}
+            for parameter,argument in zip([c for c in children(function) if c.get('kind')=='ParmVarDecl'],arguments):
+                if '*' in type_of(parameter):callee_env[parameter['id']]=self.analyzer.resolve(argument,env,stack)
+            self.pointer_env.append(callee_env);self.call_stack.append(stack+[target]);entered=True
+        try:values=[self.value(children(r)[0],target,callee_facts,bound,depth+1) for r in returns]
+        finally:
+            if entered:self.pointer_env.pop();self.call_stack.pop()
         if any(v is None for v in values):return WIDE[typ]
         self.note('calls',dict(caller=name,callee=target,location=self.analyzer.location(node)))
         return self.fit(min(v[0] for v in values),max(v[1] for v in values),node)

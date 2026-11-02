@@ -66,7 +66,10 @@ unsigned unevaluated(unsigned*p,unsigned*q){return sizeof(p-q)+sizeof(*(p+9));}'
         with tempfile.TemporaryDirectory() as tmp:
             a=Analyzer(self.parse(Path(tmp),text))
             p=a.fresh().analyze('difference');self.assertIn('pointer difference requires common-array provenance',{b['detail'] for b in p['blockers']})
-            self.assertIn('pointer_arithmetic',{b['kind'] for b in a.fresh().analyze('formation')['blockers']})
+            # An address formed without a proven offset is a derived pointer: comparing it accesses
+            # no memory, so it does not block; returning it from the root still does.
+            formation=a.fresh().analyze('formation');self.assertFalse(formation['blockers'],formation['blockers'])
+            self.assertEqual([p['kind'] for p in formation['derived_pointer_proofs']],['derived_pointer_address'])
             for name in ('returned','cast_return'):
                 self.assertIn('pointer_arithmetic',{b['kind'] for b in a.fresh().analyze(name)['blockers']})
             self.assertFalse(a.fresh().analyze('unevaluated')['blockers'])

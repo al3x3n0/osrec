@@ -35,7 +35,7 @@ EXITS=('ReturnStmt','BreakStmt','ContinueStmt','GotoStmt')
 ENTRIES=('LabelStmt','CaseStmt','DefaultStmt')
 MUTATIONS={'=','+=','-=','*=','/=','%=','<<=','>>=','&=','|=','^='}
 TRANSPARENT_CASTS=('LValueToRValue','NoOp','PointerToBoolean','IntegralToBoolean','BitCast','NullToPointer')
-MAX_DEPTH=6;MAX_NODES=512;SPAN_LIMIT=1<<20
+MAX_DEPTH=12;MAX_NODES=8192;SPAN_LIMIT=1<<20
 
 class Unproven(Exception):
     """A value depends on volatile or possibly uninitialized automatic storage."""
@@ -152,7 +152,7 @@ def canonical(node):
 class FunctionFacts:
     """Immutable per-body indexes: parents, preorder spans, mutations and escapes."""
     def __init__(self,function):
-        self.function=function;self._facts={};self.parent={};self.effects=[];self.span={};self.order=[];self.mutations={};self.escaped=set();self.has_labels=False
+        self.function=function;self.gotos={};self._facts={};self.parent={};self.effects=[];self.span={};self.order=[];self.mutations={};self.escaped=set();self.has_labels=False
         def index(node,parent):
             start=len(self.order);self.order.append(node)
             if parent is not None:self.parent[id(node)]=parent
@@ -175,6 +175,7 @@ class FunctionFacts:
                     base=children(base)[0]
                 if base.get('kind')=='DeclRefExpr':self.escaped.add(base.get('referencedDecl',{}).get('id'))
             if kind=='VarDecl' and terms:self.mutations.setdefault(node['id'],[]).append(self.span[id(node)][1])
+            if kind=='GotoStmt':self.gotos.setdefault(node.get('targetLabelDeclId'),[]).append(node)
     def contains(self,node):return id(node) in self.span
     def variables(self,node):
         return {n.get('referencedDecl',{}).get('id') for n in walk(node) if n.get('kind')=='DeclRefExpr' and n.get('referencedDecl',{}).get('kind') in ('VarDecl','ParmVarDecl')}
@@ -190,6 +191,14 @@ class FunctionFacts:
         keys=self.variables(node)
         if keys&self.escaped and any(low<=position<=high for position in self.effects):return False
         return not any(self.assigned(k,low,high) for k in keys)
+    def stable_regions(self,node,regions):
+        """`stable` over several position intervals."""
+        if any(n.get('kind')=='DeclRefExpr' and 'volatile' in type_of(n) for n in walk(node)):return False
+        keys=self.variables(node)
+        for low,high in regions:
+            if keys&self.escaped and any(low<=position<=high for position in self.effects):return False
+            if any(self.assigned(k,low,high) for k in keys):return False
+        return True
     def entered(self,node):
         """Can control enter this subtree other than through its start?"""
         for n in walk(node):
@@ -251,6 +260,15 @@ class FunctionFacts:
                     then_exits=self.exits(parts[1]);else_exits=len(parts)==3 and self.exits(parts[2])
                     if then_exits==else_exits:continue
                     if self.stable(cond,low,high):result.append((cond,not then_exits,statement))
+            elif kind=='ForStmt' and len(terms)==5 and terms[2].get('kind') and not terms[1].get('kind') and child in (terms[3],terms[4]) and not self.entered(node):
+                # The condition held when this iteration began. Up to a use in the body, the
+                # condition and the body before the use must not store its variables; up to a use
+                # in the increment, the whole body (continue reaches the increment) must not either.
+                cond,increment,body=terms[2],terms[3],terms[4]
+                regions=[self.span[id(cond)]]
+                if child is body:regions.append((self.span[id(body)][0],self.region_end(use,node,child)))
+                else:regions+=[self.span[id(body)],(self.span[id(increment)][0],self.region_end(use,node,child))]
+                if self.stable_regions(cond,regions):result.append((cond,True,node))
             elif kind in ('FunctionDecl',):break
             child=node;node=self.parent.get(id(node))
         return result
@@ -290,8 +308,66 @@ class FunctionFacts:
             child=node;parent=self.parent.get(id(node))
             while parent is not None and parent.get('kind')=='ParenExpr':child=parent;parent=self.parent.get(id(parent))
             if parent is not None and parent.get('kind')=='BinaryOperator' and parent.get('opcode')=='=' and children(parent)[0] is child:continue
-            if self.reaching(node,key) is None:return False
+            if self.reaching(node,key) is None and not self.loop_initialized(node,key):return False
         return True
+    @staticmethod
+    def defines(statement,key):
+        """Does this statement always assign `key` (`key = v;`, `T key = v;`, possibly labelled)?"""
+        while statement.get('kind')=='LabelStmt' and len(children(statement))==1:statement=children(statement)[0]
+        plain=parens(statement)
+        if plain.get('kind')=='BinaryOperator' and plain.get('opcode')=='=' and variable(children(plain)[0])==key:return True
+        return statement.get('kind')=='DeclStmt' and any(d.get('id')==key and children(d) for d in children(statement))
+    def dominated(self,use,key,visiting=frozenset()):
+        """Is `key` assigned before `use` on every path, jumps included?
+
+        Walks back through enclosing blocks. A label on the way is reached by falling
+        through or by a goto, so each goto to it must itself follow an assignment (a goto
+        reached again through the same label adds no new entry path). Case labels, and
+        labels nested in a skipped statement, end the proof. A case label is reached from
+        its switch, which must itself follow an assignment."""
+        if key in self.escaped:return False
+        child=use;node=self.parent.get(id(use))
+        while node is not None and node.get('kind')!='FunctionDecl':
+            kind=node.get('kind');terms=children(node)
+            if kind in ('CaseStmt','DefaultStmt') and not self.switch_dominated(node,key,visiting):return False
+            if kind=='LabelStmt' and not self.jumps_dominated(node,key,visiting):return False
+            if kind=='ForStmt' and len(terms)==5 and child is not terms[0] and terms[0].get('kind') and self.defines(terms[0],key):return True
+            if kind=='CompoundStmt':
+                index=next(i for i,t in enumerate(terms) if t is child)
+                for statement in reversed(terms[:index]):
+                    if self.defines(statement,key):return True
+                    inner=statement
+                    while inner.get('kind')=='LabelStmt':
+                        if not self.jumps_dominated(inner,key,visiting) or len(children(inner))!=1:return False
+                        inner=children(inner)[0]
+                    if inner.get('kind') in ('CaseStmt','DefaultStmt'):
+                        if not self.switch_dominated(inner,key,visiting):return False
+                        while inner.get('kind') in ('CaseStmt','DefaultStmt') and children(inner):inner=children(inner)[-1]
+                    if self.entered(inner):return False
+            child=node;node=self.parent.get(id(node))
+        return False
+    def switch_dominated(self,label,key,visiting):
+        node=self.parent.get(id(label))
+        while node is not None and node.get('kind')!='SwitchStmt':node=self.parent.get(id(node))
+        return node is not None and self.dominated(node,key,visiting)
+    def jumps_dominated(self,label,key,visiting):
+        if id(label) in visiting:return True
+        return all(self.dominated(jump,key,visiting|{id(label)}) for jump in self.gotos.get(label.get('declId'),()))
+    def loop_initialized(self,use,key):
+        """Is `use` inside a for loop (condition, increment or body) whose initializer assigns `key`?
+
+        Control reaches the condition, increment and body only through the initializer,
+        so every value of `key` there comes from an assignment, never the declaration."""
+        if self.has_labels or key in self.escaped:return False
+        child=use;node=self.parent.get(id(use))
+        while node is not None and node.get('kind')!='FunctionDecl':
+            terms=children(node)
+            if node.get('kind')=='ForStmt' and len(terms)==5 and child is not terms[0] and terms[0].get('kind'):
+                init=parens(terms[0])
+                if init.get('kind')=='BinaryOperator' and init.get('opcode')=='=' and variable(children(init)[0])==key:return True
+                if init.get('kind')=='DeclStmt' and any(d.get('id')==key and children(d) for d in children(init)):return True
+            child=node;node=self.parent.get(id(node))
+        return False
     def reaching(self,use,key):
         """The unique assignment or initializer of `key` that every path to `use` passes last."""
         if key in self.escaped:return None
@@ -301,6 +377,15 @@ class FunctionFacts:
                 terms=children(node);index=next(i for i,t in enumerate(terms) if t is child)
                 high=self.region_end(use,node,child)
                 for statement in reversed(terms[:index]):
+                    labelled=statement
+                    # `label: key = value;` defines key on every entry, including jumps to the label.
+                    while labelled.get('kind')=='LabelStmt' and len(children(labelled))==1:labelled=children(labelled)[0]
+                    if labelled is not statement and labelled.get('kind') not in ENTRIES and not self.entered(labelled):
+                        plain=parens(labelled)
+                        if plain.get('kind')=='BinaryOperator' and plain.get('opcode')=='=' and variable(children(plain)[0])==key and self.mutations.get(key,[]).count(self.span[id(plain)][1])==1 and not any(
+                                p!=self.span[id(plain)][1] and self.span[id(plain)][0]<=p<=self.span[id(plain)][1] for p in self.mutations.get(key,())):
+                            end=self.span[id(statement)][1]
+                            return children(plain)[1] if not self.assigned(key,end+1,high) else None
                     if statement.get('kind') in ENTRIES or self.entered(statement):return None
                     value=None
                     plain=parens(statement)
@@ -357,7 +442,7 @@ class ArgumentRanges:
 class Values:
     """Integer intervals for proofs in the analyzer's current call context."""
     def __init__(self,analyzer):
-        self.analyzer=analyzer;self.proof=None
+        self.analyzer=analyzer;self.proof=None;self.assumed={};self.active=set()
     def facts_for(self,name):
         cache=self.analyzer._function_facts
         if name not in cache:cache[name]=FunctionFacts(self.analyzer.functions[name])
@@ -428,6 +513,10 @@ class Values:
             return WIDE[typ]
         if kind=='BinaryOperator' and len(terms)==2:return self.binary(node,name,facts,parameters,depth)
         if kind=='ConditionalOperator' and len(terms)==3:
+            # A condition whose interval excludes zero (or is zero) selects one arm.
+            test=self.value(terms[0],name,facts,parameters,depth) if integer_type(type_of(terms[0])) else None
+            if test is not None and (test[0]>0 or test[1]<0):return self.value(terms[1],name,facts,parameters,depth)
+            if test==(0,0):return self.value(terms[2],name,facts,parameters,depth)
             arms=[self.value(t,name,facts,parameters,depth) for t in terms[1:]]
             if any(a is None for a in arms):return WIDE[typ]
             return (min(a[0] for a in arms),max(a[1] for a in arms))
@@ -444,6 +533,7 @@ class Values:
             if key in facts.escaped:
                 if local:raise Unproven('escaped automatic variable')
                 return WIDE[typ]
+            if key in self.assumed:return self.assumed[key]
             definition=facts.reaching(target,key)
             if definition is not None:
                 self.note('definitions',self.analyzer.location(definition))
@@ -453,18 +543,95 @@ class Values:
             if declaration.get('kind')=='ParmVarDecl' and key not in facts.mutations and key in parameters:
                 self.note('parameters',dict(function=name,parameter=declaration.get('name'),bounds=list(parameters[key])))
                 return parameters[key]
-            if local and not facts.initialized(target,key):
+            if local and not facts.initialized(target,key) and not facts.loop_initialized(target,key) and not facts.dominated(target,key):
                 raise Unproven('automatic variable may be read before initialization')
-            return WIDE[typ]
+            union=self.definitions(target,key,name,facts,parameters,depth)
+            return self.fit(*union,target) if union is not None else WIDE[typ]
         if target.get('kind')=='MemberExpr' and children(target):
             contract=self.analyzer.state_range(target)
             if contract is not None:
                 self.note('state_ranges',dict(record=contract['record'],field=contract['field'],bounds=[contract['min'],contract['max']]))
                 return (contract['min'],contract['max'])
         return WIDE[typ]
+    def definitions(self,target,key,name,facts,parameters,depth):
+        """Every value an initialized local (or mutated parameter) can hold: the union over its assignments.
+
+        Each assigned value is evaluated where it is assigned. Assignments that read the
+        variable itself (`i++`, `i = i + 1`) must map the union of the others back into
+        it, assuming it holds before them (an inductive interval); an update whose
+        guards contradict that interval never runs."""
+        declaration=target.get('referencedDecl',{})
+        node=next((n for n in facts.order if n.get('id')==key and n.get('kind') in ('VarDecl','ParmVarDecl')),None)
+        if node is None or key in self.active or node.get('storageClass') is not None or node.get('tls'):return None
+        typ=integer_type(type_of(node))
+        if typ is None:return None
+        plain_values=[];updates=[]
+        if declaration.get('kind')=='ParmVarDecl':
+            if key not in parameters:return None
+            plain_values.append(parameters[key])
+        reads=lambda n:any(r.get('kind')=='DeclRefExpr' and r.get('referencedDecl',{}).get('id')==key for r in walk(n))
+        for n in facts.order:
+            kind=n.get('kind');terms=children(n);op=n.get('opcode')
+            if kind=='VarDecl' and n.get('id')==key and terms:
+                if reads(terms[-1]):return None
+                plain_values.append(terms[-1])
+            elif kind=='BinaryOperator' and op=='=' and len(terms)==2 and variable(terms[0])==key:
+                (updates if reads(terms[1]) else plain_values).append(terms[1])
+            elif kind=='UnaryOperator' and op in ('++','--') and len(terms)==1 and variable(terms[0])==key:updates.append(n)
+            elif kind=='CompoundAssignOperator' and len(terms)==2 and variable(terms[0])==key:return None
+        if not plain_values:return None
+        self.active.add(key)
+        try:
+            values=[v if isinstance(v,tuple) else self.value(v,name,facts,parameters,depth+1) for v in plain_values]
+            if any(v is None for v in values):return None
+            union=(min(v[0] for v in values),max(v[1] for v in values))
+            for update in updates:
+                self.assumed[key]=union
+                try:
+                    if update.get('kind')=='UnaryOperator':
+                        empty=[False];operand=children(update)[0]
+                        before=self.refine(operand,union,name,facts,parameters,depth+1,empty)
+                        if empty[0]:continue
+                        step=1 if update['opcode']=='++' else -1
+                        after=(before[0]+step,before[1]+step)
+                    else:after=self.value(update,name,facts,parameters,depth+1)
+                finally:self.assumed.pop(key,None)
+                if after is None or after[0]<union[0] or after[1]>union[1]:return None
+            self.note('definitions',dict(variable=node.get('name'),kind='inductive_union' if updates else 'union',bounds=list(union),assignments=len(plain_values)+len(updates)))
+            return union
+        finally:self.active.discard(key)
+    def affine(self,node,shape,base,name,facts,parameters,depth):
+        """(a, b) with node == a*shape + b, a > 0, when no intermediate value leaves its type for shape in base."""
+        node=widening(node);kind=node.get('kind');terms=children(node);typ=integer_type(type_of(node))
+        if canonical(node)==shape:return 1,0
+        if typ is None or kind!='BinaryOperator' or node.get('opcode') not in ('+','-','*') or len(terms)!=2:return None
+        op=node['opcode']
+        for inner,other,swap in ((terms[0],terms[1],False),(terms[1],terms[0],True)):
+            if swap and op=='-':break
+            if any(n.get('kind') in ('DeclRefExpr','MemberExpr','CallExpr') for n in walk(other)):continue
+            constant=self.value(other,name,facts,parameters,depth+1)
+            if constant is None or constant[0]!=constant[1]:continue
+            c=constant[0];part=self.affine(inner,shape,base,name,facts,parameters,depth)
+            if part is None:continue
+            a,b=part
+            if op=='+':a,b=a,b+c
+            elif op=='-':a,b=a,b-c
+            elif c>0:a,b=a*c,b*c
+            else:return None
+            low,high=a*base[0]+b,a*base[1]+b
+            return (a,b) if NARROW[typ][0]<=low and high<=NARROW[typ][1] else None
+        return None
     def binary(self,node,name,facts,parameters,depth):
         op=node.get('opcode');left,right=children(node);typ=integer_type(type_of(node))
-        if op in ('==','!=','<','>','<=','>=','&&','||'):return (0,1)
+        if op in ('==','!=','<','>','<=','>='):
+            # Decided only when both operands are integers and every pair of values agrees.
+            a=self.value(left,name,facts,parameters,depth) if integer_type(type_of(widening(left))) else None
+            b=self.value(right,name,facts,parameters,depth) if integer_type(type_of(widening(right))) else None
+            if a is None or b is None:return (0,1)
+            decide={'<':(a[1]<b[0],a[0]>=b[1]),'<=':(a[1]<=b[0],a[0]>b[1]),'>':(a[0]>b[1],a[1]<=b[0]),'>=':(a[0]>=b[1],a[1]<b[0]),
+                    '==':(a[0]==a[1]==b[0]==b[1],a[1]<b[0] or b[1]<a[0]),'!=':(a[1]<b[0] or b[1]<a[0],a[0]==a[1]==b[0]==b[1])}[op]
+            return (1,1) if decide[0] else (0,0) if decide[1] else (0,1)
+        if op in ('&&','||'):return (0,1)
         if op==',':return self.value(right,name,facts,parameters,depth)
         if op in MUTATIONS:return WIDE[typ]
         a=self.value(left,name,facts,parameters,depth);b=self.value(right,name,facts,parameters,depth)
@@ -502,28 +669,34 @@ class Values:
         if any(v is None for v in values):return WIDE[typ]
         self.note('calls',dict(caller=name,callee=target,location=self.analyzer.location(node)))
         return self.fit(min(v[0] for v in values),max(v[1] for v in values),node)
-    def refine(self,node,base,name,facts,parameters,depth):
-        """Intersect with comparisons against `node` that dominate it."""
+    def refine(self,node,base,name,facts,parameters,depth,empty=None):
+        """Intersect with comparisons against `node`, or an affine `a*node + b`, that dominate it."""
         shape=canonical(node)
         if shape is None or shape[0] in ('int',):return base
         low,high=base
+        swapped={'<':'>','>':'<','<=':'>=','>=':'<=','==':'==','!=':'!='}
         for cond,truth,guard in facts.facts(node):
             for comparison,holds in self.comparisons(cond,truth):
                 left,right=children(comparison);op=comparison['opcode']
-                if canonical(left)==shape:other=right
-                elif canonical(right)==shape:
-                    other=left;op={'<':'>','>':'<','<=':'>=','>=':'<=','==':'==','!=':'!='}[op]
-                else:continue
+                form=self.affine(left,shape,base,name,facts,parameters,depth+1)
+                if form is not None:other=right
+                else:
+                    form=self.affine(right,shape,base,name,facts,parameters,depth+1)
+                    if form is None:continue
+                    other=left;op=swapped[op]
                 if not holds:op={'<':'>=','>=':'<','>':'<=','<=':'>','==':'!=','!=':'=='}[op]
                 bound=self.value(other,name,facts,parameters,depth+1)
                 if bound is None:continue
-                if op=='<':high=min(high,bound[1]-1)
-                elif op=='<=':high=min(high,bound[1])
-                elif op=='>':low=max(low,bound[0]+1)
-                elif op=='>=':low=max(low,bound[0])
-                elif op=='==':low=max(low,bound[0]);high=min(high,bound[1])
+                # a*x + b OP bound, a > 0, without wrapping: solve for x.
+                a,b=form
+                if op=='<':high=min(high,(bound[1]-1-b)//a)
+                elif op=='<=':high=min(high,(bound[1]-b)//a)
+                elif op=='>':low=max(low,-((b-bound[0]-1)//a))
+                elif op=='>=':low=max(low,-((b-bound[0])//a))
+                elif op=='==':low=max(low,-((b-bound[0])//a));high=min(high,(bound[1]-b)//a)
                 else:continue
                 self.note('guards',self.analyzer.location(guard))
+        if low>high and empty is not None:empty[0]=True
         return (low,high) if low<=high else base
     def comparisons(self,cond,truth):
         """Comparisons implied by a condition with the given truth value: (node, holds)."""

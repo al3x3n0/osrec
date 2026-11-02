@@ -84,6 +84,10 @@ class ConstantBoundTests(unittest.TestCase):
                 tree=fixture.parse(stage,prefix+'unsigned '+root+'(State *state){unsigned result=0;for(unsigned i=0;i<'+limit+';++i)result+=state->values[i];return result;}')
                 plan=fixture.analyze(tree,root)
                 with self.subTest(root=root):
+                    if root=='empty_enum':
+                        # A zero bound gives a zero-trip loop; its may-reads stay inside the array.
+                        self.assertFalse(plan['blockers'],plan['blockers'])
+                        self.assertLessEqual({r['path'] for r in plan['entry_reads']},{'osrec_argument_state()->values[%d]'%n for n in range(8)});continue
                     self.assertTrue(any(b['kind'] in ('dynamic_extent','array_bounds') for b in plan['blockers']),plan['blockers'])
                     with self.assertRaises(ValueError):capture_header([plan])
             for body in (

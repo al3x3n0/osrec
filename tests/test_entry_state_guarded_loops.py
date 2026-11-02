@@ -95,6 +95,10 @@ class GuardedLoopTests(unittest.TestCase):
                 tree=fixture.parse(stage,'int touch(unsigned *p);void '+root+'(State *state,unsigned count){unsigned j=0;for(unsigned i=0;'+condition+';++i)state->values[i]=1;}')
                 plan=fixture.analyze(tree,root)
                 with self.subTest(root=root):
+                    if root in ('wide_limit','negated','empty'):
+                        # The conjunction holds in the body, and these conjuncts give i<8 (or never hold).
+                        self.assertFalse(plan['blockers'],plan['blockers'])
+                        self.assertLessEqual({w['path'] for w in plan['state_writes']},{'osrec_argument_state()->values[%d]'%n for n in range(8)});continue
                     self.assertTrue(plan['blockers'])
                     self.assertTrue(any(b['kind'] in ('dynamic_extent','array_bounds') for b in plan['blockers']))
                     with self.assertRaises(ValueError):capture_header([plan])

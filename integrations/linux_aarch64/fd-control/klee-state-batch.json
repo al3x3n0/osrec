@@ -2,7 +2,7 @@
  "format": "osrec-klee-state-batch-v1",
  "description": "KLEE state discovery over the Linux 6.10 arm64 fd-control slice (file-io plus fcntl, pread64, pwrite64, ftruncate): state-changing boundaries captured by svc_boundary.py from a workload run with RLIMIT_NOFILE at the model constant 8 (the binding checks it), with expected results.",
  "defaults": {
-  "slice": "build/linux-fd-control-port-20261030c/kernel",
+  "slice": "build/linux-fd-control-port-20261030j/kernel",
   "binding": "integrations/linux_aarch64/fd-control/live-binding.json",
   "contracts": "integrations/linux_aarch64/fd-control/analysis-contracts.json",
   "max_time": 1200
@@ -10,8 +10,8 @@
  "entries": [
   {
    "name": "fcntl-getfd",
-   "boundary": "build/linux-svc-state-20261030b/observe-fcntl-getfd/boundary.json",
-   "boundary_sha256": "18af9fbda729c8d8c485ec9523c5076ee12b90cd293abe3b554ec681bb98b3ef",
+   "boundary": "build/linux-svc-state-20261030k/observe-fcntl-getfd/boundary.json",
+   "boundary_sha256": "594a72c9ec03110ed5b841213d55de42e80b40561381636ea0fb114fe62cc07a",
    "tier": "quick",
    "args": [],
    "expect": {
@@ -32,8 +32,8 @@
   },
   {
    "name": "fcntl-setfd",
-   "boundary": "build/linux-svc-state-20261030b/observe-fcntl-setfd/boundary.json",
-   "boundary_sha256": "3f157fc3dccaf315954255345d72b9ac61d36aaf842d51a4cdd8f04ee5991be1",
+   "boundary": "build/linux-svc-state-20261030k/observe-fcntl-setfd/boundary.json",
+   "boundary_sha256": "2379008cfff8b557b52a6f6f6fe107e796bdf05704c2a62fc40d57aa3104f9c5",
    "tier": "quick",
    "args": [],
    "expect": {
@@ -54,8 +54,8 @@
   },
   {
    "name": "fcntl-getfd-alias",
-   "boundary": "build/linux-svc-state-20261030b/observe-fcntl-getfd-alias/boundary.json",
-   "boundary_sha256": "76d27530c2b57749909ff3ea58d9e719bb6c5b4158e54b0cc4cd388577532139",
+   "boundary": "build/linux-svc-state-20261030k/observe-fcntl-getfd-alias/boundary.json",
+   "boundary_sha256": "3e9d5188432f4792db33087534a16d5a0eff1e25b359a4438263d54790aa2e64",
    "tier": "quick",
    "args": [],
    "expect": {
@@ -76,8 +76,8 @@
   },
   {
    "name": "fcntl-clearfd",
-   "boundary": "build/linux-svc-state-20261030b/observe-fcntl-clearfd/boundary.json",
-   "boundary_sha256": "0efdba54d13b8776cdb1f6a089033a8f5373b5eab8ead75c572290081cfbc6b9",
+   "boundary": "build/linux-svc-state-20261030k/observe-fcntl-clearfd/boundary.json",
+   "boundary_sha256": "3042ec99a9a7cb0d742b9a4a685fb4d737494d618747480af962bb2eddf2cf87",
    "tier": "quick",
    "args": [],
    "expect": {
@@ -98,8 +98,8 @@
   },
   {
    "name": "fcntl-getfl",
-   "boundary": "build/linux-svc-state-20261030b/observe-fcntl-getfl/boundary.json",
-   "boundary_sha256": "bb913c09d0111fe1412bce896ef1a487fc0038e25daf3e5e399f9511626baf5a",
+   "boundary": "build/linux-svc-state-20261030k/observe-fcntl-getfl/boundary.json",
+   "boundary_sha256": "c8e336863e8dd458fddca75dd2aa3edb0df5c7ce80610df51a31cc208aa53288",
    "tier": "quick",
    "args": [],
    "expect": {
@@ -120,8 +120,8 @@
   },
   {
    "name": "fcntl-dupfd",
-   "boundary": "build/linux-svc-state-20261030b/observe-fcntl-dupfd/boundary.json",
-   "boundary_sha256": "ed907b3e684f601a617111571bd4ca1b979d6510c3e820442f03559fe8991c02",
+   "boundary": "build/linux-svc-state-20261030k/observe-fcntl-dupfd/boundary.json",
+   "boundary_sha256": "71ba677f9b8eb87eee388253a49588c78d33a30ca4a4de4bc376ef738f20032c",
    "tier": "quick",
    "args": [],
    "expect": {
@@ -142,8 +142,8 @@
   },
   {
    "name": "fcntl-dupfd-limit",
-   "boundary": "build/linux-svc-state-20261030b/observe-fcntl-dupfd-limit/boundary.json",
-   "boundary_sha256": "51953fd768125d28fd356cae45dc615f2b124532a34bd9277769863ac1c8fe51",
+   "boundary": "build/linux-svc-state-20261030k/observe-fcntl-dupfd-limit/boundary.json",
+   "boundary_sha256": "19d61e7c23032d5ba1ea63f8aee45d1c4a04b6c65a758488f2ea6407c404f70e",
    "tier": "quick",
    "args": [],
    "expect": {
@@ -160,8 +160,8 @@
   },
   {
    "name": "fcntl-dupfd-cloexec",
-   "boundary": "build/linux-svc-state-20261030b/observe-fcntl-dupfd-cloexec/boundary.json",
-   "boundary_sha256": "efbe4c320af7530180974a0d9e3247abb4f237f8710e1b175015cb2125b5d39f",
+   "boundary": "build/linux-svc-state-20261030k/observe-fcntl-dupfd-cloexec/boundary.json",
+   "boundary_sha256": "5eb72116287d8862ed02e03aa232f4dfceae48e742fd418ee338fb0d90f51ffd",
    "tier": "quick",
    "args": [
     "--split-field",
@@ -188,8 +188,8 @@
   },
   {
    "name": "fcntl-ebadf",
-   "boundary": "build/linux-svc-state-20261030b/observe-fcntl-ebadf/boundary.json",
-   "boundary_sha256": "d202dcfbefb9b78bdfc7c55e876f908e0a8b5a96241bfe76e793b2c525fa685d",
+   "boundary": "build/linux-svc-state-20261030k/observe-fcntl-ebadf/boundary.json",
+   "boundary_sha256": "78cd58e6cd328eb9c73d70fe48c3b3da250143af37e090af4499fd6c0879b0bd",
    "tier": "quick",
    "args": [],
    "expect": {
@@ -205,8 +205,8 @@
   },
   {
    "name": "fcntl-clearfd-alias",
-   "boundary": "build/linux-svc-state-20261030b/observe-fcntl-clearfd-alias/boundary.json",
-   "boundary_sha256": "ae141982fddb0735b3ec964745acff603d40437c5bea83b56fce7adb2bc440d5",
+   "boundary": "build/linux-svc-state-20261030k/observe-fcntl-clearfd-alias/boundary.json",
+   "boundary_sha256": "2eb0f4decb93c9960df91b8ed7a0914b18905b6aa6485c30d6cefaf949fa2321",
    "tier": "quick",
    "args": [],
    "expect": {
@@ -227,8 +227,8 @@
   },
   {
    "name": "pread",
-   "boundary": "build/linux-svc-state-20261030b/observe-pread/boundary.json",
-   "boundary_sha256": "092171238a84f1a60fe728c9081dac5d088784aca28d9fcc8d07db0bf27f4f15",
+   "boundary": "build/linux-svc-state-20261030k/observe-pread/boundary.json",
+   "boundary_sha256": "8e913867360f08d4dc7644da73336110c8b0c38cbfe34d2cbe71cc3693a28254",
    "tier": "long",
    "args": [
     "--split-field",
@@ -240,10 +240,10 @@
      "file_data.bytes",
      "file_pool[1].f_flags",
      "file_pool[1].f_mode",
-     "file_pool[1].object_id",
      "files.count.counter",
      "inode_pool[1].i_flags",
      "inode_pool[1].i_mode",
+     "task.flags",
      "task.ioac.rchar",
      "task.ioac.syscr",
      "user_object.1"
@@ -257,14 +257,15 @@
      "file_pool[1].f_flags",
      "files.count.counter",
      "inode_pool[1].i_flags",
-     "inode_pool[1].i_mode"
+     "inode_pool[1].i_mode",
+     "task.flags"
     ]
    }
   },
   {
    "name": "pread-negative",
-   "boundary": "build/linux-svc-state-20261030b/observe-pread-negative/boundary.json",
-   "boundary_sha256": "d746005668cd8f2819ace727094291dd76c9b70a335b62dc57102ae51a7bf8a2",
+   "boundary": "build/linux-svc-state-20261030k/observe-pread-negative/boundary.json",
+   "boundary_sha256": "1d3fa2d8f89fe2003178257bb7b85549bba12d99018c3c47731be563df700dd0",
    "tier": "quick",
    "args": [],
    "expect": {
@@ -278,8 +279,8 @@
   },
   {
    "name": "pread-all",
-   "boundary": "build/linux-svc-state-20261030b/observe-pread-all/boundary.json",
-   "boundary_sha256": "289df8bfb131699945270fa4825b0e7b21a8fbf97c256109c1473cd0c5431a74",
+   "boundary": "build/linux-svc-state-20261030k/observe-pread-all/boundary.json",
+   "boundary_sha256": "794b9b4e4121a57462bf047ee7b41ad927c3be16172fc6f5eebbb527b2d657a2",
    "tier": "long",
    "args": [
     "--split-field",
@@ -291,10 +292,10 @@
      "file_data.bytes",
      "file_pool[1].f_flags",
      "file_pool[1].f_mode",
-     "file_pool[1].object_id",
      "files.count.counter",
      "inode_pool[1].i_flags",
      "inode_pool[1].i_mode",
+     "task.flags",
      "task.ioac.rchar",
      "task.ioac.syscr",
      "user_object.1"
@@ -308,14 +309,15 @@
      "file_pool[1].f_flags",
      "files.count.counter",
      "inode_pool[1].i_flags",
-     "inode_pool[1].i_mode"
+     "inode_pool[1].i_mode",
+     "task.flags"
     ]
    }
   },
   {
    "name": "pwrite",
-   "boundary": "build/linux-svc-state-20261030b/observe-pwrite/boundary.json",
-   "boundary_sha256": "1ffd31516f3cfa76f675aabbf952bbebd5dabf2559e73b5cc9abdc1117258ca4",
+   "boundary": "build/linux-svc-state-20261030k/observe-pwrite/boundary.json",
+   "boundary_sha256": "2e8248440c1e8e57eec9739fb9edc333ce9f06d8cf1d111514117e53e6a8234d",
    "tier": "long",
    "args": [],
    "expect": {
@@ -324,11 +326,11 @@
      "file_pool[1].f_flags",
      "file_pool[1].f_iocb_flags",
      "file_pool[1].f_mode",
-     "file_pool[1].object_id",
      "files.count.counter",
      "inode_pool[1].i_flags",
      "inode_pool[1].i_mode",
      "inode_pool[1].i_size",
+     "task.flags",
      "task.ioac.syscw"
     ],
     "control_without_effect": [],
@@ -337,40 +339,45 @@
     "not_demonstrated": [
      "file_pool[1].f_flags",
      "files.count.counter",
-     "inode_pool[1].i_mode"
+     "inode_pool[1].i_mode",
+     "task.flags"
     ]
    }
   },
   {
    "name": "pwrite-extend",
-   "boundary": "build/linux-svc-state-20261030b/observe-pwrite-extend/boundary.json",
-   "boundary_sha256": "8019db242645de9d168467b28077d15d07d86dfb2f917bf16b1b318bab1f603f",
+   "boundary": "build/linux-svc-state-20261030k/observe-pwrite-extend/boundary.json",
+   "boundary_sha256": "d77687b71fe188287cb24ab2a1862b0133ca1fbf3145204b5e6f863160534a7f",
    "tier": "long",
    "args": [],
    "expect": {
     "complete": false,
     "required": [
+     "file_pool[1].f_flags",
      "file_pool[1].f_iocb_flags",
      "file_pool[1].f_mode",
-     "file_pool[1].object_id",
      "files.count.counter",
      "inode_pool[1].i_flags",
      "inode_pool[1].i_mode",
+     "inode_pool[1].i_size",
+     "task.flags",
      "task.ioac.syscw"
     ],
     "control_without_effect": [],
     "split_inputs": [],
     "validation": "partial",
     "not_demonstrated": [
+     "file_pool[1].f_flags",
      "files.count.counter",
-     "inode_pool[1].i_mode"
+     "inode_pool[1].i_mode",
+     "task.flags"
     ]
    }
   },
   {
    "name": "pwrite-restore",
-   "boundary": "build/linux-svc-state-20261030b/observe-pwrite-restore/boundary.json",
-   "boundary_sha256": "89304a574c3e38a97e648dbc6e34db9f1190dedc82636a60ba6d5eb35abe2cab",
+   "boundary": "build/linux-svc-state-20261030k/observe-pwrite-restore/boundary.json",
+   "boundary_sha256": "a68bb563a62c7c557db4ff351926b6f729d1cfaa695c2c2dc64e2b45b5520026",
    "tier": "long",
    "args": [],
    "expect": {
@@ -379,11 +386,11 @@
      "file_pool[1].f_flags",
      "file_pool[1].f_iocb_flags",
      "file_pool[1].f_mode",
-     "file_pool[1].object_id",
      "files.count.counter",
      "inode_pool[1].i_flags",
      "inode_pool[1].i_mode",
      "inode_pool[1].i_size",
+     "task.flags",
      "task.ioac.syscw"
     ],
     "control_without_effect": [],
@@ -392,14 +399,15 @@
     "not_demonstrated": [
      "file_pool[1].f_flags",
      "files.count.counter",
-     "inode_pool[1].i_mode"
+     "inode_pool[1].i_mode",
+     "task.flags"
     ]
    }
   },
   {
    "name": "ftruncate-shrink",
-   "boundary": "build/linux-svc-state-20261030b/observe-ftruncate-shrink/boundary.json",
-   "boundary_sha256": "5144e9e14bde17ac08d806f6d7308b66ba4a8e6a76268153ba40f3a5615d9048",
+   "boundary": "build/linux-svc-state-20261030k/observe-ftruncate-shrink/boundary.json",
+   "boundary_sha256": "e6b069bf848ba668cd3626004257ed3e3fc040cd17aa0a823f5d867899fcae4a",
    "tier": "long",
    "args": [],
    "expect": {
@@ -407,7 +415,6 @@
     "required": [
      "file_data.bytes",
      "file_pool[1].f_mode",
-     "file_pool[1].object_id",
      "files.count.counter",
      "inode_pool[1].append",
      "inode_pool[1].i_flags",
@@ -428,8 +435,8 @@
   },
   {
    "name": "ftruncate-grow",
-   "boundary": "build/linux-svc-state-20261030b/observe-ftruncate-grow/boundary.json",
-   "boundary_sha256": "cd358eb1af2ef661c26a3350145d065b7cdae0888a26f5a293f1e623969f5f31",
+   "boundary": "build/linux-svc-state-20261030k/observe-ftruncate-grow/boundary.json",
+   "boundary_sha256": "3c7bdfd8a88675857aac583fc994491d4bd743f2cc9bb01127aaa52ffa0e965b",
    "tier": "long",
    "args": [],
    "expect": {
@@ -437,7 +444,6 @@
     "required": [
      "file_data.bytes",
      "file_pool[1].f_mode",
-     "file_pool[1].object_id",
      "files.count.counter",
      "inode_pool[1].append",
      "inode_pool[1].i_flags",
@@ -463,8 +469,8 @@
   },
   {
    "name": "ftruncate-negative",
-   "boundary": "build/linux-svc-state-20261030b/observe-ftruncate-negative/boundary.json",
-   "boundary_sha256": "9c75131645916b45f305e76bd8520678b137fe34f1723741c55e4348b1dd8def",
+   "boundary": "build/linux-svc-state-20261030k/observe-ftruncate-negative/boundary.json",
+   "boundary_sha256": "615472cf255187fbce1d46e81c2a53cc7971aaeb2d55d7faa6c019c87d487178",
    "tier": "quick",
    "args": [],
    "expect": {
@@ -478,8 +484,8 @@
   },
   {
    "name": "ftruncate-console",
-   "boundary": "build/linux-svc-state-20261030b/observe-ftruncate-console/boundary.json",
-   "boundary_sha256": "382376d36b0e93da4bb1851d997f5b1488b2084f596ca478f2238a30896810a3",
+   "boundary": "build/linux-svc-state-20261030k/observe-ftruncate-console/boundary.json",
+   "boundary_sha256": "50a606f6ad7bcf8562e1a46e6d919b31140fc3605c6e8d84a9c1ae126a991df6",
    "tier": "quick",
    "args": [],
    "expect": {
@@ -501,8 +507,8 @@
   },
   {
    "name": "ftruncate-restore",
-   "boundary": "build/linux-svc-state-20261030b/observe-ftruncate-restore/boundary.json",
-   "boundary_sha256": "fc2959603d34cc07221eb9cede5f8e470d11bb6b83dd76377547c37141ef0899",
+   "boundary": "build/linux-svc-state-20261030k/observe-ftruncate-restore/boundary.json",
+   "boundary_sha256": "fec910f52887dddc771ddb8f6b28e1b98db0fd015f60000baf78f17e17b8aea0",
    "tier": "long",
    "args": [],
    "expect": {
@@ -510,7 +516,6 @@
     "required": [
      "file_data.bytes",
      "file_pool[1].f_mode",
-     "file_pool[1].object_id",
      "files.count.counter",
      "inode_pool[1].append",
      "inode_pool[1].i_flags",

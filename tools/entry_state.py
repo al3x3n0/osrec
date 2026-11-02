@@ -384,7 +384,9 @@ def constant_record_leaf(path,name,shape):
 def fixed_global_read(item,plan):
     """Validate evidence before excluding a fixed program constant from input."""
     if 'immutable_global' not in item:return False
-    proof=item['immutable_global'];required={'kind','object','type','initializer','initializer_sha256','declaration_location'}
+    proof=item['immutable_global']
+    if isinstance(proof,dict) and proof.get('kind')=='defined_const_initializer_leaf':return constant_leaf_read(item,proof,plan)
+    required={'kind','object','type','initializer','initializer_sha256','declaration_location'}
     if isinstance(proof,dict) and proof.get('kind')=='defined_const_numeric_record':required|={'schema','schema_sha256'}
     if not isinstance(proof,dict) or set(proof)!=required:raise ValueError('invalid immutable global evidence')
     typ=proof['type'];name=proof['object'];initializer=proof['initializer']
@@ -411,6 +413,29 @@ def fixed_global_read(item,plan):
                leaf is not None and item.get('type')==leaf)
     else:valid=False
     if not valid:raise ValueError('invalid immutable global evidence')
+    origin=re.compile(re.escape('global:'+name)+r'(?=$|[.\[\)]|->)')
+    if any(origin.search(row['path']) for row in plan.get('state_writes',[])):
+        raise ValueError('immutable global is also written: '+name)
+    return True
+
+def constant_leaf_read(item,proof,plan):
+    """Validate evidence for a read of one constant member (numeric or address) of a const global."""
+    required={'kind','object','path','type','initializer','initializer_sha256','declaration_location'}
+    name=proof.get('object');initializer=proof.get('initializer')
+    if (set(proof)!=required or not isinstance(name,str) or not re.fullmatch(r'(?:tu[0-9]+:)?[A-Za-z_]\w*',name) or
+        item.get('path')!=proof['path'] or not isinstance(proof['path'],str) or not re.fullmatch(re.escape('global:'+name)+r'(?:\.[A-Za-z_]\w*|\[[0-9]+\])*',proof['path']) or
+        item.get('volatile') or item.get('bitfield') or item.get('entry_candidate') is not True or
+        not isinstance(initializer,dict) or proof['initializer_sha256']!=digest(json.dumps(initializer,sort_keys=True).encode()) or
+        not isinstance(proof['declaration_location'],dict)):
+        raise ValueError('invalid constant leaf evidence')
+    if initializer.get('kind')=='address_constant':
+        value=initializer.get('value')
+        valid=(set(initializer)=={'kind','value'} and item.get('pointer_edge') is True and isinstance(value,str) and
+               re.fullmatch(r'null|function:(?:tu[0-9]+:)?[A-Za-z_]\w*|global:(?:tu[0-9]+:)?[A-Za-z_]\w*(?:\.[A-Za-z_]\w*|\[[0-9]+\])*',value) is not None)
+    else:
+        valid=(not item.get('pointer_edge') and arithmetic_scalar(type_of(initializer)) and
+               (constant_initializer(initializer)==initializer or initializer.get('kind')=='ImplicitValueInitExpr' and set(initializer)=={'kind','type'}))
+    if not valid:raise ValueError('invalid constant leaf evidence')
     origin=re.compile(re.escape('global:'+name)+r'(?=$|[.\[\)]|->)')
     if any(origin.search(row['path']) for row in plan.get('state_writes',[])):
         raise ValueError('immutable global is also written: '+name)
@@ -468,6 +493,8 @@ def load_ast(database,source,clang=None):
             result=subprocess.run(command,cwd=directory,stdout=stream,stderr=subprocess.PIPE,text=True,timeout=120)
         if result.returncode:raise ValueError('configured Clang parse failed: '+result.stderr.strip())
         tree=json.loads(output.read_text())
+        from entry_state_offsetof import annotate
+        designators=annotate(tree,compiler,source,args,directory)
         dependencies={source.resolve()}
         if dep.exists():
             text=dep.read_text().replace('\\\n',' ')
@@ -478,7 +505,7 @@ def load_ast(database,source,clang=None):
         identity={'source':str(source.resolve()),'source_sha256':digest(source.read_bytes()),
             'compiler':subprocess.check_output([compiler,'--version'],text=True).splitlines()[0],
             'compile_arguments':args,'compile_directory':str(directory),
-            'compilation_database_sha256':digest(database.read_bytes()),
+            'compilation_database_sha256':digest(database.read_bytes()),'offsetof_designators':designators,
             'dependencies':{str(path):digest(path.read_bytes()) for path in sorted(dependencies)}}
     return tree,identity
 
@@ -614,6 +641,8 @@ class Analyzer:
         self.pointer_updates=[];self._pointer_update_syntax={}
         self._constant_record_declarations=tuple(n for n in children(tree) if n.get('kind')!='FunctionDecl')
         self._global_declarations=global_declarations
+        from entry_state_const_graph import ConstGraph
+        self.const_graph=ConstGraph(self);self.container_proofs=[]
         self._constant_record_groups={name:nodes for name,nodes in global_declarations.items() if any(
             type_of(n).startswith('const ') and not arithmetic_scalar(type_of(n)) and not numeric_array(type_of(n)) and n.get('init') for n in nodes)}
         self._constant_records={};self._constant_record_index=None;self._constant_record_shapes={}
@@ -836,7 +865,7 @@ class Analyzer:
         result._referenced_globals=set()
         result.pointer_differences=[]
         result.pointer_comparisons=[]
-        result.pointer_updates=[]
+        result.pointer_updates=[];result.container_proofs=[]
         for name in ('reads','writes','calls','blockers','arguments','ranges'):setattr(result,name,[])
         result.contexts=0;result.providers={};result.loop_index_sites={};result.alias_path_limit_observed=False
         result._effect_nodes_cache={};result._alias_program_cache={};result._return_program_cache={}
@@ -1374,6 +1403,38 @@ class Analyzer:
         offsets=[sorted({o['offset'] for o in side}) for side in origins]
         return origin,offsets
 
+    def container_of(self,node,env,stack):
+        """`(char *)member_pointer - offsetof(T, m...)` whose every value is the address of member m of a T object.
+
+        The designator comes from the compiler (see entry_state_offsetof); the object
+        path and its declared record type come from the global's definition, so the
+        result is exactly that object's address. Null alternatives must already be
+        excluded by a dominating guard (they arrive as infeasible values).
+        """
+        terms=children(node)
+        if node.get('kind')!='BinaryOperator' or node.get('opcode')!='-' or len(terms)!=2:return None
+        offset=unwrap(terms[1]);designator=offset.get('_offsetof') if offset.get('kind')=='OffsetOfExpr' else None
+        if not designator or not designator.get('field_only'):return None
+        if not re.fullmatch(r'(?:(?:const|volatile)\s+)*(?:(?:signed|unsigned)\s+)?(?:char|void)\s*\*',type_of(terms[0]).strip()):return None
+        suffix=''.join('.'+f for f in designator['fields']);result=set();origins=[]
+        values=self.resolve(terms[0],env,stack)
+        if values=={INFEASIBLE}:
+            # The only value is null and a dominating guard excludes it: this arm never runs.
+            self.container_proofs.append(dict(kind='container_of_unreachable',function=stack[-1],call_path=stack,location=self.location(node),
+                reason='the member pointer is only null and a dominating guard proves it non-null'))
+            return set()
+        for value in values:
+            walked=self.const_graph.walk(value,require_const=False) if value.startswith('global:') else None
+            if walked is None or not walked[0].endswith(suffix):return None
+            prefix=walked[0][:-len(suffix)];owner=self.const_graph.walk(prefix,require_const=False)
+            from entry_state_const_graph import plain
+            if owner is None or self.const_graph.resolve_type(owner[1],owner[3])!=plain(designator['record']):return None
+            result.add(prefix);origins.append(dict(member=walked[0],object=prefix,record=designator['record']))
+        if not result:return None
+        self.container_proofs.append(dict(kind='container_of_member_address',function=stack[-1],call_path=stack,location=self.location(node),
+            designator=dict(record=designator['record'],fields=designator['fields'],source=designator['source']),origins=sorted(origins,key=lambda o:o['object'])))
+        return result
+
     def pointer_difference(self,node,env,stack):
         """A same-array subtraction also needs a representable signed result."""
         if node.get('kind')!='BinaryOperator' or node.get('opcode')!='-' or type_of(node) not in ('int','long','long long'):return False
@@ -1459,7 +1520,8 @@ class Analyzer:
                 self.ranges[-1]['pointer_provenance']['storage_kind']='automatic_scalar'
             if proof is not None:self.ranges[-1]['index_proof']=proof
             if origin['array_type_evidence'] is not None:self.ranges[-1]['array_type_evidence']=origin['array_type_evidence']
-            if len(result)>self.max_range_elements:
+            # The element limit applies to each array; the alias limit bounds how many arrays.
+            if len({p for p in result if p==origin['path'] or p.startswith(origin['path']+'[')})>self.max_range_elements:
                 self.issue('range_limit',node,stack,'pointer access selection exceeds the configured element limit');return set()
         return result|{'*('+p+')' for p in ordinary}
 
@@ -1527,6 +1589,12 @@ class Analyzer:
             if not write and 'immutable_global' not in item and arithmetic_scalar(type_of(node)):
                 record=self.constant_record_for(path,type_of(node))
                 if record is not None:item['immutable_global']=record
+            if not write and 'immutable_global' not in item and path.startswith('global:'):
+                leaf=self.const_graph.leaf(path,type_of(node))
+                if leaf is not None:
+                    definition,_=self.const_graph.definition(leaf['object'])
+                    item['immutable_global']=dict(leaf,initializer_sha256=digest(json.dumps(leaf['initializer'],sort_keys=True).encode()),
+                        declaration_location=self.location(definition))
             (self.writes if write else self.reads).append(item)
 
     @staticmethod
@@ -2228,8 +2296,19 @@ class Analyzer:
                 return values
             # Members of anonymous structs/unions are spelled through their enclosing member.
             if not node.get('name'):return {base+('->' if node.get('isArrow') else '') for base in self.resolve(inner[0],env,stack)}
-            paths={re.sub(r'->\.','->',base+('->' if node.get('isArrow') else '.')+node['name']) for base in self.resolve(inner[0],env,stack)}
+            bases=self.resolve(inner[0],env,stack)
+            if node.get('isArrow') and any(p in self._bounded_pointers for p in bases):
+                # p->m through a bounded pointer to a record element is member m of that element.
+                selected=self.pointer_access(bases,node,stack)
+                if not selected:return set()
+                paths={p[2:-1]+'->'+node['name'] if p.startswith('*(') else p+'.'+node['name'] for p in selected}
+            else:paths={re.sub(r'->\.','->',base+('->' if node.get('isArrow') else '.')+node['name']) for base in bases}
+            # Members of const globals are spelled by their canonical object path.
+            paths={self.const_graph.canonical(p) if p.startswith('global:') else p for p in paths}
             if self._auto_storage==id(node) or '*' not in type_of(node):return paths
+            # A pointer member of a const global with a constant initializer holds that value.
+            loaded=[self.const_graph.load(p) for p in paths]
+            if paths and all(v is not None for v in loaded):return set().union(*loaded)
             values=set();stored=False
             for path in paths:
                 key=self.auto_key(path)
@@ -2404,6 +2483,8 @@ class Analyzer:
             return set().union(*(self.resolve(c,env,stack) for c in inner[1:]))
         if pointer_arithmetic_detail(node):
             if self.pointer_difference(node,env,stack):return set()
+            container=self.container_of(node,env,stack)
+            if container is not None:return container
             pointers=self.offset_pointers(node,env,stack)
             if pointers is not None:return pointers
             self.issue('pointer_arithmetic',node,stack,pointer_arithmetic_detail(node))
@@ -2454,7 +2535,9 @@ class Analyzer:
         # Restore the old seed for every non-array/unknown alternative, then
         # propagate it through dependents before accepting any certificate.
         while eligible:
-            rejected={key for key in eligible if not env.get(key) or any(p not in self._bounded_pointers for p in env[key])}
+            # Null and bounded array pointers are fully known values; an unknown origin would
+            # survive the certificate anyway, so it gains nothing from removing the seed.
+            rejected={key for key in eligible if not env.get(key) or any(p not in self._bounded_pointers and p!='null' for p in env[key])}
             if not rejected:break
             for key in rejected:
                 origin,statement=local_seeds[key]
@@ -2656,7 +2739,7 @@ class Analyzer:
         if kind in ('GCCAsmStmt','MSAsmStmt','AtomicExpr') and not self.trap_asm(node,stack) and not self.ordering_asm(node,stack):
             self.issue('architecture_or_ordering',node,stack,'assembly or atomic operation needs a target/state model')
         detail=pointer_arithmetic_detail(node)
-        if detail and not self.pointer_difference(node,env,stack) and self.offset_pointers(node,env,stack) is None:self.issue('pointer_arithmetic',node,stack,detail)
+        if detail and not self.pointer_difference(node,env,stack) and self.container_of(node,env,stack) is None and self.offset_pointers(node,env,stack) is None:self.issue('pointer_arithmetic',node,stack,detail)
         if kind=='InitListExpr' and any(p in self._bounded_pointers for c in inner if '*' in type_of(c) for p in self.resolve(c,env,stack)):
             self.issue('pointer_arithmetic',node,stack,'bounded pointer aggregate storage needs an escape and reconstruction model')
         if kind=='ReturnStmt' and inner and '*' in type_of(inner[0]):
@@ -2673,7 +2756,8 @@ class Analyzer:
             if self.tracked_member(target,env,stack) is not None:pass # automatic record storage
             elif target.get('kind') in ('MemberExpr','UnaryOperator') and self.auto_storage(self.storage_paths(target,env,stack)):pass # stack object storage
             elif target.get('kind') in ('MemberExpr','ArraySubscriptExpr','CompoundLiteralExpr') or target.get('kind')=='UnaryOperator' and target.get('opcode')=='*' or target.get('kind')=='DeclRefExpr' and target.get('referencedDecl',{}).get('id') in self.globals:
-                self.access(self.resolve(target,env,stack),target,stack)
+                pointer_member=target.get('kind')=='MemberExpr' and '*' in type_of(target)
+                self.access(self.storage_paths(target,env,stack) if pointer_member else self.resolve(target,env,stack),target,stack)
             if target is not original:
                 self.visit(target,env,stack);return
         if kind=='UnaryExprOrTypeTraitExpr':return # sizeof/alignof do not evaluate ordinary operands
@@ -2731,7 +2815,8 @@ class Analyzer:
             elif tracked is not None:
                 env[tracked]=self.bounded_aliases(env[tracked]|self.resolve(right,env,stack),node,stack)
             else:
-                paths=self.resolve(left,env,stack);self.access(paths,left,stack,True)
+                paths=self.storage_paths(left,env,stack) if left.get('kind')=='MemberExpr' and '*' in type_of(left) else self.resolve(left,env,stack)
+                self.access(paths,left,stack,True)
                 if kind=='CompoundAssignOperator':self.access(paths,left,stack)
             self.visit(left if left is not unwrap(inner[0]) else inner[0],env,stack);return
         if kind=='UnaryOperator' and node.get('opcode') in ('++','--'):
@@ -2901,6 +2986,7 @@ class Analyzer:
         if self.pointer_differences:report['pointer_difference_proofs']=unique(self.pointer_differences)
         if self.pointer_comparisons:report['pointer_comparison_proofs']=unique(self.pointer_comparisons)
         if self.pointer_updates:report['pointer_update_proofs']=unique(self.pointer_updates)
+        if self.container_proofs:report['container_proofs']=unique(self.container_proofs)
         if self.index_values:report['local_index_proofs']=unique(self.index_values)
         if self.local_volatile_proofs:report['local_volatile_storage_proofs']=unique(self.local_volatile_proofs)
         if self.scalar_addresses:report['scalar_address_proofs']=unique(self.scalar_addresses)

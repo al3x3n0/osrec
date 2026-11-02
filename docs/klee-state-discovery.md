@@ -787,6 +787,27 @@ Before validation learned about incomplete runs, these entries validated as
 called the file bytes and `wchar` unchanged. The validator then expected the
 pre-state, while the replay, correctly, produced the live post-state.
 
+### Original identifiers, close, allocation, user copies and LSM hooks (2026-10-31)
+
+The slice now also runs the original uid/gid map lookups, `filp_flush`, the
+bit search and `expand_files`, the `iov_iter` user-copy chain and the LSM hook
+walks (`build/linux-fd-control-port-20261030j`; 95.3% original code). The
+binding gained the namespace maps and `task.flags`, so the 21 boundaries were
+recaptured into `build/linux-svc-state-20261030k` and rerun in
+`build/klee-state-batch-30k`. Every entry ran; 13 kept their recorded results.
+
+| Call | Exploration | Required | Validation |
+|------|-------------|----------|------------|
+| `fcntl` (10 entries), `pread64` negative offset, `ftruncate` negative length and console | complete | unchanged | consistent |
+| `ftruncate` shrink, grow, restore | complete | no longer `object_id` | consistent |
+| `pread64` (4 bytes at 2; all) | halted at 20 min: 2,640 paths, 1,145 in domain, 1,219 partial | lower bound: adds `task.flags`, no longer `object_id` | partial |
+| `pwrite64` (at 6; extending; restoring) | halted at 20 min: about 10,800 paths, 64 in domain | lower bound: adds `task.flags`, no longer `object_id`; the extending write adds `f_flags` and `i_size` | partial |
+
+`object_id` was read only by the models the original code replaced: the
+security-hook and flush models dispatched on the file's class. `task.flags` is
+the `PF_KTHREAD` test in arm64's original `access_ok`, which decides whether to
+untag the user address before every user copy.
+
 ## Batch reruns
 
 `tools/klee_state_batch.py` reruns discovery and validation for every

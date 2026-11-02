@@ -84,30 +84,37 @@ class AffineIndexTests(unittest.TestCase):
             'negative_result':('int','i-8'),
             'outside':('unsigned','2U*i+1U'),
             'nonlinear':('unsigned','i*i'),
-            'division':('unsigned','i/2U'),
             'shift':('unsigned','i<<1'),
             'floating':('unsigned','(unsigned)(i*0.5)'),
             'explicit_cast':('unsigned','(unsigned)i+1U'),
             'narrow_cast':('unsigned','(unsigned char)(i*256U)'),
-            'wide_operation':('unsigned','i+0ULL'),
             'unrelated_argument':('unsigned','i+count'),
             'post_increment':('unsigned','i++'),
             'assignment':('unsigned','(i=count)'),
-            'expression_budget':('unsigned','i'+'+0U'*40),
         }
+        # Outside the affine certificate, the loop condition (a path fact in the body)
+        # still bounds i; interval evaluation then proves or refutes the index exactly.
+        evaluated={'division':('i/2U',range(4)),'wide_operation':('i+0ULL',range(8)),'expression_budget':('i'+'+0U'*40,range(8))}
         with tempfile.TemporaryDirectory() as name:
             stage=Path(name)
             for root,(typ,index) in negatives.items():
                 tree=fixture.parse(stage,'unsigned '+root+'(State *state,unsigned count){unsigned result=0;for('+typ+' i=0;i<8;++i)result+=state->values['+index+'];return result;}')
                 plan=fixture.analyze(tree,root)
                 with self.subTest(root=root):
-                    expected='array_bounds' if root in ('negative_result','outside') else 'dynamic_extent'
+                    expected='array_bounds' if root in ('negative_result','outside','nonlinear','shift','explicit_cast') else 'dynamic_extent'
                     self.assertTrue(any(b['kind']==expected for b in plan['blockers']),plan['blockers'])
                     with self.assertRaises(ValueError):capture_header([plan])
+            for root,(index,cells) in evaluated.items():
+                plan=fixture.analyze(fixture.parse(stage,'unsigned '+root+'(State *state,unsigned count){unsigned result=0;for(unsigned i=0;i<8;++i)result+=state->values['+index+'];return result;}'),root)
+                with self.subTest(root=root):
+                    self.assertFalse(plan['blockers'],plan['blockers'])
+                    self.assertEqual({r['path'] for r in plan['entry_reads']},{'osrec_argument_state()->values[%d]'%n for n in cells})
+            plan=fixture.analyze(fixture.parse(stage,'void nested(State *state){for(unsigned i=0;i<4;++i)for(unsigned j=0;j<2;++j)state->values[i+j]=1;}'),'nested')
+            self.assertFalse(plan['blockers'],plan['blockers'])
+            self.assertEqual({w['path'] for w in plan['state_writes']},{'osrec_argument_state()->values[%d]'%n for n in range(5)})
             for body in (
                 'for(unsigned i=0;i<count;++i)state->values[2U*i]=1;',
                 'for(unsigned i=0;i<4;++i)((unsigned *)state->values)[2U*i]=1;',
-                'for(unsigned i=0;i<4;++i)for(unsigned j=0;j<2;++j)state->values[i+j]=1;',
             ):
                 plan=fixture.analyze(fixture.parse(stage,'void bad(State *state,unsigned count){'+body+'}'),'bad')
                 self.assertTrue(plan['blockers'])

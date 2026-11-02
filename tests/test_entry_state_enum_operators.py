@@ -82,6 +82,11 @@ class EnumOperatorTests(unittest.TestCase):
                         outcomes.append({'case':root,'stage':'clang_frontend'})
                         continue
                     plan=fixture.analyze(tree,root)
+                    if root=='zero_bound':
+                        # CAPACITY is 0: a zero-trip loop whose may-reads stay inside the array.
+                        self.assertFalse(plan['blockers'],plan['blockers'])
+                        self.assertLessEqual({r['path'] for r in plan['entry_reads']},{'osrec_argument_state()->values[%d]'%n for n in range(8)})
+                        outcomes.append({'case':root,'stage':'configured_ast_analysis','blocker':None});continue
                     expected='array_bounds' if root=='outside_array' else 'dynamic_extent'
                     self.assertTrue(any(b['kind']==expected for b in plan['blockers']),plan['blockers'])
                     with self.assertRaises(ValueError):capture_header([plan])

@@ -102,7 +102,10 @@ def footprint(sources,root,policy,state,binding,clang,stage,contracts=None):
              *(['--boundaries',Path(contracts).resolve()] if contracts else [])],cwd=ROOT/'tools',timeout=int(os.environ.get('OSREC_FOOTPRINT_TIMEOUT','300')))
         cache.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(stage/'entry-state.json',cache)
     plan=json.loads((stage/'entry-state.json').read_text())['plans'][0];bound=bound_fields(state,binding);rows=[]
+    from entry_state import fixed_global_read
     for read in plan['entry_reads']:
+        # Reads of program constants (validated const-global evidence) are not entry state.
+        if fixed_global_read(read,plan):continue
         field=normalize(read['path'],policy)
         if field.startswith('argument:'):rows.append(dict(path=read['path'],field=field,kind='register',covered=True));continue
         n=None if field.endswith('?') else node(policy,field)

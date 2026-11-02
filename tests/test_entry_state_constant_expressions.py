@@ -58,13 +58,26 @@ class ConstantExpressionTests(unittest.TestCase):
 
     def test_nonconstant_side_effecting_and_invalid_expressions_remain_blocked(self):
         outcomes=[]
-        expressions={**operators.NEGATIVE,
-            'runtime_argument':'count+0U','cancelled_argument':'count*0U+8U',
-            'conditional_argument':'count?8U:8U','comma':'(count,8U)',
+        # Bounds that are not portable constant expressions get no loop certificate, but the
+        # loop condition still bounds i where the interval evaluator can decide its value.
+        evaluated={'negative_bit_and':8,'wide_shift':8,'explicit_cast':8,'expression_budget':8,'zero_bound':None,
+            'cancelled_argument':8,'conditional_argument':8,'comma':8,'function_call':8}
+        expressions={**{k:v for k,v in operators.NEGATIVE.items() if k not in evaluated},
+            'runtime_argument':'count+0U',
             'assignment':'(count=8U)','increment':'count++',
-            'const_variable':'CAPACITY+0U','function_call':'capacity()',
+            'const_variable':'CAPACITY+0U',
             'negative_implicit_conversion':'(-1)+9U',
         }
+        values={**operators.NEGATIVE,'cancelled_argument':'count*0U+8U','conditional_argument':'count?8U:8U','comma':'(count,8U)','function_call':'capacity()'}
+        with tempfile.TemporaryDirectory() as name:
+            stage=Path(name)
+            for root,size in evaluated.items():
+                with self.subTest(root=root):
+                    tree=fixture.parse(stage,'const unsigned CAPACITY=8;unsigned capacity(void){return 8;}unsigned '+root+'(State *state,unsigned count){unsigned result=0;for(unsigned i=0;i<('+values[root]+');++i)result+=state->values[i];return result;}')
+                    plan=fixture.analyze(tree,root);self.assertFalse(plan['blockers'],plan['blockers'])
+                    reads={r['path'] for r in plan['entry_reads']};cells={'osrec_argument_state()->values[%d]'%n for n in range(8)}
+                    # A zero-trip loop may still be over-approximated by a may-read.
+                    self.assertEqual(reads,cells) if size==8 else self.assertLessEqual(reads,cells)
         with tempfile.TemporaryDirectory() as name:
             stage=Path(name)
             for root,expression in expressions.items():
@@ -77,13 +90,20 @@ class ConstantExpressionTests(unittest.TestCase):
                     self.assertTrue(any(b['kind']==expected for b in plan['blockers']),plan['blockers'])
                     with self.assertRaises(ValueError):capture_header([plan])
                     outcomes.append({'case':root,'stage':'configured_ast_analysis','blocker':expected})
+            # Wrapped starts are defined unsigned arithmetic (both are 0), and i+0U cannot wrap:
+            # no loop certificate, but the condition fact proves the writes exactly.
             for body in (
                 'for(unsigned i=(0xffffffffU+1U);i<(1U<<3);++i)state->values[i]=1;',
                 'for(unsigned i=(unsigned char)256;i<(1U<<3);++i)state->values[i]=1;',
+                'for(unsigned i=0;(i+0U)<8U;++i)state->values[i]=1;',
+            ):
+                plan=fixture.analyze(fixture.parse(stage,'void good(State *state){'+body+'}'),'good')
+                self.assertFalse(plan['blockers'],plan['blockers'])
+                self.assertEqual({w['path'] for w in plan['state_writes']},{'osrec_argument_state()->values[%d]'%n for n in range(8)})
+            for body in (
                 'for(unsigned i=0;i<(1U<<3);++i){i=count;state->values[i]=1;}',
                 'for(unsigned i=0;i<(1U<<3);++i)((unsigned *)state->values)[i]=1;',
                 'for(unsigned i=0;i<count || i<(1U<<3);++i)state->values[i]=1;',
-                'for(unsigned i=0;(i+0U)<8U;++i)state->values[i]=1;',
                 'for(unsigned i=(1U<<3);i<(1U<<3);++i)state->values[i]=1;',
             ):
                 plan=fixture.analyze(fixture.parse(stage,'void bad(State *state,unsigned count){'+body+'}'),'bad')

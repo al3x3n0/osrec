@@ -43,6 +43,7 @@ class ComparisonTests(unittest.TestCase):
             self.assertTrue(any(b['kind']=='range_limit' for b in fixture.analyze(tree,'paint',4)['blockers']))
 
     def test_overflow_dynamic_and_unsafe_comparisons_remain_blocked(self):
+        EVALUATED={'wide':True,'cast':True,'indirect_counter':True,'runtime_bound':True,'lower_bound':False,'zero_trip':False}
         cases={
             'signed_max':'i<=2147483647','reversed_signed_max':'2147483647>=i',
             'unsigned_max':'i<=0xffffffffU','wide':'8ULL>i','cast':'(unsigned char)8>i',
@@ -56,7 +57,16 @@ class ComparisonTests(unittest.TestCase):
             for case,condition in cases.items():
                 with self.subTest(case=case):
                     tree=fixture.parse(stage,'void bad(State *state,unsigned count){for(unsigned i=0;'+condition+';++i)state->values[i]=1;}')
-                    plan=fixture.analyze(tree,'bad');self.assertTrue(plan['blockers'])
+                    plan=fixture.analyze(tree,'bad')
+                    if case in EVALUATED:
+                        # No comparison certificate, but the loop condition is a path fact in the
+                        # body: these conditions are i<8 or tighter, or never hold (a zero-trip
+                        # loop, whose may-writes stay inside the array).
+                        self.assertFalse(plan['blockers'],plan['blockers'])
+                        writes={w['path'] for w in plan['state_writes']};cells={'osrec_argument_state()->values[%d]'%n for n in range(8)}
+                        self.assertEqual(writes,cells) if EVALUATED[case] else self.assertLessEqual(writes,cells)
+                        continue
+                    self.assertTrue(plan['blockers'])
                     self.assertTrue(any(b['kind']==('array_bounds' if case=='outside' else 'dynamic_extent') for b in plan['blockers']),plan['blockers'])
                     with self.assertRaises(ValueError):capture_header([plan])
                     outcomes.append({'case':case,'stage':'configured_ast_analysis','blockers':sorted({b['kind'] for b in plan['blockers']})})

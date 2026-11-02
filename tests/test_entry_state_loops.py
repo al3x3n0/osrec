@@ -102,6 +102,8 @@ class EntryStateLoopTests(unittest.TestCase):
             global_plan=Analyzer(tree).analyze('global_tick');self.assertTrue(global_plan['entry_reads']);self.assertTrue(global_plan['state_writes'])
 
     def test_unsafe_or_unproved_induction_remains_blocked(self):
+        cell=lambda *ns:{'osrec_argument_state()->values[%d]'%n for n in ns}
+        EVALUATED={'nonunit':cell(*range(8)),'cast_index':cell(*range(8)),'narrow_counter':cell(*range(8)),'reused_counter':cell(*range(8)),'wide_bound':cell(*range(8))}
         bodies={
             'body_assign':'for(unsigned i=0;i<8;++i){i=count;state->values[i]=1;}',
             'body_increment':'for(unsigned i=0;i<8;++i){++i;state->values[i]=1;}',
@@ -132,6 +134,10 @@ class EntryStateLoopTests(unittest.TestCase):
                 tree=parse(stage,'void touch(unsigned *p);void '+root+'(State *state,unsigned count){'+body+'}\n')
                 plan=analyze(tree,root)
                 with self.subTest(root=root):
+                    if root in EVALUATED:
+                        # Outside the induction certificate, the condition i<8 still bounds i in the body.
+                        self.assertFalse(plan['blockers'],plan['blockers'])
+                        self.assertEqual({w['path'] for w in plan['state_writes']},EVALUATED[root]);continue
                     self.assertTrue(plan['blockers'])
                     if root=='address':self.assertTrue(any(b['kind']=='dynamic_extent' for b in plan['blockers']))
                     with self.assertRaises(ValueError):capture_header([plan])

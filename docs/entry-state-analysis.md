@@ -942,6 +942,97 @@ accepted, because subsequent tests exposed typedef-hidden volatile/atomic and
 volatile-record-member cases. Existing assembly and cross-file cohort reports
 remain separate.
 
+### Constant hook lists, jumps and loop counters (2026-10-31)
+
+The Linux `fd-control` slice now runs original kernel code for:
+- the LSM hook walks;
+- the descriptor bit search;
+- `alloc_fd`'s retry loop;
+- the uid/gid extent search.
+
+Each needed one more proof.
+
+**Constant address graphs** (`entry_state_const_graph.py`). A const global defined
+once with an initializer cannot change at run time. When one of its pointer
+members is initialized with an address constant (`&G.m[i]`, possibly converted),
+a function or a null pointer, a load of that member yields exactly that value.
+A walk over such a table therefore resolves to the table's own elements. Reads
+of its members carry `defined_const_initializer_leaf` evidence (object, path,
+type, initializer and its hash). `fixed_global_read` validates that evidence and
+removes those reads from the entry state, as it does for numeric constants.
+Paths into const objects are spelled canonically: `->` after an object of
+record type is that record's member.
+
+**`container_of`.** `(char *)p - offsetof(T, m)` resolves to an object when
+every value of `p` is the address of member `m` of an object whose declared
+record type is `T`. Clang's JSON dump omits an `OffsetOfExpr`'s designator.
+`entry_state_offsetof.py` reads it from the configured compiler's own libclang
+and attaches it by source position and order. An `offsetof` that cannot be
+matched stays unannotated and keeps its `pointer_arithmetic` blocker, as does a
+`container_of` on a mutable pointer or with a mismatched member or record. Each
+resolution is listed under `container_proofs`.
+
+**Loop conditions as facts.** In a `for` loop's body and increment, the loop
+condition holds when nothing between its evaluation and the use stores its
+variables. The whole body counts for the increment, since `continue` reaches
+it. A pointer assigned in the loop initializer is never read uninitialized
+inside the loop.
+
+**Definite assignment across jumps.** A local is initialized at a use when a
+plain assignment precedes it in an enclosing block. Each label on the way back
+is reached by falling through or by a `goto`, and every such `goto` must itself
+follow an assignment; a `goto` reached again through the same label adds no
+new entry path. A case label inherits the definitions that precede its
+`switch`. `label: x = v;` reaches later uses even when the label is a retry
+target.
+
+**Intervals over several assignments.** When a local has no unique reaching
+definition, its interval is the union of the values of all its assignments,
+each evaluated where it is assigned. Assignments that read the variable itself
+(`i++`) must map that union back into itself, assuming it holds before them,
+or the union is not used. A guard such as `(idx + 1) * 64 >= sz` is solved for
+`idx` when no intermediate value can wrap. An update whose guards contradict
+the assumed interval never runs. Comparisons whose operand intervals decide
+them fold to 0 or 1, and a conditional with a decided condition takes one arm.
+The interval depth limit rose from 6 to 12 and the node budget from 512 to 8192.
+
+**Smaller changes.**
+- `p->m` through a bounded pointer to a record element is member `m` of that
+  element.
+- A structured definite-initialization proof now also accepts null alongside
+  bounded array pointers.
+- The per-access element limit counts each array separately; the alias limit
+  bounds how many arrays.
+
+On the `fd-control` slice, the footprint blockers changed as follows:
+- **`fcntl`:** 36 to 6. The remaining three accesses index the close-on-exec
+  bitmap with the raw syscall `fd`, whose bound follows only from `fdget`
+  having succeeded. They predate this change.
+- **`ftruncate`:** 309 to 292, the count of the slice before the new code. It
+  needs `--max-alias-paths 1024`, because the uid map's 5 extents multiply the
+  64 descriptor slots. All remaining blockers are in shmem, folio and xarray
+  code.
+- **`pread64`:** about 50 new blockers remain in the user-copy chain. The copy
+  reads the kernel buffer at `kaddr + offset + progress`, which needs a
+  relational bound on the offset and the file size.
+
+`tests/test_entry_state_hook_lists.py` covers the hook walk and its rejected
+variants, the goto retry, the inductive counter and its unguarded variants, and
+`switch` dominance.
+
+Some loops that the older tests required to stay blocked are now proven:
+- Loops outside the induction certificates now have path-fact bounds: wide
+  or cast bounds, `i+0U`, `(count*0U+7U)>=i`, `i+=2`, a counter declared
+  before its loop, wrapped constant starts that equal 0, and nested `i+j`.
+- Indexes that leave the array (`i*i`, `i<<1`, `(unsigned)i+1U`) now report
+  `array_bounds` instead of an unproven extent.
+- Zero-trip loops (a bound of 0, or `i>=7` from 0) keep may-accesses inside
+  the array.
+
+Each changed case was checked against C's semantics. The affine-index,
+constant-expression, comparison, constant-bound, enum-operator, guarded-loop
+and loop tests now assert these results.
+
 ## Run the live pipeline
 
 The prepared LiteOS demo supports generated snapshot instrumentation:

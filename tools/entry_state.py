@@ -196,6 +196,9 @@ def qualifier_only_conversion(cast,operand):
         return re.sub(r'\s+',' ',re.sub(r'\b(?:const|volatile|restrict)\b','',body)).strip(),bool(re.search(r'\bvolatile\b',body))
     (target,target_volatile),(source,source_volatile)=pointee(cast),pointee(operand)
     if target is not None and target==source and target_volatile and not source_volatile:return True
+    # Adding const (keeping volatile) to the same pointee type keeps the object.
+    constant=lambda node:bool(re.search(r'\bconst\b',type_of(node).strip()[:-1]))
+    if target is not None and target==source and target_volatile==source_volatile and constant(cast) and not constant(operand):return True
     # Clang marks qualification-only conversions as NoOp, even when the target is
     # spelled through typeof/_Generic (__unqual_scalar_typeof in READ_ONCE).
     spelled=type_of(cast).strip()
@@ -511,7 +514,7 @@ def load_ast(database,source,clang=None):
 
 
 class Analyzer:
-    def __init__(self,tree,boundaries=None,max_contexts=500,max_range_elements=64,prune_written=False,argument_objects=None,preserve_write_state=False,max_alias_paths=DEFAULT_MAX_ALIAS_PATHS,cache_alias_syntax=True,state_ranges=None,linked_symbols=None,volatile_fields=None,operand_free_asm=None,volatile_accesses=None,pointer_extents=None,callback_targets=None):
+    def __init__(self,tree,boundaries=None,max_contexts=500,max_range_elements=64,prune_written=False,argument_objects=None,preserve_write_state=False,max_alias_paths=DEFAULT_MAX_ALIAS_PATHS,cache_alias_syntax=True,state_ranges=None,linked_symbols=None,volatile_fields=None,operand_free_asm=None,volatile_accesses=None,pointer_extents=None,callback_targets=None,pointer_values=None,pointer_identity=None,user_addresses=None):
         if preserve_write_state and not prune_written:raise ValueError('write-state preservation requires prune_written')
         if type(max_alias_paths) is not int or max_alias_paths<1:raise ValueError('max_alias_paths must be a positive integer')
         self.max_alias_paths=max_alias_paths;self.alias_path_limit_observed=False
@@ -519,7 +522,7 @@ class Analyzer:
         self._effect_nodes_cache={};self._alias_program_cache={};self._return_program_cache={}
         self._expression_nodes_cache={};self._direct_calls_cache={};self._parameters_cache={}
         self._static_index_cache={};self._array_lvalue_cache={}
-        self._bounded_pointer_keys={};self._bounded_pointers={};self._pointer_access_constants={};self._pointer_access_types={};self._pointer_scope_cache={};self._definite_pointer_cache={};self._pointer_initialization_environments={};self.pointer_initializations=[];self.pointer_returns=[];self.index_values=[];self._local_index_definitions={};self._local_index_cache={};self._local_index_inputs={};self._local_index_declarations={}
+        self._bounded_pointer_keys={};self._bounded_pointers={};self._pointer_access_constants={};self._pointer_access_types={};self._pointer_scope_cache={};self._definite_pointer_cache={};self._pointer_initialization_environments={};self.pointer_initializations=[];self.pointer_returns=[];self.pointer_stores=[];self.index_values=[];self._local_index_definitions={};self._local_index_cache={};self._local_index_inputs={};self._local_index_declarations={}
         self._diagnostic_keys=set();self._diagnostic_nodes={}
         from entry_state_values import Values
         self._scalar_objects={};self._scalar_fields={};self.trap_proofs=[];self.tagged_pointer_proofs=[];self.ordering_asm_proofs=[];self.extent_assumptions=[];self.infeasible_accesses=[]
@@ -543,6 +546,19 @@ class Analyzer:
                 raise ValueError('pointer extent requires record, field, extent_field, reason and validated_by')
             self.pointer_extents[(item['record'],item['field'])]=dict(item)
         self._function_facts={};self._context_calls={}
+        self.pointer_values={};self._pointer_value_items=list(pointer_values or [])
+        # The replay restores object identity: pointers to one captured object stay equal, to distinct ones distinct.
+        if pointer_identity is not None and (not isinstance(pointer_identity,dict) or set(pointer_identity)!={'reason','implementation'} or
+                not all(isinstance(v,str) and v for v in pointer_identity.values())):
+            raise ValueError('pointer identity requires a reason and an implementation')
+        self.pointer_identity=pointer_identity
+        # Root parameters that hold user-space addresses: exact register values, never kernel objects.
+        self.user_addresses=set()
+        for item in user_addresses or []:
+            if (not isinstance(item,dict) or set(item)!={'function','parameter','reason','validated_by'} or
+                    not all(isinstance(item[k],str) and item[k] for k in item)):
+                raise ValueError('user addresses require function, parameter, reason and validated_by')
+            self.user_addresses.add((item['function'].split(':',1)[-1],item['parameter']))
         self._auto_objects={};self._auto_info={};self._auto_store={};self._auto_reads={};self._auto_late=False;self._auto_storage=None;self._auto_sites={};self._call_nodes=[]
         self.volatile_fields={}
         for item in volatile_fields or []:
@@ -562,7 +578,7 @@ class Analyzer:
                 key='struct '+n['name'];self.record_layouts[key]=layout if self.record_layouts.get(key,layout)==layout else None
         self.fields={n["id"]:n for n in walk(tree) if n.get("kind")=="FieldDecl"};self.functions={};self.globals={};self.boundaries=boundaries or {};self.max_contexts=max_contexts
         self.reads=[];self.writes=[];self.calls=[];self.blockers=[];self.arguments=[];self.contexts=0;self.providers={};self.ranges=[];self.max_range_elements=max_range_elements;self.prune_written=prune_written
-        self._local_volatile_storage={};self.local_volatile_proofs=[]
+        self._local_volatile_storage={};self.local_volatile_proofs=[];self.user_address_proofs=[]
         self.scalar_addresses=[]
         self._self_recursion_syntax={};self.recursion_proofs=[]
         self.argument_objects=argument_objects or {}
@@ -641,10 +657,22 @@ class Analyzer:
         self.pointer_updates=[];self._pointer_update_syntax={}
         self._constant_record_declarations=tuple(n for n in children(tree) if n.get('kind')!='FunctionDecl')
         self._global_declarations=global_declarations
+        for item in self._pointer_value_items:
+            # Values of one pointer field: null or an object address aligned to `alignment`.
+            if (set(item)!={'record','field','alignment','reason','validated_by'} or not all(isinstance(item[k],str) and item[k] for k in ('record','field','reason','validated_by')) or
+                    type(item['alignment']) is not int or item['alignment']<2 or item['alignment']&(item['alignment']-1)):
+                raise ValueError('pointer values require record, field, a power-of-two alignment, reason and validated_by')
+            owners=[k for k,r in self.record_decls.items() if any(c.get('kind')=='FieldDecl' and c.get('name')==item['field'] for c in children(r))]
+            record=self.record_decls.get(item['record'])
+            field=next((c for c in children(record or {}) if c.get('kind')=='FieldDecl' and c.get('name')==item['field']),None)
+            # Paths name fields, not records: the field name must belong to this record alone.
+            if field is None or '*' not in type_of(field) or owners!=[item['record']]:raise ValueError('pointer values field must be a pointer member unique to its record: '+item['field'])
+            self.pointer_values[item['field']]=item['alignment']
         from entry_state_const_graph import ConstGraph
         self.const_graph=ConstGraph(self);self.container_proofs=[]
         self._derived_keys={};self._derived_pointers={};self.derived_proofs=[];self.span_proofs=[];self._mutation_nodes={}
-        self._auto_scalars={};self._auto_scalar_reads={};self.branch_proofs=[];self._taken_arms={}
+        self._auto_scalars={};self._auto_scalar_reads={};self.branch_proofs=[];self._taken_arms={};self.quiet=0;self._visited_gotos={}
+        self._flow={};self._flow_live=True;self._flow_off=0;self._flow_masks=[];self._flow_carried=[];self._flow_returns=[];self._flow_return_classes=[];self._last_partition=None;self._recent_partition=None;self._flow_weak=0;self._pure={};self._written_fields={};self._decisions={};self._unreachable=set();self._prior_unreachable=frozenset();self._auto_written={};self._auto_scalar_written={};self._inline_cache={};self._goto_states={};self._prior_goto_states=None;self._optimistic=True
         self._constant_record_groups={name:nodes for name,nodes in global_declarations.items() if any(
             type_of(n).startswith('const ') and not arithmetic_scalar(type_of(n)) and not numeric_array(type_of(n)) and n.get('init') for n in nodes)}
         self._constant_records={};self._constant_record_index=None;self._constant_record_shapes={}
@@ -875,18 +903,19 @@ class Analyzer:
         result.pointer_comparisons=[]
         result.pointer_updates=[];result.container_proofs=[]
         result._derived_keys={};result._derived_pointers={};result.derived_proofs=[];result.span_proofs=[]
-        result._auto_scalars={};result._auto_scalar_reads={};result.branch_proofs=[];result._taken_arms={}
+        result._auto_scalars={};result._auto_scalar_reads={};result.branch_proofs=[];result._taken_arms={};result.quiet=0;result._visited_gotos={}
+        result._flow={};result._flow_live=True;result._flow_off=0;result._flow_masks=[];result._flow_carried=[];result._flow_returns=[];result._flow_return_classes=[];result._last_partition=None;result._recent_partition=None;result._flow_weak=0;result._pure={};result._written_fields={};result._decisions={};result._unreachable=set();result._auto_written={};result._auto_scalar_written={};result._inline_cache={};result._goto_states={}
         for name in ('reads','writes','calls','blockers','arguments','ranges'):setattr(result,name,[])
         result.contexts=0;result.providers={};result.loop_index_sites={};result.alias_path_limit_observed=False
         result._effect_nodes_cache={};result._alias_program_cache={};result._return_program_cache={}
         result._expression_nodes_cache={};result._direct_calls_cache={};result._parameters_cache={}
         result._static_index_cache={};result._array_lvalue_cache={}
-        result._bounded_pointer_keys={};result._bounded_pointers={};result._pointer_access_constants={};result._pointer_access_types={};result._pointer_scope_cache={};result._definite_pointer_cache={};result._pointer_initialization_environments={};result.pointer_initializations=[];result.pointer_returns=[];result.index_values=[];result._local_index_definitions={};result._local_index_cache={};result._local_index_inputs={};result._local_index_declarations={}
+        result._bounded_pointer_keys={};result._bounded_pointers={};result._pointer_access_constants={};result._pointer_access_types={};result._pointer_scope_cache={};result._definite_pointer_cache={};result._pointer_initialization_environments={};result.pointer_initializations=[];result.pointer_returns=[];result.pointer_stores=[];result.index_values=[];result._local_index_definitions={};result._local_index_cache={};result._local_index_inputs={};result._local_index_declarations={}
         result._diagnostic_keys=set();result._diagnostic_nodes={}
         from entry_state_values import Values
         result.callback_uses=[];result._auto_objects={};result._auto_info={};result._auto_store={};result._auto_reads={};result._auto_late=False;result._auto_storage=None;result._auto_sites={};result._call_nodes=[]
         result._scalar_objects={};result._scalar_fields={};result.trap_proofs=[];result.tagged_pointer_proofs=[];result.ordering_asm_proofs=[];result.extent_assumptions=[];result.infeasible_accesses=[];result._context_calls={};result.null_guard_proofs=[];result.masked_pointer_proofs=[];result.external_accesses=[];result.values=Values(result)
-        result._local_volatile_storage={};result.local_volatile_proofs=[]
+        result._local_volatile_storage={};result.local_volatile_proofs=[];result.user_address_proofs=[]
         result.scalar_addresses=[]
         result._self_recursion_syntax={};result.recursion_proofs=[]
         if hasattr(result,'root_aliases'):del result.root_aliases
@@ -944,13 +973,13 @@ class Analyzer:
         owner=None
         for index in range(len(stack),0,-1):
             name=stack[index-1]
-            if name in self.functions and any(n.get('id')==key for n in self.values.facts_for(name).order if n.get('kind')=='VarDecl'):
+            if name in self.functions and key in self.values.facts_for(name).declarations:
                 owner=tuple(stack[:index]);break
         if owner is None:return None
         token=self._auto_objects.get((owner,key))
         if token is None:
             token='auto:%d'%len(self._auto_objects);self._auto_objects[(owner,key)]=token
-            declaration=next(n for n in self.values.facts_for(owner[-1]).order if n.get('kind')=='VarDecl' and n.get('id')==key)
+            declaration=self.values.facts_for(owner[-1]).declarations[key]
             self._auto_info[token]=dict(owner=owner,declaration=key,initialized=bool(children(declaration)))
         return token
     def escaped_record(self,node,stack):
@@ -960,12 +989,24 @@ class Analyzer:
         if key not in self.automatic_records or not stack or stack[-1] not in self.functions:return None
         if key not in self.values.facts_for(stack[-1]).escaped:return None
         return self.auto_origin(key,stack)
+    def escaped_pointer_local(self,node,stack):
+        """A local pointer whose address is taken: a one-field automatic object (field '*')."""
+        if node.get('kind')!='DeclRefExpr' or not stack or stack[-1] not in self.functions:return None
+        declaration=node.get('referencedDecl',{});key=declaration.get('id')
+        typ=type_of(node)
+        if declaration.get('kind')!='VarDecl' or key in self.globals or '*' not in typ or '(' in typ or '[' in typ:return None
+        facts=self.values.facts_for(stack[-1])
+        if key not in facts.escaped:return None
+        local=facts.declarations.get(key)
+        if local is None or local.get('storageClass') is not None or local.get('tls'):return None
+        return self.auto_origin(key,stack)
     @staticmethod
     def auto_key(path):
         # *(&field) is the field: a pointer to a member is spelled by that member's path.
         while path.startswith('*(') and path.endswith(')') and AUTO_PATH.fullmatch(path[2:-1]) and AUTO_PATH.fullmatch(path[2:-1])[2]:
             path=path[2:-1]
         match=AUTO_PATH.fullmatch(path)
+        if match and not match[2] and path.startswith('*(auto:') and path.endswith(')'):return 'auto:'+match[1],'*'
         if not match or not match[2]:return None
         return 'auto:'+match[1],re.sub(r'->|\.','.',match[2]).strip('.')
     def flat_fields(self,declaration,depth=0):
@@ -1031,8 +1072,10 @@ class Analyzer:
         owner=self._auto_info[token]['owner']
         if len(stack)<=len(owner) or len(self._call_nodes)<len(owner):return node
         return self._call_nodes[len(owner)-1]
-    def auto_write(self,token,field,paths,node=None,stack=None):
+    def auto_write(self,token,field,paths,node=None,stack=None,strong=False):
         key=(token,field)
+        self.flow_write(key,'p',paths,strong)
+        self._auto_written[key]=self._auto_written.get(key,set())|set(paths)
         if node is not None:
             site=self.owner_site(token,node,stack)
             if all(site is not other for other in self._auto_sites.setdefault(key,[])):self._auto_sites[key].append(site)
@@ -1043,19 +1086,368 @@ class Analyzer:
     def auto_read(self,token,field,node=None,stack=None):
         key=(token,field);values=self._auto_store.get(key)
         self._auto_reads[key]=max(self._auto_reads.get(key,-1),len(values) if values else 0)
+        flow=self.flow_value(key)
+        if flow is not None and flow[0]=='p':return set(flow[1])
         if not values:return {'unresolved:auto-field'}
         info=self._auto_info[token]
         if not info.get('initialized') and node is not None:
             # Without an initializer the field is indeterminate unless a write dominates this read.
             site=self.owner_site(token,node,stack);facts=self.values.facts_for(info['owner'][-1])
-            if not any(facts.dominates(write,site) for write in self._auto_sites.get(key,())):return set(values)|{'unresolved:indeterminate'}
+            direct=field=='*' and site is node and facts.contains(node) and facts.dominated(node,info['declaration'])
+            if not direct and not any(facts.dominates(write,site) for write in self._auto_sites.get(key,())):return set(values)|{'unresolved:indeterminate'}
         return set(values)
-    def auto_scalar_write(self,token,field,interval,node=None,stack=None):
+    # Flow-sensitive values of automatic-record fields, in visit order (see docs: flow state).
+    # self._flow maps (token, field) to ('p', pointer values) or ('i', interval or None); an
+    # absent key falls back to the union over every write. Loops and labels drop the keys
+    # they can carry; calls join their return states.
+    @staticmethod
+    def flow_join_values(kind,a,b):
+        if kind=='p':return frozenset(a)|frozenset(b)
+        return None if a is None or b is None else (min(a[0],b[0]),max(a[1],b[1]))
+    def flow_carried(self,token):
+        return any(token in carried for carried in self._flow_carried)
+    def flow_write(self,key,kind,value,strong):
+        if self.flow_carried(key[0]):self._flow.pop(key,None);return
+        if strong and not self._flow_weak:self._flow[key]=(kind,frozenset(value) if kind=='p' else value);return
+        old=self._flow.get(key)
+        if old is not None and old[0]=='u':self._flow[key]=('u',None)
+        elif old is not None:self._flow[key]=(kind,self.flow_join_values(kind,old[1],frozenset(value) if kind=='p' else value))
+    def flow_value(self,key):
+        if self._flow_off or not self._flow_live or self.flow_carried(key[0]):return None
+        # Inside a callee's out-of-order alias closure, keys it may store are unknown.
+        if any(set(key[1].split('.'))&mask for mask in self._flow_masks):return None
+        value=self._flow.get(key)
+        return value if value is not None and value[0]!='u' else None
+    def flow_snapshot(self):return (dict(self._flow),self._flow_live)
+    def flow_restore(self,state):self._flow=dict(state[0]);self._flow_live=state[1]
+    def flow_join(self,states):
+        live=[f for f,l in states if l]
+        if not live:self._flow={};self._flow_live=False;return
+        result={}
+        for key in set.intersection(*(set(f) for f in live)):
+            values=[f[key] for f in live]
+            # A value no state changed keeps its identity (return partitions test it).
+            if all(v is values[0] for v in values):result[key]=values[0];continue
+            if any(v[0]!=values[0][0] for v in values) or values[0][0]=='r':continue
+            joined=values[0][1]
+            for v in values[1:]:joined=self.flow_join_values(values[0][0],joined,v[1])
+            result[key]=(values[0][0],joined)
+        self._flow=result;self._flow_live=True
+    def flow_reset(self,stack,label=None):
+        """A label or case: control may also arrive from a jump.
+
+        A label joins the fall-through state with the states the previous pass recorded at
+        the gotos that jump to it (an unvisited goto was unreachable); without a previous
+        pass, or for a case label, every value falls back to its union over all writes."""
+        # Integer locals of enclosing frames cannot change inside this function (they do not escape).
+        kept={k:v for k,v in self._flow.items() if k[0]=='L' and k[1]!=tuple(stack)}
+        if label is not None and (self._prior_goto_states is not None or self._optimistic):
+            states=[self.flow_snapshot()] if self._flow_live else []
+            states+=[state for (target,context),state in (self._prior_goto_states or {}).items() if target==label and context==tuple(stack)]
+            if states:
+                self.flow_join(states);self._flow.update(kept);return
+        self._flow=dict(kept);self._flow_live=True
+    def flow_record_goto(self,label,stack):
+        if not self._flow_live:return
+        key=(label,tuple(stack));state=self.flow_snapshot()
+        if key in self._goto_states:
+            previous=self._goto_states[key];self.flow_join([previous,state]);state=self.flow_snapshot()
+        self._goto_states[key]=state
+    def local_flow_key(self,stack,key):return ('L',tuple(stack),key)
+    def local_flow(self,stack,key):
+        """The flow interval of an integer local of frame `stack`, if known on this path."""
+        if self._flow_off or any(self._flow_masks) or not self._flow_live:return 'unset'
+        value=self._flow.get(self.local_flow_key(stack,key))
+        return value[1] if value is not None and value[0]!='u' else 'unset'
+    def flow_interval(self,expression,env,stack):
+        """The interval of an integer expression here (flow values included), or None."""
+        bounds=self.constant_interval(expression)
+        if bounds is not None:return bounds
+        if not stack or stack[-1] not in self.functions or not self.values.facts_for(stack[-1]).contains(expression):return None
+        self.values.pointer_env.append(env);self.values.call_stack.append(list(stack));self.quiet+=1
+        try:bounds,_=self.values.interval(expression,stack[-1],self.context_ranges(stack))
+        finally:self.values.pointer_env.pop();self.values.call_stack.pop();self.quiet-=1
+        return tuple(bounds) if bounds is not None else None
+    def integer_local(self,node,stack):
+        """The declaration id of a non-escaped integer local or parameter of the current frame."""
+        from entry_state_values import integer_type
+        if node.get('kind')!='DeclRefExpr' or not stack or stack[-1] not in self.functions:return None
+        declaration=node.get('referencedDecl',{});key=declaration.get('id')
+        if declaration.get('kind') not in ('VarDecl','ParmVarDecl') or key in self.globals or not integer_type(type_of(node)):return None
+        facts=self.values.facts_for(stack[-1])
+        if key in facts.escaped or 'volatile' in type_of(node):return None
+        local=facts.declarations.get(key)
+        if local is not None and (local.get('storageClass') is not None or local.get('tls')):return None
+        return key
+    def local_flow_write(self,stack,key,interval):
+        if self._flow_weak:self._flow.pop(self.local_flow_key(stack,key),None);return
+        self._flow[self.local_flow_key(stack,key)]=('i',interval)
+    @staticmethod
+    def assigned_local(node):
+        terms=children(node)
+        if not terms or not (node.get('kind') in ('BinaryOperator','CompoundAssignOperator') and node.get('opcode','').endswith('=') and node.get('opcode') not in ('==','!=','<=','>=') or
+                node.get('kind')=='UnaryOperator' and node.get('opcode') in ('++','--')):return None
+        target=unwrap(terms[0])
+        return target.get('referencedDecl',{}).get('id') if target.get('kind')=='DeclRefExpr' else None
+    def null_tests(self,condition,truth,stack):
+        """(token, nonnull) pairs that `condition` having `truth` implies for escaped pointer locals."""
+        from entry_state_values import condition as strip,is_null
+        node=strip(condition);kind=node.get('kind');op=node.get('opcode');terms=children(node)
+        if kind=='UnaryOperator' and op=='!' and len(terms)==1:return self.null_tests(terms[0],not truth,stack)
+        if kind=='BinaryOperator' and op in ('&&','||') and len(terms)==2:
+            return [t for term in terms for t in self.null_tests(term,truth,stack)] if (op=='&&')==truth else []
+        if kind=='BinaryOperator' and op in ('==','!=') and len(terms)==2:
+            for pointer,other in (terms,terms[::-1]):
+                if is_null(other):
+                    token=self.escaped_pointer_local(unwrap(pointer),stack)
+                    return [(token,(op=='!=')==truth)] if token is not None else []
+            return []
+        token=self.escaped_pointer_local(unwrap(node),stack) if '*' in type_of(node) else None
+        return [(token,truth)] if token is not None else []
+    # Return partitions: a call's return states split by the sign of the returned value
+    # (negative, zero/null, positive/non-null). ('RP', frame, local) holds the partition of the
+    # call last stored to that local, as ('r', (possible, ((key, joined, per-sign values), ...)))
+    # with `possible` and the values in SIGNS order. An entry applies only while the flow still
+    # holds the very `joined` value object: every write makes a new object, so a key written
+    # since the call no longer matches. A key some return states lack joins to a fresh
+    # ('u', None): present, but read as the fallback.
+    SIGNS=('neg','zero','pos')
+    ALL_SIGNS=frozenset(SIGNS)
+    def return_class(self,expression,env,stack):
+        """The signs this returned value may have in the current state."""
+        if '*' in type_of(expression):
+            values=self.resolve(expression,env,stack)
+            if values=={'null'}:return frozenset({'zero'})
+            if values and 'null' not in values and not any(v.startswith(('unresolved:','user:')) for v in values):return frozenset({'pos'})
+            return frozenset({'zero','pos'})
+        from entry_state_values import integer_type
+        if not integer_type(type_of(expression)) and type_of(expression) not in ('_Bool','bool'):return self.ALL_SIGNS
+        bounds=self.flow_interval(expression,env,stack)
+        if bounds is None:return self.ALL_SIGNS
+        return frozenset(c for c,(low,high) in zip(self.SIGNS,((None,-1),(0,0),(1,None)))
+                         if (low is None or bounds[1]>=low) and (high is None or bounds[0]<=high))
+    def partition_join(self,values):
+        """Join flow values of one key (None: unknown in some state)."""
+        if any(v is None or v[0]!=values[0][0] or v[0]=='r' for v in values):return None
+        if all(v is values[0] for v in values):return values[0]
+        joined=values[0][1]
+        for v in values[1:]:joined=self.flow_join_values(values[0][0],joined,v[1])
+        return (values[0][0],joined)
+    def partition_of(self,states,classes,frame):
+        """The partition of joined return states by sign (None if it splits nothing)."""
+        groups=[[f for (f,l),c in zip(states,classes) if l and sign in c] for sign in self.SIGNS]
+        possible=tuple(bool(g) for g in groups)
+        if sum(possible)<2:return None
+        entries=[];keys={}
+        for group in groups:
+            for f in group:
+                for key in f:keys.setdefault(key,None)
+        for key in keys:
+            # The callee's own frame is gone; partitions of partitions do not nest.
+            if key[0] in ('L','RP') and len(key[1])>len(frame):continue
+            if key[0]=='RP':continue
+            joined=self._flow.get(key)
+            if joined is not None and joined[0]=='r':continue
+            values=tuple(self.partition_join([f.get(key) for f in group]) if group else None for group in groups)
+            if all(v==joined for v,p in zip(values,possible) if p):continue
+            if joined is None:joined=self._flow[key]=('u',None)
+            entries.append((key,joined,values))
+        return ('r',(possible,tuple(entries))) if entries else None
+    def partition_state(self,partition,allowed):
+        """The flow state where the value has one of the `allowed` signs (None: no such return)."""
+        possible,entries=partition[1]
+        chosen=[i for i,sign in enumerate(self.SIGNS) if sign in allowed and possible[i]]
+        if not chosen:return None
+        state=dict(self._flow)
+        for key,joined,values in entries:
+            if state.get(key) is not joined:continue
+            value=self.partition_join([values[i] for i in chosen])
+            if value is None:state.pop(key,None)
+            else:state[key]=value
+        return state
+    def partition_states(self,partition):
+        """(signs, state) for each possible sign: a returned partitioned value returns each part."""
+        return [(frozenset({sign}),self.partition_state(partition,{sign})) for i,sign in enumerate(self.SIGNS) if partition[1][0][i]]
+    def recent_partition(self,expression,stack):
+        """The partition of `expression` if it is the call just visited, or a local holding its result."""
+        node=unwrap(expression)
+        if node.get('kind')=='CallExpr':
+            recent=self._recent_partition
+            return recent[2] if recent is not None and recent[0]==id(node) and recent[1]==tuple(stack) else None
+        if node.get('kind')=='DeclRefExpr':
+            entry=self._flow.get(('RP',tuple(stack),node.get('referencedDecl',{}).get('id')))
+            return entry
+        return None
+    def partition_store(self,key,expression,stack):
+        """A local stored from `expression`: it now holds that call's partition, or none."""
+        self._flow.pop(('RP',tuple(stack),key),None)
+        if expression is None or not self._flow_live or self._flow_weak:return
+        facts=self.values.facts_for(stack[-1]) if stack and stack[-1] in self.functions else None
+        if facts is None or key in facts.escaped or key in self.globals:return
+        partition=self.recent_partition(expression,stack) if unwrap(expression).get('kind')=='CallExpr' else None
+        if partition is not None:self._flow[('RP',tuple(stack),key)]=partition
+    SIGN_TESTS={'==':{'zero'},'!=':{'neg','pos'},'<':{'neg'},'<=':{'neg','zero'},'>':{'pos'},'>=':{'zero','pos'}}
+    MIRROR={'<':'>','>':'<','<=':'>=','>=':'<=','==':'==','!=':'!='}
+    def sign_tests(self,condition,truth,stack):
+        """(expression, signs) pairs that `condition` having `truth` implies for calls and locals."""
+        from entry_state_values import condition as strip,is_null
+        node=strip(condition);kind=node.get('kind');op=node.get('opcode');terms=children(node)
+        if kind=='UnaryOperator' and op=='!' and len(terms)==1:return self.sign_tests(terms[0],not truth,stack)
+        if kind=='BinaryOperator' and op in ('&&','||') and len(terms)==2:
+            return [t for term in terms for t in self.sign_tests(term,truth,stack)] if (op=='&&')==truth else []
+        if kind=='BinaryOperator' and op in self.SIGN_TESTS and len(terms)==2:
+            for value,other,operator in ((terms[0],terms[1],op),(terms[1],terms[0],self.MIRROR[op])):
+                if is_null(other) or self.constant_interval(other)==(0,0):
+                    signs=self.SIGN_TESTS[operator]
+                    return [(value,frozenset(signs) if truth else self.ALL_SIGNS-signs)]
+            return []
+        if unwrap(node).get('kind') in ('CallExpr','DeclRefExpr'):
+            return [(node,frozenset({'neg','pos'}) if truth else frozenset({'zero'}))]
+        return []
+    def partition_refine(self,condition,truth,stack):
+        if not self._flow_live:return
+        for expression,signs in self.sign_tests(condition,truth,stack):
+            partition=self.recent_partition(expression,stack)
+            if partition is None:continue
+            state=self.partition_state(partition,signs)
+            if state is None:continue
+            self._flow=state
+            # The local's later uses (`return ret`) see only the signs this arm allows.
+            node=unwrap(expression)
+            if node.get('kind')=='DeclRefExpr':
+                key=('RP',tuple(stack),node.get('referencedDecl',{}).get('id'))
+                possible=tuple(p and sign in signs for p,sign in zip(partition[1][0],self.SIGNS))
+                if key in self._flow:self._flow[key]=('r',(possible,partition[1][1]))
+    def flow_refine(self,condition,truth,env,stack):
+        """Restrict escaped pointer locals in the arm's state to the values the condition allows."""
+        if not self._flow_live:return
+        self.partition_refine(condition,truth,stack)
+        for token,nonnull in self.null_tests(condition,truth,stack):
+            key=(token,'*');value=self.flow_value(key)
+            values=set(value[1]) if value is not None else set(self._auto_store.get(key,set()))
+            if not values:continue
+            # In the null arm the pointer is null; in the other arm it is any non-null value.
+            refined=values-{'null'} if nonnull else {'null'}
+            if refined:self._flow[key]=('p',frozenset(refined))
+        self.value_split_refine(condition,truth,env,stack)
+    @staticmethod
+    def value_classes(values):
+        """Pointer values grouped by integer view: null, the error range, each constant address, objects."""
+        groups={}
+        for v in values:
+            label=v if v in ('null','error-pointer') or re.fullmatch(r'const-address:[0-9]+',v) else 'user' if v.startswith('user:') else 'object'
+            groups.setdefault(label,set()).add(v)
+        return list(groups.values())
+    def value_split_refine(self,condition,truth,env,stack):
+        """Drop the value classes of an escaped pointer local under which the condition is decided the other way."""
+        if not self._flow_live or not stack or stack[-1] not in self.functions:return
+        tokens={}
+        for n in walk(condition):
+            if n.get('kind')=='DeclRefExpr' and '*' in type_of(n):
+                token=self.escaped_pointer_local(n,stack)
+                if token is not None:tokens[token]=None
+        for token in tokens:
+            key=(token,'*');current=self._flow.get(key);value=self.flow_value(key)
+            values=set(value[1]) if value is not None else set(self._auto_store.get(key,set()))
+            groups=self.value_classes(values)
+            if len(groups)<2:continue
+            kept=set()
+            for group in groups:
+                self._flow[key]=('p',frozenset(group))
+                self.values.pointer_env.append(env);self.values.call_stack.append(list(stack));self.quiet+=1
+                try:bounds,_=self.values.interval(condition,stack[-1],self.context_ranges(stack))
+                finally:self.values.pointer_env.pop();self.values.call_stack.pop();self.quiet-=1
+                outcome=None if bounds is None else 0 if bounds==(0,0) else 1 if bounds[0]>0 or bounds[1]<0 else None
+                if outcome is None or outcome==int(truth):kept|=group
+            if current is None:self._flow.pop(key,None)
+            else:self._flow[key]=current
+            if kept and kept!=values:self._flow[key]=('p',frozenset(kept))
+    def referenced_tokens(self,env):
+        """Objects named by this frame's values, closed over the pointers stored in objects."""
+        pattern=re.compile(r'auto:(\d+)')
+        found={'auto:'+m for values in env.values() if isinstance(values,(set,frozenset)) for v in values for m in pattern.findall(v)}
+        pending=list(found)
+        while pending:
+            token=pending.pop()
+            for (owner,field),values in list(self._auto_store.items())+[(k,v[1]) for k,v in self._flow.items() if v[0]=='p']:
+                if owner!=token:continue
+                for v in values:
+                    for m in pattern.findall(v):
+                        if 'auto:'+m not in found:found.add('auto:'+m);pending.append('auto:'+m)
+        return found
+    def flow_tokens(self,stack):
+        """Records whose owner frame encloses the current one: they outlive a loop iteration."""
+        return {t for t,i in self._auto_info.items() if tuple(stack[:len(i['owner'])])==tuple(i['owner'])}
+    def writes_memory(self,name,depth=0,active=()):
+        """May this function (or a callee) store into non-automatic memory or escape to unknown code?"""
+        if name in self._pure:return self._pure[name]
+        if depth>6 or name in active:return True
+        function=self.functions.get(name)
+        if function is None:return True
+        result=False
+        for n in walk(function):
+            kind=n.get('kind');terms=children(n)
+            if kind in ('BinaryOperator','CompoundAssignOperator') and (n.get('opcode','').endswith('=') and n.get('opcode') not in ('==','!=','<=','>=')) or kind=='UnaryOperator' and n.get('opcode') in ('++','--'):
+                target=unwrap(terms[0]) if terms else {}
+                if not (target.get('kind')=='DeclRefExpr' and target.get('referencedDecl',{}).get('id') not in self.globals):result=True;break
+            if kind=='CallExpr':
+                target=self.direct_call(n)
+                if target is None or (target not in self.functions and not self.boundary(target) and target not in INTEGER_BIT_BUILTINS and target not in COMPILE_TIME_BUILTINS and target!='__builtin_expect'):result=True;break
+                if target in self.functions and self.writes_memory(target,depth+1,active+(name,)):result=True;break
+                policy=self.boundary(target)
+                if policy and (policy.get('writes') or policy.get('spans') or policy.get('kind') not in ('memory_model','value_model','ordering_model')):result=True;break
+        self._pure[name]=result
+        return result
+
+    def written_fields(self,name,depth=0,active=()):
+        """Member names this function (or a callee) may store; None if it may store other memory."""
+        if name in self._written_fields:return self._written_fields[name]
+        if depth>6 or name in active:return None
+        function=self.functions.get(name)
+        if function is None:return None
+        result=set()
+        for n in walk(function):
+            kind=n.get('kind');terms=children(n)
+            if kind in ('BinaryOperator','CompoundAssignOperator') and (n.get('opcode','').endswith('=') and n.get('opcode') not in ('==','!=','<=','>=')) or kind=='UnaryOperator' and n.get('opcode') in ('++','--'):
+                target=unwrap(terms[0]) if terms else {}
+                while target.get('kind')=='ArraySubscriptExpr' and children(target):target=unwrap(children(target)[0])
+                if target.get('kind')=='DeclRefExpr':
+                    if target.get('referencedDecl',{}).get('id') in self.globals or '[' not in type_of(target):continue
+                    result=None;break
+                if target.get('kind')!='MemberExpr' or not target.get('name'):result=None;break
+                result.add(target['name'])
+            if kind=='CallExpr':
+                target=self.direct_call(n)
+                if target in INTEGER_BIT_BUILTINS or target in COMPILE_TIME_BUILTINS or target=='__builtin_expect':continue
+                if target in self.functions and not self.boundary(target):
+                    callee_fields=self.written_fields(target,depth+1,active+(name,))
+                    if callee_fields is None:result=None;break
+                    result|=callee_fields;continue
+                policy=self.boundary(target) if target is not None else None
+                if not policy or policy.get('writes') or policy.get('spans') or policy.get('kind') not in ('memory_model','value_model','ordering_model'):result=None;break
+        result=frozenset(result) if result is not None else None
+        # A cut-off recursion is only a sound answer for the outermost function.
+        if depth==0 or result is not None:self._written_fields[name]=result
+        return result
+    def flow_mask(self,name):
+        """Enter a region that may store what `name` stores, out of order: hide those flow keys."""
+        fields=self.written_fields(name)
+        if fields is None:self._flow_off+=1
+        else:self._flow_masks.append(fields)
+        return fields
+    def flow_unmask(self,fields):
+        if fields is None:self._flow_off-=1
+        else:self._flow_masks.pop()
+
+    def auto_scalar_write(self,token,field,interval,node=None,stack=None,strong=False):
         """Union an integer field's possible values (None: unknown) over every write to it."""
         key=(token,field)
         if node is not None:
             site=self.owner_site(token,node,stack)
             if all(site is not other for other in self._auto_sites.setdefault(key,[])):self._auto_sites[key].append(site)
+        self.flow_write(key,'i',interval,strong)
+        written=self._auto_scalar_written.get(key,'unset')
+        self._auto_scalar_written[key]=interval if written=='unset' else None if written is None or interval is None else (min(written[0],interval[0]),max(written[1],interval[1]))
         previous=self._auto_scalars.get(key,'unset')
         if previous=='unset':combined=interval
         elif previous is None or interval is None:combined=None
@@ -1066,6 +1458,8 @@ class Analyzer:
     def auto_scalar_read(self,token,field,node,stack):
         """The union of an integer field's writes, if a write dominates this read (or the record is initialized)."""
         key=(token,field);self._auto_scalar_reads[key]=True
+        flow=self.flow_value(key)
+        if flow is not None and flow[0]=='i':return flow[1]
         value=self._auto_scalars.get(key,'unset')
         if value in ('unset',None):return None
         info=self._auto_info[token]
@@ -1114,12 +1508,45 @@ class Analyzer:
         fitted=self.values.fit(bounds[0],bounds[1],term)
         # A conversion that cannot keep the value is not folded here.
         return tuple(fitted) if fitted is not None and tuple(fitted)==tuple(bounds) else None
+    def unreachable_region(self,node,stack):
+        self._unreachable.add((id(node),tuple(stack)))
+    def prior_reachable(self,node,name,stack):
+        """Was `node` (in function `name`, call context `stack`) reachable in the previous pass?"""
+        if not self._prior_unreachable or name not in self.functions:return True
+        facts=self.values.facts_for(name);context=tuple(stack)
+        while node is not None:
+            if (id(node),context) in self._prior_unreachable:return False
+            node=facts.parent.get(id(node))
+        return True
+    def decided_outcome(self,condition,env,stack):
+        key=(id(condition),tuple(stack))
+        if key not in self._decisions:self._decisions[key]=self.decided(condition,env,stack)
+        return self._decisions[key]
+    def loop_never_runs(self,node,env,stack):
+        """Is the loop condition false on entry? It is evaluated on values from before the loop."""
+        parts=children(node)
+        condition=parts[0] if node.get('kind')=='WhileStmt' and len(parts)==2 else parts[2] if node.get('kind')=='ForStmt' and len(parts)==5 and not parts[1].get('kind') else None
+        if condition is None or not condition.get('kind'):return False
+        key=(id(condition),tuple(stack))
+        if key not in self._decisions:
+            name=stack[-1] if stack else None
+            entry_env=env
+            if name in self.functions:
+                function=self.functions[name];body=next(c for c in children(function) if c.get('kind')=='CompoundStmt')
+                region={id(n) for n in walk(parts[-1])}|({id(n) for n in walk(parts[3])} if node.get('kind')=='ForStmt' else set())
+                parameters={p['id'] for p in self.parameters(function)}
+                entry_env={k:set(v) for k,v in env.items() if k in parameters or any(k.startswith(p+'.') for p in parameters)}
+                self.quiet+=1
+                try:self.pointer_aliases(body,entry_env,stack,exclude=region)
+                finally:self.quiet-=1
+            self._decisions[key]=self.decided(condition,entry_env,stack)
+        return self._decisions[key]==0
     def decided(self,condition,env,stack):
         """0 or 1 when the condition's interval in this call context excludes the other outcome."""
         if not stack or stack[-1] not in self.functions:return None
-        self.values.pointer_env.append(env);self.values.call_stack.append(list(stack))
+        self.values.pointer_env.append(env);self.values.call_stack.append(list(stack));self.quiet+=1
         try:bounds,proof=self.values.interval(condition,stack[-1],self.context_ranges(stack))
-        finally:self.values.pointer_env.pop();self.values.call_stack.pop()
+        finally:self.values.pointer_env.pop();self.values.call_stack.pop();self.quiet-=1
         if bounds is None:return None
         if bounds==(0,0):outcome=0
         elif bounds[0]>0 or bounds[1]<0:outcome=1
@@ -1167,6 +1594,106 @@ class Analyzer:
                 self.null_guard_proofs.append(dict(kind='dominating_null_guard',function=stack[-1],call_path=stack,value=label,
                     guard=self.location(guard),location=self.location(node)))
                 return True
+        return False
+
+    PURE_CONDITION_KINDS=('DeclRefExpr','IntegerLiteral','CharacterLiteral','ImplicitCastExpr','CStyleCastExpr','ParenExpr','ConstantExpr','BinaryOperator','UnaryOperator')
+    @staticmethod
+    def condition_signature(cond,truth):
+        """A structural spelling of `cond` with this truth value, with negations folded into the truth."""
+        from entry_state_values import condition
+        cond=condition(cond)
+        while cond.get('kind')=='UnaryOperator' and cond.get('opcode')=='!' and len(children(cond))==1:
+            cond=condition(children(cond)[0]);truth=not truth
+        def spell(n):
+            while n.get('kind')=='ParenExpr' and len(children(n))==1:n=children(n)[0]
+            return (n.get('kind'),n.get('opcode'),n.get('referencedDecl',{}).get('id'),n.get('value'),n.get('castKind'),type_of(n),tuple(spell(c) for c in children(n)))
+        return spell(cond),truth
+    def correlated_nonnull(self,node,key,env,stack):
+        """A guard `C` on this read repeats an earlier `if (C)` whose arm stored a non-null value.
+
+        `p` starts null and is stored only by that arm. The earlier `if` precedes the
+        statement holding this read in one block, with no label or case between them, and
+        `C` reads only unescaped locals that nothing stores in between. So whenever `C`
+        holds here it held there, the arm ran, and the store happened.
+        """
+        from entry_state_values import condition,is_null
+        facts=self.function_facts(node,stack)
+        if facts is None or key in facts.escaped:return False
+        declaration=facts.declarations.get(key)
+        if declaration is None or not children(declaration) or not is_null(children(declaration)[0]):return False
+        stores=[n for n in facts.order if n.get('kind')=='BinaryOperator' and n.get('opcode')=='=' and children(n) and unwrap(children(n)[0]).get('referencedDecl',{}).get('id')==key]
+        if len(stores)!=1 or sorted(facts.mutations.get(key,()))!=sorted([facts.span[id(declaration)][1],facts.span[id(stores[0])][1]]):return False
+        store=stores[0]
+        # The arm statement holding the store, and the if whose arm it is.
+        statement=store;parent=facts.parent.get(id(statement))
+        while parent is not None and parent.get('kind') in ('ImplicitCastExpr','ParenExpr','ExprWithCleanups'):statement=parent;parent=facts.parent.get(id(statement))
+        arm=statement
+        if parent is not None and parent.get('kind')=='CompoundStmt':
+            before=children(parent)[:next(i for i,t in enumerate(children(parent)) if t is statement)]
+            if any(n.get('kind') in ('GotoStmt','BreakStmt','ContinueStmt','LabelStmt','CaseStmt','DefaultStmt') for b in before for n in walk(b)):return False
+            arm=parent;parent=facts.parent.get(id(arm))
+        if parent is None or parent.get('kind')!='IfStmt' or len(children(parent))<2 or arm is children(parent)[0]:return False
+        first=parent;parts=children(first)
+        cond=parts[0];truth=arm is parts[1]
+        if facts.entered(first) or any(n.get('kind') not in self.PURE_CONDITION_KINDS or n.get('opcode') in ('=','++','--','&','*') and n.get('kind')=='UnaryOperator'
+                                       or n.get('kind')=='BinaryOperator' and n.get('opcode','').endswith('=') and n.get('opcode') not in ('==','!=','<=','>=')
+                                       for n in walk(condition(cond))):return False
+        variables=facts.variables(cond)
+        if not variables or variables&facts.escaped or any(v in self.globals for v in variables):return False
+        # The statement holding this read follows `first` in the same block.
+        block=facts.parent.get(id(first))
+        if block is None or block.get('kind')!='CompoundStmt':return False
+        holder=node
+        while holder is not None and facts.parent.get(id(holder)) is not block:holder=facts.parent.get(id(holder))
+        if holder is None:return False
+        terms=children(block);index=next(i for i,t in enumerate(terms) if t is first)
+        later=next((i for i,t in enumerate(terms) if t is holder),None)
+        if later is None or later<=index:return False
+        if any(t.get('kind') in ('LabelStmt','CaseStmt','DefaultStmt') or facts.entered(t) for t in terms[index+1:later+1]):return False
+        low=facts.span[id(cond)][0];high=facts.span[id(node)][0]-1
+        if not facts.stable(cond,low,high) or low<=facts.span[id(declaration)][1]<=high:return False
+        wanted=self.condition_signature(cond,truth)
+        guard=next((g for c,t,g in facts.facts(node) if self.condition_signature(c,t)==wanted),None)
+        if guard is None:return False
+        if 'null' in self.resolve(children(store)[1],env,stack):return False
+        self.null_guard_proofs.append(dict(kind='correlated_store_guard',function=stack[-1],call_path=stack,value=declaration.get('name'),
+            guard=self.location(guard),store=self.location(store),location=self.location(node)))
+        return True
+
+    def null_replaced(self,node,key,env,stack):
+        """`if (!p) p = E;` with E non-null precedes this read in its block, and p is not stored since.
+
+        When the test is false p is already non-null; when it is true the arm stores E.
+        """
+        from entry_state_values import implies_nonnull,match_variable
+        facts=self.function_facts(node,stack)
+        if facts is None or key in facts.escaped:return False
+        holder=node;block=facts.parent.get(id(holder))
+        while block is not None:
+            if block.get('kind')=='CompoundStmt':
+                terms=children(block);index=next(i for i,t in enumerate(terms) if t is holder)
+                for back in range(index-1,-1,-1):
+                    statement=terms[back]
+                    if statement.get('kind') in ('LabelStmt','CaseStmt','DefaultStmt') or facts.entered(statement):return False
+                    if statement.get('kind')=='IfStmt' and len(children(statement))==2:
+                        cond,arm=children(statement)
+                        if implies_nonnull(cond,False,match_variable(key)):
+                            store=arm
+                            if store.get('kind')=='CompoundStmt' and children(store):
+                                before=children(store)[:-1];store=children(store)[-1]
+                                if any(n.get('kind') in ('GotoStmt','BreakStmt','ContinueStmt','LabelStmt','CaseStmt','DefaultStmt') for b in before for n in walk(b)):return False
+                            store=unwrap(store)
+                            if not (store.get('kind')=='BinaryOperator' and store.get('opcode')=='=' and unwrap(children(store)[0]).get('referencedDecl',{}).get('id')==key):return False
+                            if 'null' in self.resolve(children(store)[1],env,stack):return False
+                            low=facts.span[id(statement)][1]+1;high=facts.span[id(node)][0]-1
+                            if facts.assigned(key,low,high) or facts.has_labels and any(facts.entered(t) for t in terms[back+1:index+1]):return False
+                            self.null_guard_proofs.append(dict(kind='null_replaced_before_use',function=stack[-1],call_path=stack,
+                                value=facts.declarations.get(key,{}).get('name'),guard=self.location(statement),location=self.location(node)))
+                            return True
+                    if any(n.get('kind')=='DeclRefExpr' and n.get('referencedDecl',{}).get('id')==key for n in walk(statement)) and facts.assigned(key,*facts.span[id(statement)]):return False
+                return False
+            if block.get('kind') in ('FunctionDecl','WhileStmt','ForStmt','DoStmt','SwitchStmt'):return False
+            holder=block;block=facts.parent.get(id(holder))
         return False
 
     def record_pointer_fields(self,typ):
@@ -1302,6 +1829,7 @@ class Analyzer:
         self.pointer_aliases(function,local,stack+[name])
         updates,_=self.return_alias_program(function)
         for key,expression,statement in updates:
+            if not self.prior_reachable(statement,name,stack+[name]):continue
             local[key]=self.bounded_aliases(local.get(key,set())|self.resolve(expression,local,stack+[name]),statement,stack+[name])
         return local
 
@@ -1309,6 +1837,7 @@ class Analyzer:
         # AST nodes and call paths are immutable during a root analysis. Avoid
         # allocating the same diagnostic in every alias-fixpoint iteration;
         # analyze() still deduplicates equal locations from distinct AST nodes.
+        if self.quiet:return
         key=(kind,id(node),tuple(stack),detail)
         if key in self._diagnostic_keys:return
         self._diagnostic_keys.add(key);self._diagnostic_nodes[id(node)]=node
@@ -1523,13 +2052,14 @@ class Analyzer:
         result=set();origins=[]
         for value in values:
             if value==INFEASIBLE:continue
+            if value.startswith('user:'):result.add(value);origins.append(dict(kind='user',path=value));continue
             if value in self._bounded_pointers:
                 o=self._bounded_pointers[value]
                 if o['owner'] and tuple(stack[:len(o['owner'])])!=o['owner']:return None
                 origin=dict(kind='array',path=o['path'],extent=o['extent'],element_type=o['element_type'],owner=list(o['owner']),
                     immutable_global=o['immutable_global'])
             elif value in self._derived_pointers:origin=self._derived_pointers[value]
-            elif (re.search(r'(?:^|\*\()(?:unresolved:|local:)',value) or 'derived-pointer:' in value) and not re.search(r'bounded-pointer:|tagged:',value):
+            elif (re.search(r'(?:^|\*\()(?:unresolved:|local:|const-address:|error-pointer)',value) or 'derived-pointer:' in value) and not re.search(r'bounded-pointer:|tagged:',value):
                 # A value loaded through a derived pointer is as unknown as an unresolved one.
                 # An unknown address stays unknown: every dereference of it already blocks.
                 result.add('unresolved:pointer-arithmetic');origins.append(dict(kind='unresolved'));continue
@@ -1550,6 +2080,20 @@ class Analyzer:
         value=self.mutation_expression(node)
         return value is not None and (self.offset_pointers(value,env,stack) is not None or self.derived_pointers(value,env,stack) is not None)
 
+    def escaped_pointer_step(self,node,env,stack):
+        """The value an escaped pointer local holds after `p++`, `p += n` and the like.
+
+        Its value lives in the automatic-object store, which does not follow the counted-loop
+        cursor proofs: a step that can repeat (in a loop, or with labels) is an unresolved value.
+        """
+        facts=self.function_facts(node,stack)
+        if facts is None or facts.has_labels:return {'unresolved:pointer-mutation'}
+        parent=facts.parent.get(id(node))
+        while parent is not None:
+            if parent.get('kind') in ('ForStmt','WhileStmt','DoStmt'):return {'unresolved:pointer-mutation'}
+            parent=facts.parent.get(id(parent))
+        value=self.mutation_expression(node)
+        return self.resolve(value,env,stack) if value is not None else {'unresolved:pointer-mutation'}
     def mutation_expression(self,node):
         """`p++`, `p--`, `p += n`, `p -= n` as the value `p + 1`, `p - 1`, `p + n`, `p - n` (cached synthetic node)."""
         key=id(node)
@@ -1650,6 +2194,19 @@ class Analyzer:
         self.derived_proofs.append(dict(kind='derived_pointer_difference',function=stack[-1],call_path=stack,location=self.location(node),value='unknown integer'))
         return True
 
+    def user_arithmetic(self,node,env,stack):
+        """`u + n`, `u - n` and `u - v` on user addresses: values, not kernel memory.
+
+        A user address is the exact value the caller passed. The kernel never
+        dereferences it directly (access() blocks that); boundaries check it at run time.
+        """
+        terms=children(node);pointers=[c for c in terms if '*' in type_of(c)]
+        sides=[self.resolve(c,env,stack) for c in pointers]
+        if not sides or not all(side and all(v.startswith('user:') for v in side) for side in sides):return None
+        difference=len(pointers)==2
+        self.user_address_proofs.append(dict(kind='user_address_difference' if difference else 'user_address_offset',function=stack[-1],
+            call_path=stack,location=self.location(node),values=sorted(set().union(*sides)),kernel_memory=False))
+        return set() if difference else set(sides[0])
     def pointer_difference(self,node,env,stack):
         """A same-array subtraction also needs a representable signed result."""
         if node.get('kind')!='BinaryOperator' or node.get('opcode')!='-' or type_of(node) not in ('int','long','long long'):return False
@@ -1665,6 +2222,30 @@ class Analyzer:
             automatic_storage=bool(owner),owner_call_path=list(owner),one_past_allowed=True))
         return True
 
+    def fixed_object(self,value):
+        """Storage the replay does not reconstruct: automatic objects and named globals."""
+        origin=self._bounded_pointers.get(value)
+        if origin is not None:
+            if origin['owner']:return True
+            value=origin['path']
+        return bool(re.fullmatch(r'(?:auto:\d+|\*\(auto:\d+\)|global:[A-Za-z_]\w*)(?:\[\d+\]|\.\w+)*',value))
+    def pointer_equality(self,node,env,stack):
+        """`==`/`!=` between resolved pointers (an element pointer among them): no memory is read.
+
+        Constants (null, constant addresses, the error range, functions), one path on both
+        sides, and storage the replay does not rebuild compare alike at capture and replay.
+        Other pairs (two reconstructed objects) need the pointer identity contract.
+        """
+        terms=children(node)
+        if node.get('opcode') not in ('==','!=') or len(terms)!=2 or not all('*' in type_of(c) for c in terms):return False
+        sides=[self.resolve(c,env,stack) for c in terms]
+        if not all(sides) or any(re.search(r'(?:^|\*\()(?:unresolved:|local:)',p) for side in sides for p in side):return False
+        constant=lambda v:v in ('null','error-pointer') or v.startswith('function:') or re.fullmatch(r'const-address:[0-9]+',v) is not None
+        independent=all(constant(l) or constant(r) or l==r or self.fixed_object(l) and self.fixed_object(r) for l in sides[0] for r in sides[1])
+        if not independent and self.pointer_identity is None:return False
+        self.pointer_comparisons.append(dict(kind='pointer_equality',operator=node['opcode'],function=stack[-1],call_path=stack,location=self.location(node),
+            result_range=[0,1],branch_pruning=False,memory_read=False,identity='address_independent' if independent else 'pointer_identity_contract'))
+        return True
     def pointer_comparison(self,node,env,stack):
         """Admit the original runtime comparison without folding its value.
 
@@ -1707,7 +2288,7 @@ class Analyzer:
         ordinary={p for p in paths if p not in self._bounded_pointers}
         # A plain dereference may mix array elements with ordinary object paths;
         # an offset access through an ordinary path still has no proven extent.
-        if ordinary and (bounds is None or tuple(bounds)!=(0,0) or any(re.search(r'(?:^|\*\()(?:null(?=$|->|[.\[\)])|unresolved:)',p) for p in ordinary)):
+        if ordinary and (bounds is None or tuple(bounds)!=(0,0) or any(re.search(r'(?:^|\*\()(?:null(?=$|->|[.\[\)])|unresolved:|const-address:|error-pointer)',p) for p in ordinary)):
             self.issue('unresolved_pointer_origin',node,stack,'bounded pointer also has an unproven origin');return set()
         paths=[p for p in paths if p in self._bounded_pointers]
         if bounds is None:
@@ -1763,7 +2344,9 @@ class Analyzer:
             # Dereferences wrap origins in *(...), so checking only the first
             # characters can accidentally admit an unresolved alias. Match
             # origin positions, not legitimate fields/globals named "null".
-            if re.search(r'(?:^|\*\()(?:null(?=$|->|[.\[\)])|unresolved:)',path):
+            if re.search(r'(?:^|\*\()user:',path):
+                self.issue('unresolved_pointer_origin',node,stack,'user address dereferenced outside a user-memory boundary');continue
+            if re.search(r'(?:^|\*\()(?:null(?=$|->|[.\[\)])|unresolved:|const-address:|error-pointer)',path):
                 self.issue('unresolved_pointer_origin',node,stack,'pointer may be null or have an unresolved origin');continue
             if re.match(r'^(?:\*\()*external:',path):
                 # Memory returned by a declared external-memory boundary (for
@@ -2298,6 +2881,23 @@ class Analyzer:
         if bounds and bounds[0]==bounds[1] and 0<=bounds[0]<=7:return ('value',bounds[0])
         return None
 
+    @staticmethod
+    def user_tag(value):
+        match=TAGGED.fullmatch(value)
+        return match[3] if match is not None and match[3].startswith('user:') else None
+    def user_integer(self,node,env,stack):
+        """Integer arithmetic on a user address's integer value is another user address value.
+
+        Every operand is that user value, a pointer-free integer or a constant: an
+        operand carrying a kernel pointer's integer keeps the existing rules.
+        """
+        values=set()
+        for term in children(node):values|=self.integer_values(term,env,stack) if type_of(term) in POINTER_WIDTH_INTEGERS else set()
+        users={self.user_tag(v) for v in values}-{None}
+        if not users:return None
+        if any(self.user_tag(v) is None and not v.startswith('unresolved:integer') and not (TAGGED.fullmatch(v) and TAGGED.fullmatch(v)[3]=='null') for v in values):return None
+        return {tag_value(u) for u in users}
+
     def tagged_operation(self,node,env,stack):
         """Tag bits OR-ed into, or cleared from, an integer that carries pointer provenance."""
         terms=children(node);op=node['opcode']
@@ -2444,6 +3044,9 @@ class Analyzer:
             values=self.resolve(children(original)[0],env,stack)
             return {v if v.startswith(('unresolved:','tagged:')) else tag_value(v) for v in values}
         if original.get('castKind')=='IntegralToPointer':
+            if children(original):
+                values=self.resolve(children(original)[0],env,stack)
+                if values and all(self.user_tag(v) for v in values):return {self.user_tag(v) for v in values}
             recovered=self.tagged_recovery(original,env,stack)
             if recovered is not None:return recovered
             masked=self.masked_pointer(original,stack)
@@ -2451,6 +3054,18 @@ class Analyzer:
                 self.masked_pointer_proofs.append(dict(kind='index_mask_pointer',function=stack[-1],call_path=stack,location=self.location(original),
                     mask_function=masked['mask_function'],mask_type=masked['mask_type'],values='the masked pointer operand or null'))
                 return self.bounded_aliases(self.resolve(masked['pointer'],env,stack)|{'null'},original,stack)
+            # A constant address (an xarray sentinel) or an errno (ERR_PTR) is a value, not an object.
+            operand=children(original)[0] if children(original) else {}
+            bounds=self.constant_interval(operand)
+            if bounds is None and stack and stack[-1] in self.functions and self.values.facts_for(stack[-1]).contains(operand):
+                self.quiet+=1
+                try:bounds,_=self.values.interval(operand,stack[-1],self.context_ranges(stack))
+                finally:self.quiet-=1
+            if bounds is not None:
+                low,high=bounds
+                if low==high==0:return {'null'}
+                if low==high:return {'const-address:%d'%(low%(1<<64))}
+                if -4095<=low and high<=-1:return {'error-pointer'}
             return {'unresolved:integer-address'}
         converted=(original.get('kind')=='CStyleCastExpr' or original.get('kind')=='ImplicitCastExpr' and
                    original.get('castKind') not in ('ArrayToPointerDecay','LValueToRValue','NoOp'))
@@ -2490,11 +3105,22 @@ class Analyzer:
                 token=self.escaped_record(node,stack)
                 if token is not None:return {'*('+token+')'}
             if key in self.automatic_arrays or key in self.automatic_records:return {'local:'+declaration['name']}
+            token=self.escaped_pointer_local(node,stack)
+            if token is not None:
+                # Its value lives in the automatic-object store (direct and indirect stores alike).
+                if self._auto_storage==id(node):return {'*('+token+')'}
+                values=self.auto_read(token,'*',node,stack)
+                if 'null' in values:
+                    from entry_state_values import match_variable
+                    if self.nonnull(node,match_variable(key),declaration.get('name'),stack):return values-{'null'} or {INFEASIBLE}
+                return values
             if key in env:
                 values=env[key]
                 if 'null' in values:
                     from entry_state_values import match_variable
                     if self.nonnull(node,match_variable(key),declaration.get('name'),stack):return values-{'null'} or {INFEASIBLE}
+                    if self.correlated_nonnull(node,key,env,stack):return values-{'null'} or {INFEASIBLE}
+                    if self.null_replaced(node,key,env,stack):return values-{'null'} or {INFEASIBLE}
                 return values
             if key in self.globals:
                 self._referenced_globals.add(declaration['name'])
@@ -2548,6 +3174,9 @@ class Analyzer:
             self.pointer_aliases(inner[0],local,stack)
             result=self.resolve(statements[-1],local,stack) if statements else set()
             return result or ({'unresolved:statement-expression'} if '*' in type_of(node) else set())
+        if kind in ('BinaryOperator','UnaryOperator') and node.get('opcode') in ('+','-','*','/','%','&','|','^','<<','>>','~') and type_of(node) in POINTER_WIDTH_INTEGERS:
+            user=self.user_integer(node,env,stack)
+            if user is not None:return user
         if kind=='BinaryOperator' and node.get('opcode') in ('|','&') and type_of(node) in POINTER_WIDTH_INTEGERS:
             tagged=self.tagged_operation(node,env,stack)
             if tagged is not None:return tagged
@@ -2642,7 +3271,7 @@ class Analyzer:
         if kind=='UnaryOperator' and node.get('opcode') in ('&','*'):
             target=unwrap(inner[0])
             if node['opcode']=='&':
-                token=self.escaped_record(target,stack)
+                token=self.escaped_record(target,stack) or self.escaped_pointer_local(target,stack)
                 if token is not None:return {token}
                 scalar=self.scalar_address(node,target,stack)
                 if scalar is not None:return scalar
@@ -2690,11 +3319,28 @@ class Analyzer:
                     result.add('external:'+name.split(':',1)[-1]+'()')
                 elif name in self.functions and not policy and name not in stack:
                     # Resolve simple return aliases; execution visits the full body separately.
-                    local=self.inline_environment(name,node,inner[1:],env,stack)
-                    _,returns=self.return_alias_program(self.functions[name])
-                    for expression,statement in returns:
-                        values=self.integer_values(expression,local,stack+[name]) if type_of(node) in POINTER_WIDTH_INTEGERS else self.resolve(expression,local,stack+[name])
-                        result=self.bounded_aliases(result|values,statement,stack+[name])
+                    # The result depends only on the call, its context and its pointer arguments.
+                    # The callee's returns read records after its own writes: no flow state here,
+                    # unless it writes no memory, so every record it reads holds its value at the call.
+                    flow=None if self._flow_off or not self._flow_live else frozenset(self._flow.items())
+                    cache_key=(id(node),name,tuple(stack),tuple(frozenset(self.resolve(a,env,stack)) if '*' in type_of(a) else None for a in inner[1:]),flow)
+                    cached=self._inline_cache.get(cache_key)
+                    if cached is not None:
+                        result=self.bounded_aliases(result|cached,node,stack+[name]);continue
+                    own=set()
+                    if tuple(stack+[name]) not in self._context_calls:self.enter_call(name,node,stack)
+                    mask=self.flow_mask(name)
+                    try:
+                        local=self.inline_environment(name,node,inner[1:],env,stack)
+                        _,returns=self.return_alias_program(self.functions[name])
+                        kept=[(e,st) for e,st in returns if self.prior_reachable(st,name,stack+[name])]
+                        returns=kept
+                        for expression,statement in returns:
+                            values=self.integer_values(expression,local,stack+[name]) if type_of(node) in POINTER_WIDTH_INTEGERS else self.resolve(expression,local,stack+[name])
+                            own=self.bounded_aliases(own|values,statement,stack+[name])
+                    finally:self.flow_unmask(mask)
+                    self._inline_cache[cache_key]=frozenset(own)
+                    result=self.bounded_aliases(result|own,node,stack+[name])
             if not result and '*' in type_of(node):return {'unresolved:call'}
             return result
         if kind=='BinaryConditionalOperator':
@@ -2704,8 +3350,12 @@ class Analyzer:
                 return {'unresolved:binary-conditional'} if '*' in type_of(node) else set()
             return set().union(*(self.resolve(c,env,stack) for c in parts))
         if kind=='ConditionalOperator':
+            outcome=self._decisions.get((id(inner[0]),tuple(stack))) if len(inner)==3 else None
+            if outcome is not None:return self.resolve(inner[1] if outcome else inner[2],env,stack)
             return set().union(*(self.resolve(c,env,stack) for c in inner[1:]))
         if pointer_arithmetic_detail(node):
+            user=self.user_arithmetic(node,env,stack)
+            if user is not None:return user
             if self.pointer_difference(node,env,stack):return set()
             container=self.container_of(node,env,stack)
             if container is not None:return container
@@ -2718,9 +3368,13 @@ class Analyzer:
             return set()
         return set()
 
-    def pointer_aliases(self,body,env,stack):
+    def pointer_aliases(self,body,env,stack,exclude=None):
         """Compute a bounded may-alias closure, retaining every possible origin."""
         seeds,assignments=self.alias_program(body)
+        if exclude:
+            # Values before a region: its assignments (and pointer steps) have not run yet.
+            seeds=tuple(x for x in seeds if id(x[3]) not in exclude)
+            assignments=tuple((key,expression) for key,expression in assignments if id(expression) not in exclude)
         local_seeds={key:(origin,statement) for operation,key,origin,statement in seeds if operation=='local'}
         proofs={}
         if local_seeds and len(local_seeds)<=64:
@@ -2744,6 +3398,9 @@ class Analyzer:
             elif key in proofs or key in reached:env.setdefault(key,set())
             else:env.setdefault(key,{origin})
         empty=set()
+        if stack and stack[-1] in self.functions and self._prior_unreachable:
+            before=len(assignments)
+            assignments=tuple((key,expression) for key,expression in assignments if self.prior_reachable(expression,stack[-1],stack))
         def settle():
             for _ in range(32):
                 changed=False
@@ -2844,7 +3501,7 @@ class Analyzer:
             self._local_volatile_storage[name]=eligible
         key=node.get('id') if node.get('kind')=='VarDecl' else node.get('referencedDecl',{}).get('id') if node.get('kind')=='DeclRefExpr' else None
         storage=self._local_volatile_storage[name].get(key)
-        if storage is None:return False
+        if storage is None:return self.discarded_volatile(name,key,stack)
         declaration,initialization=storage
         proof=dict(kind='initialized_nonescaping_volatile_scalar',variable=declaration['name'],
             type=type_of(declaration),declaration=self.location(declaration),
@@ -2859,6 +3516,45 @@ class Analyzer:
                 loop_body_stores_initialize_continuation=False,scalar_updates_require_prior_assignment=True,
                 unsequenced_operands_share_incoming_facts=True,max_declarations=64)
         self.local_volatile_proofs.append(proof)
+        return True
+
+    def discarded_volatile(self,name,key,stack):
+        """A volatile automatic scalar whose value nothing uses.
+
+        Every reference stores to it, reads it into a discarded value (`(void)c`), or
+        passes its address to a memory-model boundary that declares writing that
+        argument. Its (possibly indeterminate) value never reaches a computation.
+        """
+        facts=self.values.facts_for(name);declaration=facts.declarations.get(key)
+        if (declaration is None or declaration.get('storageClass') is not None or declaration.get('tls') or
+                not re.search(r'\bvolatile\b',type_of(declaration)) or not arithmetic_scalar(' '.join(re.sub(r'\bvolatile\b','',type_of(declaration)).split()))):return False
+        transparent=('ParenExpr','ImplicitCastExpr','CStyleCastExpr')
+        def up(n):
+            parent=facts.parent.get(id(n))
+            while parent is not None and parent.get('kind')=='ParenExpr':n=parent;parent=facts.parent.get(id(n))
+            return n,parent
+        boundaries=[]
+        for ref in facts.order:
+            if ref.get('kind')!='DeclRefExpr' or ref.get('referencedDecl',{}).get('id')!=key:continue
+            ref,parent=up(ref)
+            if parent is None:return False
+            if parent.get('kind')=='BinaryOperator' and parent.get('opcode')=='=' and children(parent)[0] is ref:continue
+            if parent.get('kind')=='ImplicitCastExpr' and parent.get('castKind')=='LValueToRValue':
+                read,outer=up(parent)
+                if outer is not None and (outer.get('kind')=='CompoundStmt' or outer.get('kind')=='CStyleCastExpr' and outer.get('castKind')=='ToVoid'):continue
+                return False
+            if parent.get('kind')=='UnaryOperator' and parent.get('opcode')=='&':
+                argument=parent;call=facts.parent.get(id(argument))
+                while call is not None and call.get('kind') in transparent:argument=call;call=facts.parent.get(id(argument))
+                if call is None or call.get('kind')!='CallExpr':return False
+                index=next((i for i,c in enumerate(children(call)[1:]) if c is argument),None)
+                policy=self.boundary(self.direct_call(call) or '') or {}
+                if index is None or policy.get('kind')!='memory_model' or index not in policy.get('writes',[]) or index in policy.get('reads',[]):return False
+                boundaries.append(self.location(call));continue
+            return False
+        self.local_volatile_proofs.append(dict(kind='discarded_volatile_scalar',variable=declaration['name'],type=type_of(declaration),
+            declaration=self.location(declaration),function=name,call_path=stack,automatic_storage=True,value_used=False,
+            boundary_writes=boundaries,original_operations_retained=True))
         return True
 
     def local_qualified_access(self,node,stack):
@@ -2966,7 +3662,7 @@ class Analyzer:
         if kind in ('GCCAsmStmt','MSAsmStmt','AtomicExpr') and not self.trap_asm(node,stack) and not self.ordering_asm(node,stack):
             self.issue('architecture_or_ordering',node,stack,'assembly or atomic operation needs a target/state model')
         detail=pointer_arithmetic_detail(node)
-        if (detail and not self.pointer_difference(node,env,stack) and self.container_of(node,env,stack) is None and self.offset_pointers(node,env,stack) is None and
+        if (detail and self.user_arithmetic(node,env,stack) is None and not self.pointer_difference(node,env,stack) and self.container_of(node,env,stack) is None and self.offset_pointers(node,env,stack) is None and
                 self.derived_pointers(node,env,stack) is None and not self.pointer_difference_value(node,env,stack)):self.issue('pointer_arithmetic',node,stack,detail)
         if kind=='InitListExpr' and any(p in self._bounded_pointers or p in self._derived_pointers for c in inner if '*' in type_of(c) for p in self.resolve(c,env,stack)):
             self.issue('pointer_arithmetic',node,stack,'bounded pointer aggregate storage needs an escape and reconstruction model')
@@ -2977,7 +3673,7 @@ class Analyzer:
             if len(stack)<2 and self.derived_values(paths):
                 self.issue('pointer_arithmetic',node,stack,'derived pointer return needs a result-binding model')
         if kind=='BinaryOperator' and node.get('opcode') in ('==','!=','<','>','<=','>='):
-            if any(p in self._bounded_pointers for c in inner if '*' in type_of(c) for p in self.resolve(c,env,stack)) and not self.pointer_comparison(node,env,stack):
+            if any(p in self._bounded_pointers for c in inner if '*' in type_of(c) for p in self.resolve(c,env,stack)) and not self.pointer_comparison(node,env,stack) and not self.pointer_equality(node,env,stack):
                 self.issue('pointer_arithmetic',node,stack,'bounded pointer comparisons need an identity/value model')
         if kind=='ImplicitCastExpr' and node.get('castKind')=='LValueToRValue':
             original=unwrap(inner[0]);target=self.array_lvalue(original)
@@ -2993,37 +3689,134 @@ class Analyzer:
         if kind=='UnaryExprOrTypeTraitExpr':return # sizeof/alignof do not evaluate ordinary operands
         if kind in ('IfStmt','ConditionalOperator') and len(inner)>=2 and inner[0].get('kind'):
             # A condition decided in this call context leaves the other arm unreachable here.
-            outcome=self.decided(inner[0],env,stack)
+            outcome=self.decided_outcome(inner[0],env,stack)
             if outcome is not None:
                 self.visit(inner[0],env,stack)
                 arm=inner[1] if outcome else (inner[2] if len(inner)>2 else None)
+                other=inner[2] if outcome and len(inner)>2 else inner[1] if not outcome else None
+                if other is not None:self.unreachable_region(other,stack)
                 if arm is not None:self.visit(arm,env,stack)
                 self._taken_arms[id(node),tuple(stack)]=arm
                 return
+        if kind=='ReturnStmt':
+            for child in inner:self.visit(child,env,stack)
+            if self._flow_returns:
+                partition=self.recent_partition(inner[0],stack) if inner and self._flow_live else None
+                if partition is not None:
+                    for signs,state in self.partition_states(partition):
+                        self._flow_returns[-1].append((state,True));self._flow_return_classes[-1].append(signs)
+                else:
+                    self._flow_returns[-1].append(self.flow_snapshot())
+                    self._flow_return_classes[-1].append(self.return_class(inner[0],env,stack) if inner and self._flow_live else self.ALL_SIGNS)
+            self._flow_live=False;return
+        if kind in ('GotoStmt','BreakStmt','ContinueStmt'):
+            if kind=='GotoStmt':
+                self._visited_gotos.setdefault(tuple(stack),set()).add(node.get('targetLabelDeclId'))
+                self.flow_record_goto(node.get('targetLabelDeclId'),stack)
+            self._flow_live=False;return
+        if kind=='LabelStmt':self.flow_reset(stack,node.get('declId'))
+        if kind in ('CaseStmt','DefaultStmt'):self.flow_reset(stack)
+        if kind=='IfStmt' and len(inner)>=2 and inner[0].get('kind') and self.decided_outcome(inner[0],env,stack) is None:
+            # Both arms may run: each starts from the state after the condition (refined by it); they rejoin.
+            self.visit(inner[0],env,stack);base=self.flow_snapshot()
+            self.flow_refine(inner[0],True,env,stack)
+            self.visit(inner[1],env,stack);taken=self.flow_snapshot();self.flow_restore(base)
+            self.flow_refine(inner[0],False,env,stack)
+            if len(inner)>2:self.visit(inner[2],env,stack)
+            self.flow_join([taken,self.flow_snapshot()]);return
+        if kind=='ConditionalOperator' and len(inner)==3 and self.decided_outcome(inner[0],env,stack) is None:
+            self.visit(inner[0],env,stack);base=self.flow_snapshot()
+            self.visit(inner[1],env,stack);taken=self.flow_snapshot();self.flow_restore(base)
+            self.visit(inner[2],env,stack);self.flow_join([taken,self.flow_snapshot()]);return
+        if kind=='BinaryOperator' and node.get('opcode') in ('&&','||') and len(inner)==2:
+            self.visit(inner[0],env,stack);base=self.flow_snapshot()
+            self.visit(inner[1],env,stack);self.flow_join([base,self.flow_snapshot()]);return
+        if kind in ('WhileStmt','ForStmt','DoStmt','SwitchStmt') and not (kind in ('WhileStmt','ForStmt') and self.loop_never_runs(node,env,stack)):
+            # Records that outlive an iteration (or a case entry) lose their flow values here.
+            # Objects declared in the body begin a new lifetime (indeterminate until stored) every
+            # iteration; a for-init declaration runs once and is carried.
+            body=inner[0] if kind=='DoStmt' else inner[-1] if inner else {}
+            fresh={n['id'] for n in walk(body) if n.get('kind')=='VarDecl'}
+            # An enclosing frame's object can change in the loop only through a pointer this frame holds.
+            reachable=self.referenced_tokens(env)
+            carried={t for t in self.flow_tokens(stack) if (self._auto_info[t]['owner']==tuple(stack) and self._auto_info[t]['declaration'] not in fresh) or
+                (self._auto_info[t]['owner']!=tuple(stack) and t in reachable)}
+            assigned={variable_key for n in walk(node) for variable_key in [self.assigned_local(n)] if variable_key is not None}
+            dropped=lambda k:k[0] in carried or k[0] in ('L','RP') and k[1]==tuple(stack) and k[2] in assigned
+            self._flow={k:v for k,v in self._flow.items() if not dropped(k)}
+            self._flow_carried.append(carried)
+            try:
+                for child in inner:self.visit(child,env,stack)
+            finally:self._flow_carried.pop()
+            self._flow={k:v for k,v in self._flow.items() if not dropped(k)};self._flow_live=True
+            return
+        if kind in ('WhileStmt','ForStmt'):
+            parts=inner
+            condition=parts[0] if kind=='WhileStmt' and len(parts)==2 else parts[2] if kind=='ForStmt' and len(parts)==5 and not parts[1].get('kind') else None
+            if condition is not None and condition.get('kind') and self.decided_outcome(condition,env,stack)==0:
+                # The condition is false on entry: the body (and a for increment) never runs.
+                self.unreachable_region(parts[-1],stack)
+                if kind=='ForStmt':self.unreachable_region(parts[3],stack)
+                if kind=='ForStmt' and parts[0].get('kind'):self.visit(parts[0],env,stack)
+                self.visit(condition,env,stack)
+                return
         if kind=='CompoundStmt' and stack and stack[-1] in self.functions:
             facts=self.values.facts_for(stack[-1])
-            for index,child in enumerate(inner):
+            labels=lambda statement:{n.get('declId') for n in walk(statement) if n.get('kind')=='LabelStmt'}
+            visited=set();skipped=[];index=0
+            while index<len(inner):
+                child=inner[index];visited.add(index)
                 self.visit(child,env,stack)
                 key=(id(child),tuple(stack))
-                if child.get('kind')=='IfStmt' and key in self._taken_arms:
-                    arm=self._taken_arms[key]
-                    # The taken arm always leaves the block: later statements run only if a label enters them.
-                    if arm is not None and facts.exits(arm) and not any(s.get('kind') in ('LabelStmt','CaseStmt','DefaultStmt') or facts.entered(s) for s in inner[index+1:]):
-                        if inner[index+1:]:self.branch_proofs.append(dict(kind='unreachable_after_decided_exit',function=stack[-1],call_path=stack,
-                            location=self.location(child),skipped_statements=len(inner)-index-1))
-                        return
+                arm=self._taken_arms.get(key) if child.get('kind')=='IfStmt' else None
+                dead=not self._flow_live and index+1<len(inner)
+                if (dead or arm is not None and facts.exits(arm)) and not any(s.get('kind') in ('CaseStmt','DefaultStmt') or
+                        any(n.get('kind') in ('CaseStmt','DefaultStmt') for n in walk(s)) for s in inner[index+1:]):
+                    # The taken arm always leaves the block: later statements run only from a label
+                    # that a goto visited in this context targets.
+                    jumped=self._visited_gotos.get(tuple(stack),set())
+                    resume=next((k for k in range(index+1,len(inner)) if labels(inner[k])&jumped),None)
+                    later=range(index+1,resume if resume is not None else len(inner))
+                    if later:self.branch_proofs.append(dict(kind='unreachable_after_decided_exit',function=stack[-1],call_path=stack,
+                        location=self.location(child),skipped_statements=len(later)))
+                    skipped.extend(later)
+                    for k in later:self.unreachable_region(inner[k],stack)
+                    if resume is None:break
+                    index=resume;continue
+                index+=1
+            # A goto visited later may target a label in a skipped statement: visit from there too.
+            while True:
+                jumped=self._visited_gotos.get(tuple(stack),set())
+                entry=next((k for k in skipped if k not in visited and labels(inner[k])&jumped),None)
+                if entry is None:break
+                for k in range(entry,len(inner)):
+                    if k in visited:break
+                    visited.add(k);self._unreachable.discard((id(inner[k]),tuple(stack)));self.visit(inner[k],env,stack)
             return
         if kind=='VarDecl' and inner and node.get('id') in self.automatic_records and stack and stack[-1] in self.functions and node['id'] in self.values.facts_for(stack[-1]).escaped:
             token=self.auto_origin(node['id'],stack);declaration=self.record_declaration(type_of(node))
             if token is not None and declaration is not None:
                 initial=self.flat_initializer(declaration,inner[-1],env,stack)
                 for field in [f[0] for f in self.flat_fields(declaration) if '*' in f[1] and '(' not in f[1]]:
-                    self.auto_write(token,field,initial.get(field,{'unresolved:auto-field'}) if initial is not None else {'unresolved:auto-field'},node,stack)
+                    self.auto_write(token,field,initial.get(field,{'unresolved:auto-field'}) if initial is not None else {'unresolved:auto-field'},node,stack,strong=True)
+                from entry_state_values import integer_type
+                scalars=self.scalar_initializer(declaration,inner[-1],stack) or {}
+                for field in [f[0] for f in self.flat_fields(declaration) if integer_type(f[1])]:
+                    self.auto_scalar_write(token,field,scalars.get(field),node,stack,strong=True)
         if kind=='VarDecl':
             if inner and node.get('storageClass') is None and not node.get('tls'):self.local_qualified_access(node,stack)
             for child in inner:self.visit(child,env,stack)
             # Numeric scalars carry no alias values; `size_t n=0` is not a null pointer.
-            if inner and not arithmetic_scalar(type_of(node)):env[node['id']]=self.bounded_aliases(env.get(node['id'],set())|self.resolve(inner[-1],env,stack),node,stack)
+            from entry_state_values import integer_type
+            if inner and integer_type(type_of(node)) and node.get('storageClass') is None and stack and stack[-1] in self.functions and node['id'] not in self.values.facts_for(stack[-1]).escaped:
+                self.local_flow_write(stack,node['id'],self.flow_interval(inner[-1],env,stack))
+            if node.get('storageClass') is None and stack and stack[-1] in self.functions:self.partition_store(node['id'],inner[-1] if inner else None,stack)
+            if inner and not arithmetic_scalar(type_of(node)):
+                initial=self.resolve(inner[-1],env,stack)
+                env[node['id']]=self.bounded_aliases(env.get(node['id'],set())|initial,node,stack)
+                if '*' in type_of(node) and stack and stack[-1] in self.functions and node['id'] in self.values.facts_for(stack[-1]).escaped:
+                    token=self.auto_origin(node['id'],stack)
+                    if token is not None:self.auto_write(token,'*',initial or {'unresolved:alias'},node,stack,strong=True)
             elif inner:pass
             else:
                 certified=self._pointer_initialization_environments.get(id(env),(None,frozenset()))[1]
@@ -3052,13 +3845,13 @@ class Analyzer:
                     scalars=self.scalar_initializer(declaration,right,stack) or {}
                     for path in storage:
                         token=re.match(r'^(?:\*\()*(auto:\d+)',path)[1]
-                        for field in fields:self.auto_write(token,field,(initial or {}).get(field,{'unresolved:auto-field'}) if initial is not None else {'unresolved:auto-field'},node,stack)
-                        for field in scalar_fields:self.auto_scalar_write(token,field,scalars.get(field),node,stack)
+                        for field in fields:self.auto_write(token,field,(initial or {}).get(field,{'unresolved:auto-field'}) if initial is not None else {'unresolved:auto-field'},node,stack,strong=len(storage)==1)
+                        for field in scalar_fields:self.auto_scalar_write(token,field,scalars.get(field),node,stack,strong=len(storage)==1)
                 elif '*' in type_of(left):
                     values=self.resolve(right,env,stack) or {'unresolved:auto-field'}
                     for path in storage:
                         key=self.auto_key(path)
-                        if key is not None:self.auto_write(key[0],key[1],values,node,stack)
+                        if key is not None:self.auto_write(key[0],key[1],values,node,stack,strong=len(storage)==1)
                 else:
                     # An integer field: its value here, or unknown for compound updates and wider records.
                     from entry_state_values import integer_type
@@ -3068,12 +3861,19 @@ class Analyzer:
                         if bounds is None:bounds,_=self.values.interval(right,stack[-1],self.context_ranges(stack))
                     for path in storage:
                         key=self.auto_key(path)
-                        if key is not None:self.auto_scalar_write(key[0],key[1],tuple(bounds) if bounds is not None else None,node,stack)
+                        if key is not None:self.auto_scalar_write(key[0],key[1],tuple(bounds) if bounds is not None else None,node,stack,strong=len(storage)==1)
                 self.visit(left if left is not unwrap(inner[0]) else inner[0],env,stack);return
             tracked=self.tracked_member(left,env,stack)
             automatic_pointer=(left.get('kind')=='DeclRefExpr' and
                 left.get('referencedDecl',{}).get('id') not in self.globals)
-            if '*' in type_of(right) and not automatic_pointer and any(p in self._bounded_pointers for p in self.resolve(right,env,stack)):
+            stored=[p for p in self.resolve(right,env,stack) if p in self._bounded_pointers] if '*' in type_of(right) and not automatic_pointer else []
+            # The address of one element of a non-automatic array is an ordinary object address:
+            # a later load of it carries no array provenance, so arithmetic on it stays unproven.
+            elements=[self._bounded_pointers[p] for p in stored]
+            if stored and all(not o['owner'] and isinstance(o['offset'],int) and 0<=o['offset']<o['extent'] for o in elements):
+                self.pointer_stores.append(dict(kind='array_element_address_store',function=stack[-1],call_path=stack,location=self.location(node),
+                    elements=sorted({'%s[%d]'%(o['path'],o['offset']) for o in elements}),array_provenance_retained=False))
+            elif stored:
                 self.issue('pointer_arithmetic',node,stack,'bounded pointer store needs an escape and reconstruction model')
             if '*' in type_of(right) and not automatic_pointer and tracked is None and self.derived_values(self.resolve(right,env,stack)):
                 self.issue('pointer_arithmetic',node,stack,'derived pointer store needs an escape and reconstruction model')
@@ -3082,7 +3882,14 @@ class Analyzer:
                 key=left.get('referencedDecl',{}).get('id')
                 # p += n holds p + n, not n.
                 value=self.mutation_expression(node) if kind=='CompoundAssignOperator' and '*' in type_of(left) else right
-                env[key]=self.bounded_aliases(env.get(key,set())|(self.resolve(value,env,stack) if value is not None else {'unresolved:pointer-mutation'}),node,stack)
+                assigned=self.resolve(value,env,stack) if value is not None else {'unresolved:pointer-mutation'}
+                env[key]=self.bounded_aliases(env.get(key,set())|assigned,node,stack)
+                if self.integer_local(left,stack) is not None:
+                    self.local_flow_write(stack,key,self.flow_interval(right,env,stack) if kind=='BinaryOperator' else None)
+                self.partition_store(key,right if kind=='BinaryOperator' else None,stack)
+                token=self.escaped_pointer_local(left,stack)
+                if token is not None and kind=='CompoundAssignOperator' and '*' in type_of(left):assigned=self.escaped_pointer_step(node,env,stack)
+                if token is not None:self.auto_write(token,'*',assigned or {'unresolved:alias'},node,stack,strong=True)
             elif tracked is not None:
                 env[tracked]=self.bounded_aliases(env[tracked]|self.resolve(right,env,stack),node,stack)
             else:
@@ -3097,11 +3904,16 @@ class Analyzer:
             local_integer=(target.get('kind')=='DeclRefExpr' and (arithmetic_scalar(type_of(target)) or '*' in type_of(target) and self.local_pointer_mutation(node,env,stack)) and
                            target.get('referencedDecl',{}).get('id') not in self.globals)
             if 'volatile' in type_of(target) and self.local_volatile_storage(target,stack):local_integer=True
+            if local_integer and self.integer_local(target,stack) is not None:
+                self.local_flow_write(stack,target['referencedDecl']['id'],None)
+            if target.get('kind')=='DeclRefExpr':self._flow.pop(('RP',tuple(stack),target.get('referencedDecl',{}).get('id')),None)
+            token=self.escaped_pointer_local(target,stack) if '*' in type_of(target) else None
+            if token is not None:self.auto_write(token,'*',self.escaped_pointer_step(node,env,stack),node,stack,strong=True)
             if not local_integer:
                 paths=self.resolve(target,env,stack)
                 for path in paths:
                     key=self.auto_key(path) if re.match(r'^(?:\*\()*auto:\d+',path) else None
-                    if key is not None:self.auto_scalar_write(key[0],key[1],None,node,stack)
+                    if key is not None:self.auto_scalar_write(key[0],key[1],None,node,stack,strong=len(paths)==1)
                 self.access(paths,target,stack);self.access(paths,target,stack,True)
             if target is not original:
                 self.visit(target,env,stack);return
@@ -3127,6 +3939,7 @@ class Analyzer:
             if not names:
                 self.calls.append({'caller':stack[-1],'callee':None,'call_path':stack,'location':self.location(node),'boundary':None})
                 self.issue('indirect_call',node,stack,'callback target set is unresolved');return
+            base=None;outcomes=[]
             for name in sorted(names):
                 policy=self.boundary(name)
                 if (name not in self.functions or policy) and (not policy or policy.get('kind') not in ('ordering_model','value_model')):
@@ -3144,6 +3957,8 @@ class Analyzer:
                                 self.auto_write(match[1],field,{'unresolved:auto-escape'})
                             for field in [f[0] for f in self.flat_fields(record) if '*' not in f[1]]:
                                 self.auto_scalar_write(match[1],field,None)
+                            if declaration is not None and '*' in type_of(declaration) and record is None:
+                                self.auto_write(match[1],'*',{'unresolved:auto-escape'})
                 self.calls.append({'caller':stack[-1],'callee':name,'call_path':stack,'location':self.location(node),'boundary':policy,
                     'resolution':'direct' if self.direct_call(node) else 'callback contract' if isinstance(names,frozenset) else 'finite local function-pointer targets'})
                 if policy:
@@ -3164,6 +3979,18 @@ class Analyzer:
                             if index>=len(inner)-1 or '*' not in type_of(inner[1+index]):
                                 self.issue('boundary_memory_effect',node,stack,'declared argument effect does not name a pointer argument');continue
                             argument=inner[1+index];pointee=re.sub(r'\s*\*\s*(?:const\s*)?$','',type_of(argument))
+                            # The address of this frame's own scalar local that has no scalar-address
+                            # model (a volatile one): the boundary writes live automatic storage, which
+                            # is no kernel state (volatile storage stays classified).
+                            local=unwrap(argument)
+                            if local.get('kind')=='UnaryOperator' and local.get('opcode')=='&' and children(local):
+                                target=unwrap(children(local)[0]);declaration=target.get('referencedDecl',{})
+                                if declaration.get('id') in self.automatic_scalars:target={}
+                                facts=self.values.facts_for(stack[-1]) if stack[-1] in self.functions else None
+                                if (target.get('kind')=='DeclRefExpr' and declaration.get('kind')=='VarDecl' and declaration.get('id') not in self.globals and
+                                        facts is not None and declaration.get('id') in facts.declarations and arithmetic_scalar(' '.join(re.sub(r'\b(?:volatile|const)\b','',type_of(target)).split())) and
+                                        facts.declarations[declaration['id']].get('storageClass') is None and
+                                        ('volatile' not in type_of(target) or self.local_volatile_storage(target,stack))):continue
                             dereference={'kind':'UnaryOperator','opcode':'*','type':{'qualType':pointee},'valueCategory':'lvalue',
                                 'range':node.get('range',{}),'inner':[argument],'id':(node.get('id') or '')+'#arg'+str(index)}
                             self.access(self.resolve(dereference,env,stack),dereference,stack,write)
@@ -3179,8 +4006,15 @@ class Analyzer:
                 records=[self.record_value(c,env,stack) if self.record_pointer_fields(type_of(c)) else None for c in inner[1:]]
                 self.enter_call(name,node,stack)
                 self._call_nodes.append(node)
+                if base is None:base=self.flow_snapshot()
+                else:self.flow_restore(base)
                 try:self.function(name,stack,bindings,records)
                 finally:self._call_nodes.pop()
+                outcomes.append((self.flow_snapshot(),self._last_partition))
+            if len(outcomes)>1 or outcomes and len(names)>1:
+                # Any one of several targets runs: their states join (a skipped one leaves the call's state).
+                self.flow_join([state for state,_ in outcomes]+([base] if len(outcomes)<len(names) else []))
+            self._recent_partition=(id(node),tuple(stack),outcomes[0][1]) if len(outcomes)==1 and len(names)==1 and outcomes[0][1] is not None else None
             return
         for child in inner:self.visit(child,env,stack)
 
@@ -3196,6 +4030,8 @@ class Analyzer:
             if variably_modified_type(type_of(parameter)):
                 self.issue('unsupported_construct',parameter,stack+[name],'variably modified parameter types need bound/effect analysis')
             env[parameter['id']]=bindings[index] if bindings is not None and index<len(bindings) else {'argument:'+parameter['name']}
+            if not stack and (name.split(':',1)[-1],parameter.get('name')) in self.user_addresses and '*' in type_of(parameter):
+                env[parameter['id']]={'user:'+parameter['name']}
             env[parameter['id']]=self.bounded_aliases(env[parameter['id']],parameter,stack+[name])
             if records is not None and index<len(records) and records[index] is not None:
                 for field,paths in records[index].items():
@@ -3226,27 +4062,58 @@ class Analyzer:
                 kind=term.get('kind')
                 if kind=='GotoStmt' and (not term.get('targetLabelDeclId') or term['targetLabelDeclId'] not in labels):
                     self.issue('unsupported_construct',term,stack+[name],'direct jump target is outside the available function body')
-        self.pointer_aliases(body,env,stack+[name])
+        # Aliases are computed before the body runs: flow values hold only if it writes no memory.
+        mask=self.flow_mask(name)
+        try:self.pointer_aliases(body,env,stack+[name])
+        finally:self.flow_unmask(mask)
         if not stack:self.root_aliases=dict(env)
-        self.visit(body,env,stack+[name])
+        facts=self.values.facts_for(name);ranges=self.context_ranges(stack+[name])
+        from entry_state_values import integer_type
+        for parameter in parameters:
+            if integer_type(type_of(parameter)) and parameter['id'] in facts.mutations and parameter['id'] not in facts.escaped:
+                self.local_flow_write(stack+[name],parameter['id'],ranges.get(parameter['id']) if hasattr(ranges,'get') else None)
+        self._flow_returns.append([]);self._flow_return_classes.append([])
+        try:self.visit(body,env,stack+[name])
+        finally:returns=self._flow_returns.pop();classes=self._flow_return_classes.pop()
+        if self._flow_live:returns.append(self.flow_snapshot());classes.append(self.ALL_SIGNS)
+        if returns:self.flow_join(returns)
+        else:self._flow={};self._flow_live=True
+        self._last_partition=self.partition_of(returns,classes,tuple(stack)) if returns else None
 
     def analyze(self,root):
-        """Analyze a root; repeat while a stack-object field grew after it was read."""
+        """Analyze a root by iterating whole-root passes to a fixpoint.
+
+        A pass uses the previous pass's unreachable regions, its goto states (joined at
+        labels; the first pass takes a label's fall-through state) and the stack-object
+        values it wrote. A converged result solves the analysis equations, so it is sound.
+        Without convergence the root is analyzed again conservatively: no regions or goto
+        states carried, every label resets, and only late stack-object writes repeat a pass.
+        """
         if root not in self.functions:raise ValueError('root has no available configured body: '+root)
-        run=self;store={};sites={};scalars={}
-        for attempt in range(4):
-            if attempt:
-                run=self.fresh();run._auto_store={k:set(v) for k,v in store.items()};run._auto_sites={k:list(v) for k,v in sites.items()};run._auto_scalars=dict(scalars)
-            report=run.analyze_once(root)
-            if not run._auto_late:break
-            store=run._auto_store;sites=run._auto_sites;scalars=run._auto_scalars
-        else:
-            report['blockers'].append({'kind':'analysis_limit','function':root,'call_path':[root],'detail':'stack-object field values did not converge in 4 passes','location':{}})
+        for optimistic,passes in ((True,10),(False,5)):
+            store={};sites={};scalars={};unreachable=frozenset();goto_states=None;converged=False
+            for attempt in range(passes):
+                run=self if optimistic and not attempt else self.fresh()
+                run._optimistic=optimistic
+                if attempt:
+                    run._auto_store={k:set(v) for k,v in store.items()};run._auto_sites={k:list(v) for k,v in sites.items()};run._auto_scalars=dict(scalars)
+                    run._prior_unreachable=unreachable if optimistic else frozenset();run._prior_goto_states=goto_states if optimistic else None
+                report=run.analyze_once(root)
+                regions=frozenset(run._unreachable)
+                if optimistic:converged=not run._auto_late and attempt>0 and regions==unreachable and run._goto_states==goto_states
+                else:converged=not run._auto_late
+                if converged:break
+                # Carry only this pass's writes: earlier passes may have visited code now unreachable.
+                store=run._auto_written;sites=run._auto_sites;scalars=run._auto_scalar_written;unreachable=regions;goto_states=dict(run._goto_states)
+            if converged:break
+        if not converged:
+            report['blockers'].append({'kind':'analysis_limit','function':root,'call_path':[root],'detail':'stack-object field values did not converge in 5 passes','location':{}})
             report['classification']='requires_review'
         if run is not self:self.__dict__.update(run.__dict__)
         return report
 
     def analyze_once(self,root):
+        self._flow={};self._flow_live=True;self._flow_off=0;self._flow_masks=[];self._flow_carried=[];self._flow_returns=[];self._flow_return_classes=[];self._last_partition=None;self._recent_partition=None;self._flow_weak=0
         self.function(root,[])
         def unique(items):
             result=[];seen=set()
@@ -3263,6 +4130,8 @@ class Analyzer:
             'policy':'retain may-reads including reads after writes; both branch arms and loop bodies; unknown effects block automatic export'}
         if self.pointer_initializations:report['pointer_initialization_proofs']=unique(self.pointer_initializations)
         if self.pointer_returns:report['pointer_return_proofs']=unique(self.pointer_returns)
+        if self.pointer_stores:report['pointer_store_proofs']=unique(self.pointer_stores)
+        if self.user_address_proofs:report['user_address_proofs']=unique(self.user_address_proofs)
         if self.pointer_differences:report['pointer_difference_proofs']=unique(self.pointer_differences)
         if self.pointer_comparisons:report['pointer_comparison_proofs']=unique(self.pointer_comparisons)
         if self.pointer_updates:report['pointer_update_proofs']=unique(self.pointer_updates)
@@ -3415,6 +4284,7 @@ def main():
     parser.add_argument('--max-translation-units',type=int,default=100)
     parser.add_argument('--max-range-elements',type=int,default=64)
     parser.add_argument('--max-alias-paths',type=int,default=DEFAULT_MAX_ALIAS_PATHS)
+    parser.add_argument('--max-contexts',type=int,default=500,help='call contexts analyzed per root before an analysis_limit blocker')
     parser.add_argument('--prune-written-fields',dest='prune_written',action='store_true',help='omit proven dominated loads under stable/exclusive provider or argument-object contracts')
     parser.add_argument('--preserve-write-state',action='store_true',help='also retain eligible may-written scalar inputs unless overwritten on every analyzed exit; requires --prune-written-fields')
     parser.add_argument('--boundaries',type=Path)
@@ -3423,7 +4293,7 @@ def main():
     parser.add_argument('--out',required=True,type=Path)
     parser.add_argument('--capture-header',type=Path)
     args=parser.parse_args()
-    if args.max_alias_paths<1:parser.error('--max-alias-paths must be positive')
+    if args.max_alias_paths<1 or args.max_contexts<1:parser.error('--max-alias-paths and --max-contexts must be positive')
     if args.preserve_write_state and not args.prune_written:parser.error('--preserve-write-state requires --prune-written-fields')
     boundaries={};boundary_hash=None;argument_objects={};state_ranges=[];volatile_fields=[];contracts={}
     if args.boundaries:
@@ -3431,7 +4301,8 @@ def main():
         if document.get('format')!='osrec-entry-state-boundaries-v1':raise ValueError('unsupported boundary policy format')
         boundaries=document['boundaries'];boundary_hash=digest(args.boundaries.read_bytes())
         argument_objects=document.get('argument_objects',{});state_ranges=document.get('state_ranges',[]);volatile_fields=document.get('volatile_fields',[])
-        contracts=dict(operand_free_asm=document.get('operand_free_asm'),volatile_accesses=document.get('volatile_accesses'),pointer_extents=document.get('pointer_extents',[]),callback_targets=document.get('callback_targets',[]))
+        contracts=dict(operand_free_asm=document.get('operand_free_asm'),volatile_accesses=document.get('volatile_accesses'),pointer_extents=document.get('pointer_extents',[]),callback_targets=document.get('callback_targets',[]),
+            pointer_values=document.get('pointer_values',[]),pointer_identity=document.get('pointer_identity'),user_addresses=document.get('user_addresses',[]))
     program=None
     if args.closure_source or args.all_sources:
         from entry_state_program import load_program
@@ -3444,7 +4315,7 @@ def main():
         if any(line.split()[-2:-1]==['U'] for line in args.linked_symbols.read_text().splitlines()):raise ValueError('linked image has undefined symbols; elimination is not proven')
     plans=[]
     for root in args.root:
-        analyzer=Analyzer(tree,boundaries,max_range_elements=args.max_range_elements,prune_written=args.prune_written,argument_objects=argument_objects,preserve_write_state=args.preserve_write_state,max_alias_paths=args.max_alias_paths,state_ranges=state_ranges,linked_symbols=linked,volatile_fields=volatile_fields,**contracts)
+        analyzer=Analyzer(tree,boundaries,max_contexts=args.max_contexts,max_range_elements=args.max_range_elements,prune_written=args.prune_written,argument_objects=argument_objects,preserve_write_state=args.preserve_write_state,max_alias_paths=args.max_alias_paths,state_ranges=state_ranges,linked_symbols=linked,volatile_fields=volatile_fields,**contracts)
         internal='tu0:'+root if program and 'tu0:'+root in analyzer.functions else root
         plan=analyzer.analyze(internal);plan['root']=root;plans.append(plan)
     report={'format':'osrec-entry-state-plan-v1','source_identity':identity,'boundary_policy_sha256':boundary_hash,

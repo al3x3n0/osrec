@@ -43,6 +43,14 @@
    ],
    "reason": "copies from user memory: writes its kernel destination span; user bytes go through the replay user-memory contract and are not kernel entry state",
    "implementation": "models.c __arch_copy_from_user: page_span fails unless [pointer, pointer + n) lies inside file_data.bytes, then copies byte by byte through user_byte"
+  },
+  "osrec_kernel_linux_get_user_byte": {
+   "kind": "memory_model",
+   "writes": [
+    2
+   ],
+   "reason": "reads one user byte (unsafe_get_user): the user address is checked against the replay user-memory map; only the byte at value is kernel-visible, plus the transient model fault flag",
+   "implementation": "models.c linux_get_user_byte: fails with -EFAULT unless the address lies in the admitted 32-byte user object, then stores that byte to *value"
   }
  },
  "state_ranges": [
@@ -53,6 +61,14 @@
    "max": 64,
    "reason": "the slice fdtable holds 64 inline descriptor slots and bitmap words for 64 descriptors",
    "validated_by": "live state field files.fdtab.max_fds"
+  },
+  {
+   "record": "struct inode",
+   "field": "i_size",
+   "min": 0,
+   "max": 64,
+   "reason": "a regular file of the slice holds at most the 64-byte store (file_data); the console has size 0, so every page index below the size is 0",
+   "validated_by": "live state field inode_pool[].i_size, checked against each captured state (state_range_checks)"
   }
  ],
  "input_domains": [
@@ -96,6 +112,33 @@
    "field": "files.next_fd",
    "kind": "at_most_first_free_slot",
    "reason": "next_fd is a search hint never above the lowest free descriptor: alloc_fd advances it past the allocated slot and __put_unused_fd/close lower it to the freed one"
+  }
+ ],
+ "pointer_values": [
+  {
+   "record": "struct xarray",
+   "field": "xa_head",
+   "alignment": 8,
+   "reason": "the page-cache xarray of a regular file holds at most its one folio, stored directly in xa_head (index 0, no nodes or value entries): the value is null or the address of a struct folio, which is 8-byte aligned",
+   "validated_by": "checkpoint policy: inode_pool[].i_data.i_pages.xa_head is null or a context reference to folio_pool[0]; the slice models (shmem_alloc_and_add_folio, filemap_remove_folio) store only those"
+  }
+ ],
+ "pointer_identity": {
+  "reason": "the replay context restores the captured object graph: descriptor slots point at the pool object of their captured class, related links and embedded objects are bound by the live binding, and model pools (folios, inodes) are fixed context arrays",
+  "implementation": "tools/reduced_boundary_replay.py state_source binds every pointer to the pool/class object recorded in the live pre-state"
+ },
+ "user_addresses": [
+  {
+   "function": "osrec_kernel_linux_pread64",
+   "parameter": "buf",
+   "reason": "the user buffer argument is a user-space address: the slice reaches its bytes only through user-memory boundaries",
+   "validated_by": "contract register of the SVC boundary observation (argument buf); user objects are admitted by the live binding"
+  },
+  {
+   "function": "osrec_kernel_linux_pwrite64",
+   "parameter": "buf",
+   "reason": "the user buffer argument is a user-space address: the slice reaches its bytes only through user-memory boundaries",
+   "validated_by": "contract register of the SVC boundary observation (argument buf); user objects are admitted by the live binding"
   }
  ]
 }

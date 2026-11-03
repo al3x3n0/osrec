@@ -1119,6 +1119,216 @@ formation now assert where the derived value blocks instead: in the local
 effects, GNU conditional, kernel idiom, pointer arithmetic and hook-list tests.
 A zero step (`p += 0`) is proven.
 
+### Flow-sensitive values and path correlations (2026-11-03)
+
+The page cache (`filemap_get_entry`, `xas_load`, `shmem_get_folio_gfp`,
+`__mark_inode_dirty`) keeps state in stack objects whose values change along a
+path. Two examples are `XA_STATE`'s `xa_node` (`XAS_RESTART`, then NULL or a
+node) and a folio returned through `&folio`. A union over every write cannot
+separate these states. The analyzer now follows them in visit order.
+
+**Pointer values.** An integer converted to a pointer is a value, not an
+object: `const-address:N` for a constant, `error-pointer` for the ERR_PTR
+range. The interval evaluator gives each pointer an integer view: null is 0;
+objects lie in `[4096, top-4097]`, aligned as a `pointer_values` contract
+says; error pointers lie in the top 4095 values. Through these views it decides
+`&` masks, `==`/`!=` with constants, `!`, `&&`/`||` and `xa_is_node`-style
+tag tests.
+
+**Flow state.** These values are tracked along the visited path:
+- fields of automatic records;
+- pointer locals whose address escapes (each a one-field object);
+- integer locals.
+
+The state is kept as follows:
+- **Branches:** each arm starts from the condition's refined state, and the
+  arms join.
+- **Labels:** a label joins the states of the gotos that reach it.
+- **Loops:** a loop drops what its body can carry across iterations.
+- **Calls:** a call joins its callee's return states. A call with several
+  possible targets joins one state per target.
+- **Unknown keys:** a key with no flow value falls back to the union of every
+  write.
+
+`analyze()` repeats whole-root passes, up to 10 optimistic and then up to 5
+conservative. Each optimistic pass carries the previous pass's unreachable
+regions, goto states and stack-object writes. A converged result solves the
+analysis equations. Without convergence the root is analyzed again with nothing
+carried, and failing that it reports `analysis_limit`.
+
+While a callee's aliases are resolved out of order, flow values stay visible
+for every field the callee and its callees never store. A store through a
+non-member lvalue, or an unknown callee, hides them all. Before this, any
+callee that wrote memory, such as a model setting `ctx->model_fault`, hid them
+all.
+
+**Return partitions.** A call's return states are also kept split by the sign
+of the returned value: negative, zero (null), or positive (non-null). The split
+applies to:
+- `if (f(...))` or `if (!f(...))` directly;
+- a local assigned from the call, at a later test against zero: truth,
+  `==`/`!=`, `<`, `<=`, `>`, `>=`, either way round;
+- `return v` or `return f(...)`, which pass the split to the caller.
+
+A test also narrows the local's own split, so `if (ret) return ret;` returns
+only the non-zero states. `if (status < 0) break;` in `generic_perform_write`
+keeps the success states of `write_begin`, where the page is stored.
+
+A split applies to a key only while the flow still holds the very value
+object the call produced. Any later store makes a new object. An
+`XAS_BOUNDS` from `xas_start` only comes with a NULL entry, so the
+`folio != xas_reload(&xas)` reached after `if (!folio) goto out` no longer
+sees it.
+
+**Correlated stores.** A pointer local `p` is proven non-null at a read when
+all of these hold:
+- `p` starts null, and one statement stores it, unconditionally in the arm of
+  an earlier `if (C)`;
+- the read has the same guard `C` with the same truth;
+- `C` reads only unescaped locals that nothing stores in between;
+- the earlier `if` precedes the read's statement in one block, with no label
+  or case between them.
+
+For example, `__mark_inode_dirty`'s `wb` is proven non-null under its second
+`if (!was_dirty)`. Each use is listed in `null_guard_proofs` as
+`correlated_store_guard`.
+
+**Value splits.** At a condition over an escaped pointer local, each value
+class is tried alone: null, the error range, each constant address, and
+objects. A class is dropped from the arm when the condition is decided against
+it. `IS_ERR(folio)` keeps only error pointers in its true arm and only objects
+in its false arm.
+
+**Data models.** The portable evaluator treats `long` as at least 32 bits, so
+a 64-bit pointer view does not fit it. When an integer view of a pointer leaves
+a value undecided, the evaluator repeats it under ILP32 and under LP64. Each
+run uses that model's exact `long` width, modular conversion to unsigned types,
+and that pointer width. It keeps the hull of the two results, which holds on
+both targets. `(uintptr_t)p >= (uintptr_t)-MAX_ERRNO` is false for an object
+address under both. A comparison that only one model decides stays undecided.
+
+**Pointer equality.** `==`/`!=` with an array-element pointer is admitted when
+the result is address-independent:
+- one side is a constant (null, constant address, error range, function);
+- both sides are the same path;
+- both sides are storage the replay does not rebuild (automatic objects or
+  named globals).
+
+Two reconstructed objects compare alike only if the replay preserves their
+identity. A profile states that with a `pointer_identity` contract (`reason`,
+`implementation`). `fd-control` declares it: its replay binds every pointer to
+the pool or class object recorded in the live state. Each comparison is listed
+in `pointer_comparison_proofs` with its `identity`.
+
+**Element-address stores.** Storing `&array[k]` of a non-automatic array is
+storing an ordinary object address when every `k` is in range. Examples are
+`xa_head = &ctx->folio_pool[0]` and `p->head = &p->items[n % 2]`. A later load
+carries no array provenance, so arithmetic on it stays unproven. One-past and
+automatic arrays still block. Each store is listed in `pointer_store_proofs`.
+
+**User addresses.** A `user_addresses` contract names root parameters that hold
+user-space addresses (`function`, `parameter`, `reason`, `validated_by`).
+`fd-control` names `buf` of `pread64` and `pwrite64`. Such a parameter's value
+is `user:NAME`: the exact address the caller passed, never a kernel object.
+- `u + n`, `u - n`, `p++`/`p += n` keep the user value.
+- `u - v` between user values is an integer.
+- `(unsigned long)u` with integer arithmetic (`PAGE_ALIGN`) and a cast back
+  keeps it too, as long as no operand carries a kernel pointer.
+- A user value has no integer view, so it decides no condition, and it may be
+  null.
+- Kernel code dereferencing it blocks ("user address dereferenced outside a
+  user-memory boundary"). Only boundaries may touch user memory.
+
+Each use is listed in `user_address_proofs`. `fault_in_readable`'s page
+stepping and `uaddr - start` need this.
+
+**Boundary writes into locals.** A memory-model boundary whose declared
+`writes` argument is the address of the caller's own volatile scalar local
+writes live automatic storage, which is no kernel state. Other scalar locals
+keep their scalar-address `memory_ranges`. `linux_get_user_byte`, the model
+behind `unsafe_get_user`, is now such a boundary (`writes: [2]`).
+
+**Discarded volatile scalars.** A volatile automatic scalar qualifies when each
+of its uses is one of:
+- a store;
+- a read whose value is discarded (`(void)c`);
+- its address as a declared boundary write argument.
+
+Its value, even an indeterminate one, never reaches a computation, whatever
+jumps the function has. Each one is listed in `local_volatile_storage_proofs`
+as `discarded_volatile_scalar`. `fault_in_readable`'s `volatile char c`
+qualifies.
+
+**Loop-body objects.** An object declared in a loop body starts a new lifetime
+on every iteration, with or without an initializer, so its flow values are not
+carried across iterations. A `for`-init declaration runs once and is carried.
+Before, `generic_perform_write`'s `struct page *page` lost every stored value
+inside the loop.
+
+**Null-replacing stores.** A read of `p` is non-null when, earlier in its block,
+`if (!p) p = E;` stores a non-null `E` unconditionally and nothing stores `p`
+or enters the block in between. `balance_dirty_pages_ratelimited`'s `wb` uses
+this. Each use is listed in `null_guard_proofs` as `null_replaced_before_use`.
+
+**Escaped pointer steps.** `p++` or `p += n` on an escaped pointer local
+updates its stored value. In a loop, or in a function with labels, the value
+becomes unresolved. Before, the stored value kept the pointer's first element.
+
+**Budgets.** `entry_state.py --max-contexts` sets the call-context budget.
+`reduced_boundary_replay.py` passes 4000 contexts and 1024 alias paths.
+
+On the `fd-control` slice:
+
+| Call | Before (2026-11-02) | After |
+|---|---|---|
+| `pread64` | 180 | 0 |
+| `pwrite64` | 174 | 0 |
+| `fcntl` | 6 | 6 |
+| `ftruncate` | 292 | 360 |
+
+ftruncate's stack-object values do not converge in 5 passes (`analysis_limit`).
+Its count is the conservative fallback's: `shmem_undo_range` and the folio
+batch loops of truncation.
+
+Both footprints pass the reduced replay's blocker check (observations
+`observe-pread` and `observe-pwrite`). Both then stop at the binding check:
+discovered reads that `live-binding.json` does not supply. pread64 has 46 and
+pwrite64 has 48:
+- inode timestamps, ids, state, lock and version;
+- `user_ns` id maps;
+- superblock flags and time limits;
+- `tk_core`, the clock read for timestamps;
+- the ops classes (`fop_pool`, `aops_pool`, `iop_pool`, `super_ops`);
+- mount flags;
+- the inode's writeback structure;
+- for pwrite64, also the dirty-throttling state (`bdp_ratelimits`,
+  `ratelimit_pages`, `task.nr_dirtied`).
+
+The timestamp update (`touch_atime`, `file_update_time`,
+`inode_update_time`, `__mark_inode_dirty`) and the page cache reach them.
+
+fcntl's six are the raw-descriptor `close_on_exec` bitmap index.
+
+`tests/test_entry_state_flow.py` covers the following, each with the cases
+that must stay blocked:
+- return partitions;
+- field-aware callee regions;
+- correlated stores;
+- value splits under both data models;
+- element-address stores;
+- escaped pointer steps;
+- several callback targets;
+- user addresses, boundary writes into locals and discarded volatile
+  scalars;
+- sign tests on returned values, loop-body objects and null-replacing
+  stores.
+
+Updated expectations now assert the more precise result:
+- `goto` dead code, conditions false on loop entry, and a guard decided on a
+  null-only pointer are pruned;
+- address-independent comparisons are admitted;
+- reconstructed-object comparisons need the identity contract.
+
 ## Run the live pipeline
 
 The prepared LiteOS demo supports generated snapshot instrumentation:

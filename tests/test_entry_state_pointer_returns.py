@@ -66,7 +66,8 @@ unsigned root(unsigned n){return *get(n);}'''
         texts=(
             MODEL+'void external(void);unsigned*get(void){external();return current()->a;}unsigned root(void){return *get();}',
             MODEL+'unsigned char*get(void){return (unsigned char*)current()->a;}unsigned root(void){return *get();}',
-            MODEL+'unsigned*g;unsigned*get(void){g=current()->a;return current()->a;}unsigned root(void){return *get();}',
+            # Storing an element's address is an ordinary address store (test_entry_state_flow); one past is not.
+            MODEL+'unsigned*g;unsigned*get(void){g=current()->a+4;return current()->a;}unsigned root(void){return *get();}',
             'const unsigned a[4]={1,2,3,4};unsigned*get(void){return a;}unsigned root(void){*get()=9;return 0;}',
             'volatile unsigned a[4];unsigned*get(void){return a;}unsigned root(void){return *get();}',
             'unsigned a[4];unsigned*get(unsigned n){if(n)return get(n-1);return a;}unsigned root(void){return *get(1);}',

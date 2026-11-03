@@ -103,7 +103,9 @@ class EntryStateLoopTests(unittest.TestCase):
 
     def test_unsafe_or_unproved_induction_remains_blocked(self):
         cell=lambda *ns:{'osrec_argument_state()->values[%d]'%n for n in ns}
-        EVALUATED={'nonunit':cell(*range(8)),'cast_index':cell(*range(8)),'narrow_counter':cell(*range(8)),'reused_counter':cell(*range(8)),'wide_bound':cell(*range(8))}
+        # A condition false on entry (8<8, 0xffffffff<8) means the body never runs: nothing is accessed.
+        EVALUATED={'nonunit':cell(*range(8)),'cast_index':cell(*range(8)),'narrow_counter':cell(*range(8)),'reused_counter':cell(*range(8)),'wide_bound':cell(*range(8)),
+                   'zero_trip':set(),'wrapped_init':set()}
         bodies={
             'body_assign':'for(unsigned i=0;i<8;++i){i=count;state->values[i]=1;}',
             'body_increment':'for(unsigned i=0;i<8;++i){++i;state->values[i]=1;}',

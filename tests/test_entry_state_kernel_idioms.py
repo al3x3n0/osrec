@@ -198,7 +198,9 @@ unsigned long mask_nospec(unsigned long index,unsigned long size);
 
     def test_null_only_pointers_behind_guards_are_infeasible_and_anonymous_members_are_transparent(self):
         p=self.plan('struct S{union{unsigned a;unsigned b;};};static struct S *none(void){return 0;}\nunsigned root(void){struct S *s=none();if(!s)return 0;return s->b;}')
-        self.assertFalse(p['blockers'],p['blockers']);self.assertTrue(p['infeasible_accesses']);self.assertFalse(p['entry_reads'])
+        # s is null-only, so the guard is decided and the read after it is unreachable.
+        self.assertFalse(p['blockers'],p['blockers']);self.assertFalse(p['entry_reads'])
+        self.assertEqual([(d['kind'],d.get('outcome')) for d in p['decided_branch_proofs']],[('decided_condition',1),('unreachable_after_decided_exit',None)])
         # Without the guard the null read still blocks.
         self.assertIn('unresolved_pointer_origin',self.kinds(self.plan('struct S{union{unsigned a;unsigned b;};};static struct S *none(void){return 0;}\nunsigned root(void){struct S *s=none();return s->b;}')))
         p=self.plan('struct S{union{unsigned a;unsigned b;};};struct S *get(void);\nunsigned root(void){return get()->b;}',policy={**self.POLICY,'get':{'kind':'object_provider','reason':'r','implementation':'i','snapshot_safe':True}})

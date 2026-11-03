@@ -98,7 +98,10 @@ def footprint(sources,root,policy,state,binding,clang,stage,contracts=None):
     cache=ROOT/'build/footprint-cache'/(key+'.json')
     if cache.exists():shutil.copyfile(cache,stage/'entry-state.json')
     else:
+        # Whole-syscall closures (the page cache under pread64) exceed the default call-context
+        # and alias budgets; both remain bounded, and exceeding them still blocks.
         run(['python3',ROOT/'tools/entry_state.py','--compile-commands',stage/'compile_commands.json','--source',sources/'syscalls.c','--closure-source',sources/'models.c','--root',root,'--clang',clang,'--out',stage/'entry-state.json',
+             '--max-contexts','4000','--max-alias-paths','1024',
              *(['--boundaries',Path(contracts).resolve()] if contracts else [])],cwd=ROOT/'tools',timeout=int(os.environ.get('OSREC_FOOTPRINT_TIMEOUT','300')))
         cache.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(stage/'entry-state.json',cache)
     plan=json.loads((stage/'entry-state.json').read_text())['plans'][0];bound=bound_fields(state,binding);rows=[]

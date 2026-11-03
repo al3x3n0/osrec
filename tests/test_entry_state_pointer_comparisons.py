@@ -31,15 +31,29 @@ class PointerComparisonTests(unittest.TestCase):
         proof=p['pointer_comparison_proofs'][0]
         self.assertEqual(proof['storage'],'global:object.a');self.assertEqual(proof['call_path'],['root','before'])
         self.assertFalse(proof['automatic_storage'])
+    def test_address_independent_equality_is_admitted(self):
+        # Storage the replay does not rebuild (automatic arrays), null, and one path on
+        # both sides compare alike at capture and at replay.
+        for body in ('unsigned a[4],b[4];return a==b;','unsigned a[4];unsigned*p=n?a:0;return p!=a;',
+                     'unsigned a[4];return a==0;','return pointer->a==pointer->a;'):
+            with self.subTest(body=body):
+                # (A global pointer read has no snapshot provider, so no capture header is generated.)
+                p=self.plan('struct T{unsigned a[4];};struct T*current(void);struct T*pointer;int root(unsigned n){'+body+'}')
+                self.assertFalse(p['blockers'],p['blockers'])
+                self.assertEqual({c['identity'] for c in p['pointer_comparison_proofs'] if c['kind']=='pointer_equality'},{'address_independent'})
+    def test_reconstructed_objects_need_the_identity_contract(self):
+        text='struct T{unsigned a[4];};struct T*current(void);struct T*pointer;int root(void){return current()->a==pointer->a;}'
+        p=self.plan(text);self.assertIn('pointer_arithmetic',{b['kind'] for b in p['blockers']})
+        identity={'reason':'fixture replay restores captured objects','implementation':'fixture'}
+        p=self.plan(text,pointer_identity=identity);self.assertFalse(p['blockers'],p['blockers'])
+        self.assertEqual([c['identity'] for c in p['pointer_comparison_proofs']],['pointer_identity_contract'])
+        for bad in ({'reason':'r'},{'reason':'','implementation':'i'},'yes'):
+            with self.subTest(contract=bad),self.assertRaises(ValueError):Analyzer({'kind':'TranslationUnitDecl','inner':[]},basic.POLICY,pointer_identity=bad)
     def test_different_mixed_unknown_null_and_indirect_arrays_remain_blocked(self):
         bodies=(
-            'unsigned a[4],b[4];return a==b;',
             'unsigned a[4],b[4];unsigned*p=n?a:b;return p<a;',
-            'unsigned a[4];unsigned*p=n?a:0;return p!=a;',
             'unsigned a[4];unsigned*p;return p==a;',
-            'unsigned a[4];return a==0;',
             'return current()->a<current()->a+1;',
-            'return pointer->a==pointer->a;',
             'unsigned a[4];return ((unsigned*)((char*)a+1))<a;',
         )
         for body in bodies:
@@ -48,8 +62,8 @@ class PointerComparisonTests(unittest.TestCase):
                 self.assertIn('pointer_arithmetic',{b['kind'] for b in p['blockers']});self.assertNotIn('pointer_comparison_proofs',p)
                 with self.assertRaises(ValueError):capture_header([p])
     def test_lifetime_shadowing_bounds_and_alias_caps(self):
+        # A shadowing inner array is distinct storage: p==a is admitted as address-independent (above).
         for body in ('unsigned*p,*q;{unsigned a[4];p=a;q=a+1;}return p<q;',
-                     'unsigned a[4];unsigned*p=a;{unsigned a[4];return p==a;}',
                      'unsigned a[4];return (a+5)>a;'):
             with self.subTest(body=body):
                 p=self.plan('int root(void){'+body+'}');self.assertTrue(p['blockers']);self.assertNotIn('pointer_comparison_proofs',p)

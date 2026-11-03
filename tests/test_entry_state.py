@@ -198,7 +198,8 @@ unsigned call_jump(int pick){return jump_helper(current(),pick);}
                 with self.subTest(root=root):
                     plan=Analyzer(tree,POLICY).analyze(root)
                     self.assertFalse(plan['blockers'],plan['blockers'])
-                    self.assertEqual({r['path'] for r in plan['entry_reads']},{'current()->value','current()->other'})
+                    # The statement after an unconditional goto never runs.
+                    self.assertEqual({r['path'] for r in plan['entry_reads']},{'current()->value'} if root=='after_return' else {'current()->value','current()->other'})
                     capture_header([plan])
             plan=Analyzer(tree,POLICY).analyze('backward')
             self.assertFalse(plan['blockers'],plan['blockers'])

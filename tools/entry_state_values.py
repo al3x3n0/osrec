@@ -36,7 +36,14 @@ EXITS=('ReturnStmt','BreakStmt','ContinueStmt','GotoStmt')
 ENTRIES=('LabelStmt','CaseStmt','DefaultStmt')
 MUTATIONS={'=','+=','-=','*=','/=','%=','<<=','>>=','&=','|=','^='}
 TRANSPARENT_CASTS=('LValueToRValue','NoOp','PointerToBoolean','IntegralToBoolean','BitCast','NullToPointer')
-MAX_DEPTH=12;MAX_NODES=8192;SPAN_LIMIT=1<<20
+MAX_DEPTH=12;MAX_NODES=8192
+# No object lies in the first or the last page of the address space (Linux reserves
+# both: the null page and the ERR_PTR range); object addresses are within OBJECT.
+OBJECT=(4096,(1<<64)-4097);TOP_ALIGNMENT=1<<63;SPAN_LIMIT=1<<20
+# Data models with a fixed `long` (and pointer) width: ILP32 and LP64. The portable tables
+# above hold on both; an integer view of a pointer is evaluated under each model separately.
+MODELS={bits:({**WIDE,'long':(-(1<<bits-1),(1<<bits-1)-1),'unsigned long':(0,(1<<bits)-1)},
+              {**NARROW,'long':(-(1<<bits-1),(1<<bits-1)-1),'unsigned long':(0,(1<<bits)-1)}) for bits in (32,64)}
 
 class Unproven(Exception):
     """A value depends on volatile or possibly uninitialized automatic storage."""
@@ -163,6 +170,7 @@ class FunctionFacts:
             for child in children(node):index(child,node)
             self.span[id(node)]=(start,len(self.order)-1)
         index(function,None)
+        self.declarations={n['id']:n for n in self.order if n.get('kind')=='VarDecl' and 'id' in n}
         for node in self.order:
             kind=node.get('kind');terms=children(node);op=node.get('opcode')
             if kind in ENTRIES:self.has_labels=True
@@ -312,7 +320,7 @@ class FunctionFacts:
             child=node;parent=self.parent.get(id(node))
             while parent is not None and parent.get('kind')=='ParenExpr':child=parent;parent=self.parent.get(id(parent))
             if parent is not None and parent.get('kind')=='BinaryOperator' and parent.get('opcode')=='=' and children(parent)[0] is child:continue
-            if self.reaching(node,key) is None and not self.loop_initialized(node,key):return False
+            if self.reaching(node,key) is None and not self.loop_initialized(node,key) and not self.dominated(node,key):return False
         return True
     @staticmethod
     def defines(statement,key):
@@ -447,6 +455,7 @@ class Values:
     """Integer intervals for proofs in the analyzer's current call context."""
     def __init__(self,analyzer):
         self.analyzer=analyzer;self.proof=None;self.assumed={};self.active=set();self.pointer_env=[];self.call_stack=[]
+        self.W=WIDE;self.N=NARROW;self.model=None;self.viewed=False
     def facts_for(self,name):
         cache=self.analyzer._function_facts
         if name not in cache:cache[name]=FunctionFacts(self.analyzer.functions[name])
@@ -458,27 +467,105 @@ class Values:
         if not facts.contains(node):return None,None
         if not any(n.get('kind') in ('DeclRefExpr','MemberExpr','CallExpr') and n.get('referencedDecl',{}).get('kind')!='EnumConstantDecl' for n in walk(node)):
             return None,None
-        self.proof=dict(kind='path_fact_interval',state_ranges=[],guards=[],definitions=[],calls=[],parameters=[]);self.budget=MAX_NODES
-        try:result=self.value(node,name,facts,parameters or {},0)
-        except (RecursionError,Unproven):return None,None
+        def evaluate():
+            self.proof=dict(kind='path_fact_interval',state_ranges=[],guards=[],definitions=[],calls=[],parameters=[]);self.budget=MAX_NODES
+            try:return self.value(node,name,facts,parameters or {},0)
+            except (RecursionError,Unproven):return None
+        outer=(self.W,self.N,self.model,self.viewed);self.viewed=False
+        try:
+            result=evaluate()
+            if self.viewed and self.model is None and (result is None or result[0]!=result[1]):
+                # An integer view of a pointer depends on the pointer width: the value holds on
+                # both targets if it holds under each data model.
+                found=[]
+                for bits in (32,64):
+                    self.W,self.N=MODELS[bits];self.model=bits
+                    found.append((evaluate(),self.proof))
+                self.W,self.N,self.model=outer[:3]
+                if all(r is not None for r,_ in found):
+                    hull=(min(r[0] for r,_ in found),max(r[1] for r,_ in found))
+                    if result is None or hull[0]>=result[0] and hull[1]<=result[1]:
+                        result=hull;self.proof=found[1][1]
+                        for _,proof in found[:1]:
+                            for k in ('state_ranges','guards','definitions','calls','parameters'):self.proof[k]+=proof[k]
+                        self.proof['data_models']=['ILP32','LP64']
+        finally:self.W,self.N,self.model,self.viewed=outer
         if result is None or result[1]-result[0]+1>SPAN_LIMIT:return None,None
         proof=self.proof;proof['bounds']=list(result)
         for k in ('state_ranges','guards','definitions','calls','parameters'):
             unique=[];[unique.append(v) for v in proof[k] if v not in unique];proof[k]=unique
         return result,proof
     def note(self,kind,value):self.proof[kind].append(value)
+    def pointer_view(self,node):
+        """(low, high, alignment) of a pointer's integer value over its alias values, or None.
+
+        Null is 0; a constant address is itself; an error pointer is in the last 4095 values;
+        an array element or function is an object address; a loaded pointer may also be null,
+        and a contract may give its alignment. Unknown origins have no view."""
+        if not self.pointer_env or not self.call_stack or '*' not in type_of(node) or '(' in type_of(node):return None
+        analyzer=self.analyzer
+        # A variable whose address escapes may be stored through that address: its alias values
+        # are incomplete, so it has no view (any local read in the expression, not only at the top).
+        name=self.call_stack[-1][-1]
+        if name in analyzer.functions:
+            # Escaped pointer locals read the automatic-object store; other escaped variables are unknown.
+            escaped=self.facts_for(name).escaped
+            if any(n.get('kind')=='DeclRefExpr' and n.get('referencedDecl',{}).get('id') in escaped and analyzer.escaped_pointer_local(n,self.call_stack[-1]) is None for n in walk(node)):return None
+        analyzer.quiet+=1
+        try:values=analyzer.resolve(node,self.pointer_env[-1],self.call_stack[-1])
+        finally:analyzer.quiet-=1
+        views=[];top=1<<(self.model or 64)
+        for value in values:
+            if value.startswith('infeasible:'):continue
+            if value=='null':views.append((0,0,TOP_ALIGNMENT))
+            elif re.fullmatch(r'const-address:[0-9]+',value):
+                n=int(value.split(':',1)[1])
+                # A constant address is spelled at 64 bits; a small negative one (ERR_PTR(-E)) is the
+                # same negative value at 32 bits.
+                if top<1<<64 and n>=(1<<64)-(top>>1):n-=(1<<64)-top
+                if n>=top:return None
+                views.append((n,n,(n&-n) if n else TOP_ALIGNMENT))
+            elif value=='error-pointer':views.append((top-4095,top-1,1))
+            elif re.search(r'const-address:|error-pointer',value):return None
+            elif value in analyzer._bounded_pointers or value.startswith('function:'):views.append((OBJECT[0],top-4097,1))
+            elif re.search(r'(?:^|\*\()(?:unresolved:|local:|user:)|derived-pointer:|tagged:|auto:',value):return None
+            else:
+                alignment=next((a for f,a in analyzer.pointer_values.items() if re.search(r'(?:\.|->)'+re.escape(f)+'$',value)),1)
+                views.append((0,top-4097,alignment))
+        if not views:return None
+        self.viewed=True
+        self.note('definitions',dict(kind='pointer_integer_view',bounds=[min(v[0] for v in views),max(v[1] for v in views)],alignment=min(v[2] for v in views)))
+        return (min(v[0] for v in views),max(v[1] for v in views),min(v[2] for v in views))
+    def operand_view(self,node,name,facts,parameters,depth):
+        """(low, high, alignment) of an integer or pointer operand, or None."""
+        inner=widening(node)
+        if '*' in type_of(inner):return self.pointer_view(inner)
+        if inner.get('kind') in ('ImplicitCastExpr','CStyleCastExpr') and inner.get('castKind')=='PointerToIntegral' and children(inner):
+            return self.pointer_view(children(inner)[0])
+        if not integer_type(type_of(inner)):return None
+        value=self.value(node,name,facts,parameters,depth)
+        if value is None:return None
+        return (value[0],value[1],(value[0]&-value[0]) if value[0]==value[1] and value[0] else 1 if value[0]!=value[1] else TOP_ALIGNMENT)
     def value(self,node,name,facts,parameters,depth):
         self.budget-=1
         if self.budget<0 or depth>MAX_DEPTH:return self.wide(node)
+        if self.pointer_env and '*' in type_of(node) and '(' not in type_of(node):
+            view=self.pointer_view(node)
+            return (view[0],view[1]) if view is not None else None
         base=self.base(node,name,facts,parameters,depth)
         if base is None:return None
         return self.refine(node,base,name,facts,parameters,depth)
     def wide(self,node):
-        t=integer_type(type_of(node));return WIDE[t] if t else None
+        t=integer_type(type_of(node));return self.W[t] if t else None
     def fit(self,low,high,node):
         t=integer_type(type_of(node))
         if t is None:return None
-        return (low,high) if NARROW[t][0]<=low and high<=NARROW[t][1] else WIDE[t]
+        if self.N[t][0]<=low and high<=self.N[t][1]:return (low,high)
+        if self.model is not None and self.W[t][0]==0 and t!='_Bool':
+            # With a fixed width, conversion to an unsigned type is reduction modulo 2^n.
+            size=self.W[t][1]+1
+            if high-low<size and low%size<=high%size:return (low%size,high%size)
+        return self.W[t]
     def base(self,node,name,facts,parameters,depth):
         kind=node.get('kind');terms=children(node);typ=integer_type(type_of(node))
         bounds,_=self.analyzer.static_index_bounds(node)
@@ -499,10 +586,15 @@ class Values:
         if kind=='ParenExpr' and len(terms)==1:return self.value(terms[0],name,facts,parameters,depth)
         if kind in ('ImplicitCastExpr','CStyleCastExpr') and len(terms)==1:
             cast=node.get('castKind')
+            if cast in ('PointerToIntegral','PointerToBoolean'):
+                view=self.pointer_view(terms[0])
+                if view is None:return self.wide(node)
+                if cast=='PointerToBoolean':return (0,0) if view[1]==0 else (1,1) if view[0]>0 else (0,1)
+                return self.fit(view[0],view[1],node) if typ else None
             if cast in ('LValueToRValue','NoOp'):return self.load(terms[0],name,facts,parameters,depth) if cast=='LValueToRValue' else self.value(terms[0],name,facts,parameters,depth)
             if cast in ('IntegralCast','IntegralToBoolean') and typ:
                 inner=self.value(terms[0],name,facts,parameters,depth)
-                if inner is None:return WIDE[typ]
+                if inner is None:return self.W[typ]
                 if cast=='IntegralToBoolean':return (0 if inner[0]<=0<=inner[1] else 1,0 if inner==(0,0) else 1)
                 return self.fit(inner[0],inner[1],node)
             return self.wide(node)
@@ -510,14 +602,14 @@ class Values:
         if kind=='UnaryOperator' and len(terms)==1:
             op=node.get('opcode')
             if op=='!':
-                inner=self.value(terms[0],name,facts,parameters,depth) if integer_type(type_of(terms[0])) else None
+                inner=self.value(terms[0],name,facts,parameters,depth) if integer_type(type_of(terms[0])) or '*' in type_of(terms[0]) else None
                 if inner is None:return (0,1)
                 return (1,1) if inner==(0,0) else (0,0) if inner[0]>0 or inner[1]<0 else (0,1)
             inner=self.value(terms[0],name,facts,parameters,depth)
-            if inner is None:return WIDE[typ]
+            if inner is None:return self.W[typ]
             if op=='+':return self.fit(*inner,node)
             if op=='-':return self.fit(-inner[1],-inner[0],node)
-            return WIDE[typ]
+            return self.W[typ]
         if kind=='BinaryOperator' and len(terms)==2:return self.binary(node,name,facts,parameters,depth)
         if kind=='ConditionalOperator' and len(terms)==3:
             # A condition whose interval excludes zero (or is zero) selects one arm.
@@ -525,27 +617,40 @@ class Values:
             if test is not None and (test[0]>0 or test[1]<0):return self.value(terms[1],name,facts,parameters,depth)
             if test==(0,0):return self.value(terms[2],name,facts,parameters,depth)
             arms=[self.value(t,name,facts,parameters,depth) for t in terms[1:]]
-            if any(a is None for a in arms):return WIDE[typ]
+            if any(a is None for a in arms):return self.W[typ]
             return (min(a[0] for a in arms),max(a[1] for a in arms))
         if kind=='CallExpr':return self.call(node,name,facts,parameters,depth)
-        return WIDE[typ]
+        return self.W[typ]
     def load(self,target,name,facts,parameters,depth):
-        target=parens(target);typ=integer_type(type_of(target))
+        target=parens(target)
+        # *&x (smp_load_acquire, READ_ONCE spellings) reads x itself.
+        while target.get('kind')=='UnaryOperator' and target.get('opcode')=='*' and len(children(target))==1:
+            address=parens(children(target)[0])
+            while address.get('kind') in ('ImplicitCastExpr','CStyleCastExpr') and address.get('castKind') in ('NoOp','BitCast') and len(children(address))==1 and type_of(address)==type_of(children(address)[0]):address=parens(children(address)[0])
+            if address.get('kind')!='UnaryOperator' or address.get('opcode')!='&' or len(children(address))!=1:break
+            target=parens(children(address)[0])
+        typ=integer_type(type_of(target))
         if typ is None:return None
         if target.get('kind')=='DeclRefExpr':
             declaration=target.get('referencedDecl',{});key=declaration.get('id')
-            if declaration.get('kind') not in ('VarDecl','ParmVarDecl') or key in self.analyzer.globals:return WIDE[typ]
+            if declaration.get('kind') not in ('VarDecl','ParmVarDecl') or key in self.analyzer.globals:return self.W[typ]
             if 'volatile' in type_of(target):raise Unproven('volatile')
             local=declaration.get('kind')=='VarDecl'
             if key in facts.escaped:
                 if local:raise Unproven('escaped automatic variable')
-                return WIDE[typ]
+                return self.W[typ]
             if key in self.assumed:return self.assumed[key]
+            # The flow value of a local of the frame being visited (assignments in visit order).
+            if self.call_stack and self.call_stack[-1] and self.call_stack[-1][-1]==name:
+                flowed=self.analyzer.local_flow(self.call_stack[-1],key)
+                if flowed!='unset':
+                    self.note('definitions',dict(kind='flow_value',variable=declaration.get('name'),bounds=list(flowed) if flowed else None))
+                    return self.fit(*flowed,target) if flowed is not None else self.W[typ]
             definition=facts.reaching(target,key)
             if definition is not None:
                 self.note('definitions',self.analyzer.location(definition))
                 result=self.value(definition,name,facts,parameters,depth+1)
-                if result is None:return WIDE[typ]
+                if result is None:return self.W[typ]
                 return self.fit(*result,target)
             if declaration.get('kind')=='ParmVarDecl' and key not in facts.mutations and key in parameters:
                 self.note('parameters',dict(function=name,parameter=declaration.get('name'),bounds=list(parameters[key])))
@@ -553,7 +658,7 @@ class Values:
             if local and not facts.initialized(target,key) and not facts.loop_initialized(target,key) and not facts.dominated(target,key):
                 raise Unproven('automatic variable may be read before initialization')
             union=self.definitions(target,key,name,facts,parameters,depth)
-            return self.fit(*union,target) if union is not None else WIDE[typ]
+            return self.fit(*union,target) if union is not None else self.W[typ]
         if target.get('kind')=='MemberExpr' and children(target) and self.pointer_env:
             # A field of an automatic record, read through the pointer values of this context.
             stack=self.call_stack[-1] if self.call_stack else None
@@ -567,13 +672,13 @@ class Values:
                     found.append(value)
                 if found:
                     self.note('definitions',dict(kind='automatic_record_field',field=target.get('name'),bounds=[min(v[0] for v in found),max(v[1] for v in found)]))
-                    return self.fit(min(v[0] for v in found),max(v[1] for v in found),target) or WIDE[typ]
+                    return self.fit(min(v[0] for v in found),max(v[1] for v in found),target) or self.W[typ]
         if target.get('kind')=='MemberExpr' and children(target):
             contract=self.analyzer.state_range(target)
             if contract is not None:
                 self.note('state_ranges',dict(record=contract['record'],field=contract['field'],bounds=[contract['min'],contract['max']]))
                 return (contract['min'],contract['max'])
-        return WIDE[typ]
+        return self.W[typ]
     def definitions(self,target,key,name,facts,parameters,depth):
         """Every value an initialized local (or mutated parameter) can hold: the union over its assignments.
 
@@ -640,23 +745,40 @@ class Values:
             elif c>0:a,b=a*c,b*c
             else:return None
             low,high=a*base[0]+b,a*base[1]+b
-            return (a,b) if NARROW[typ][0]<=low and high<=NARROW[typ][1] else None
+            return (a,b) if self.N[typ][0]<=low and high<=self.N[typ][1] else None
         return None
     def binary(self,node,name,facts,parameters,depth):
         op=node.get('opcode');left,right=children(node);typ=integer_type(type_of(node))
+        if op in ('==','!=') and ('*' in type_of(widening(left)) or '*' in type_of(widening(right))):
+            # Pointer identity over integer views: disjoint ranges, or a constant that is not a
+            # multiple of the other side's alignment, never compare equal.
+            a=self.operand_view(left,name,facts,parameters,depth);b=self.operand_view(right,name,facts,parameters,depth)
+            if a is None or b is None:return (0,1)
+            equal=a[0]==a[1]==b[0]==b[1]
+            different=a[1]<b[0] or b[1]<a[0] or (a[0]==a[1] and a[0]%b[2]!=0) or (b[0]==b[1] and b[0]%a[2]!=0)
+            if not (equal or different):return (0,1)
+            return (1,1) if equal==(op=='==') else (0,0)
         if op in ('==','!=','<','>','<=','>='):
-            # Decided only when both operands are integers and every pair of values agrees.
-            a=self.value(left,name,facts,parameters,depth) if integer_type(type_of(widening(left))) else None
-            b=self.value(right,name,facts,parameters,depth) if integer_type(type_of(widening(right))) else None
+            # Decided only when both operands are integers and every pair of values agrees
+            # (an integer view of a pointer, `(uintptr_t)p`, is one).
+            numeric=lambda n:integer_type(type_of(widening(n))) or integer_type(type_of(n)) and '*' in type_of(widening(n))
+            a=self.value(left,name,facts,parameters,depth) if numeric(left) else None
+            b=self.value(right,name,facts,parameters,depth) if numeric(right) else None
             if a is None or b is None:return (0,1)
             decide={'<':(a[1]<b[0],a[0]>=b[1]),'<=':(a[1]<=b[0],a[0]>b[1]),'>':(a[0]>b[1],a[1]<=b[0]),'>=':(a[0]>=b[1],a[1]<b[0]),
                     '==':(a[0]==a[1]==b[0]==b[1],a[1]<b[0] or b[1]<a[0]),'!=':(a[1]<b[0] or b[1]<a[0],a[0]==a[1]==b[0]==b[1])}[op]
             return (1,1) if decide[0] else (0,0) if decide[1] else (0,1)
-        if op in ('&&','||'):return (0,1)
+        if op in ('&&','||'):
+            a=self.value(left,name,facts,parameters,depth) if integer_type(type_of(left)) or '*' in type_of(left) else None
+            b=self.value(right,name,facts,parameters,depth) if integer_type(type_of(right)) or '*' in type_of(right) else None
+            truth=lambda v:None if v is None else 0 if v==(0,0) else 1 if v[0]>0 or v[1]<0 else None
+            x,y=truth(a),truth(b)
+            if op=='&&':return (0,0) if 0 in (x,y) else (1,1) if x==y==1 else (0,1)
+            return (1,1) if 1 in (x,y) else (0,0) if x==y==0 else (0,1)
         if op==',':return self.value(right,name,facts,parameters,depth)
-        if op in MUTATIONS:return WIDE[typ]
+        if op in MUTATIONS:return self.W[typ]
         a=self.value(left,name,facts,parameters,depth);b=self.value(right,name,facts,parameters,depth)
-        if a is None or b is None:return WIDE[typ]
+        if a is None or b is None:return self.W[typ]
         if op=='+':return self.fit(a[0]+b[0],a[1]+b[1],node)
         if op=='-':return self.fit(a[0]-b[1],a[1]-b[0],node)
         if op=='*':
@@ -665,18 +787,26 @@ class Values:
             return self.fit(a[0]//b[0],a[1]//b[0],node) if op=='/' else (0,min(a[1],b[0]-1))
         if op=='>>' and b[0]==b[1] and 0<=b[0]<64 and a[0]>=0:return (a[0]>>b[0],a[1]>>b[0])
         if op=='<<' and b[0]==b[1] and 0<=b[0]<64 and a[0]>=0:return self.fit(a[0]<<b[0],a[1]<<b[0],node)
+        if op in ('&','|','^') and a[0]==a[1]>=0 and b[0]==b[1]>=0:
+            value={'&':a[0]&b[0],'|':a[0]|b[0],'^':a[0]^b[0]}[op];return self.fit(value,value,node)
+        if op=='&':
+            # An aligned address masked below its alignment is zero.
+            for pointer,mask in ((left,b),(right,a)):
+                view=self.operand_view(pointer,name,facts,parameters,depth) if mask[0]==mask[1]>=0 else None
+                if view is not None and '*' in type_of(widening(pointer)) or view is not None and widening(pointer).get('castKind')=='PointerToIntegral':
+                    if mask[0]<view[2] and view[0]%view[2]==0:return (0,0)
         if op=='&' and a[0]>=0 and b[0]>=0:
             masked=self.masked_index(node,name,facts,parameters,depth)
             if masked is not None:return masked
             return (0,min(a[1],b[1]))
         if op=='&' and (a[0]>=0 or b[0]>=0):return (0,a[1] if a[0]>=0 else b[1])
         if op in ('|','^') and a[0]>=0 and b[0]>=0:return self.fit(0,(1<<max(a[1],b[1]).bit_length())-1,node)
-        return WIDE[typ]
+        return self.W[typ]
     def call(self,node,name,facts,parameters,depth):
         target=callee(node);typ=integer_type(type_of(node))
         if target=='__builtin_expect' and len(children(node))==3:return self.value(children(node)[1],name,facts,parameters,depth+1)
         function=self.analyzer.functions.get(target)
-        if function is None or self.analyzer.boundary(target) or depth>=MAX_DEPTH:return WIDE[typ]
+        if function is None or self.analyzer.boundary(target) or depth>=MAX_DEPTH:return self.W[typ]
         callee_facts=self.facts_for(target)
         arguments=children(node)[1:];bound={}
         for parameter,argument in zip([c for c in children(function) if c.get('kind')=='ParmVarDecl'],arguments):
@@ -686,7 +816,7 @@ class Values:
                     converted=self.fit(*value,parameter)
                     if converted is not None:bound[parameter['id']]=converted
         returns=[n for n in walk(function) if n.get('kind')=='ReturnStmt']
-        if not returns or any(not children(r) for r in returns):return WIDE[typ]
+        if not returns or any(not children(r) for r in returns):return self.W[typ]
         # Pointer arguments carry their alias values into the callee (fields of automatic records).
         entered=False
         if self.pointer_env and self.call_stack and target not in self.call_stack[-1]:
@@ -697,7 +827,7 @@ class Values:
         try:values=[self.value(children(r)[0],target,callee_facts,bound,depth+1) for r in returns]
         finally:
             if entered:self.pointer_env.pop();self.call_stack.pop()
-        if any(v is None for v in values):return WIDE[typ]
+        if any(v is None for v in values):return self.W[typ]
         self.note('calls',dict(caller=name,callee=target,location=self.analyzer.location(node)))
         return self.fit(min(v[0] for v in values),max(v[1] for v in values),node)
     def refine(self,node,base,name,facts,parameters,depth,empty=None):

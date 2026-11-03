@@ -100,11 +100,13 @@ class ConstantExpressionTests(unittest.TestCase):
                 plan=fixture.analyze(fixture.parse(stage,'void good(State *state){'+body+'}'),'good')
                 self.assertFalse(plan['blockers'],plan['blockers'])
                 self.assertEqual({w['path'] for w in plan['state_writes']},{'osrec_argument_state()->values[%d]'%n for n in range(8)})
+            # A condition false on entry: the body never runs and writes nothing.
+            plan=fixture.analyze(fixture.parse(stage,'void never(State *state){for(unsigned i=(1U<<3);i<(1U<<3);++i)state->values[i]=1;}'),'never')
+            self.assertFalse(plan['blockers'],plan['blockers']);self.assertFalse(plan['state_writes'])
             for body in (
                 'for(unsigned i=0;i<(1U<<3);++i){i=count;state->values[i]=1;}',
                 'for(unsigned i=0;i<(1U<<3);++i)((unsigned *)state->values)[i]=1;',
                 'for(unsigned i=0;i<count || i<(1U<<3);++i)state->values[i]=1;',
-                'for(unsigned i=(1U<<3);i<(1U<<3);++i)state->values[i]=1;',
             ):
                 plan=fixture.analyze(fixture.parse(stage,'void bad(State *state,unsigned count){'+body+'}'),'bad')
                 self.assertTrue(plan['blockers'])

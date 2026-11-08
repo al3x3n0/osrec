@@ -103,10 +103,25 @@ def replay(capture_dir,out,llvm_bin,qemu,timeout=300):
         process=subprocess.Popen(command,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=err)
         try:
             r=Remote(port,timeout=timeout)
-            # Stop at the continuation, or at any kernel-mode exception vector (a fault or interrupt the live call did not take).
-            stops=[continuation]+[vbar+o for o in (0x200,0x280,0x300,0x380)]
-            for s in stops:r.breakpoint(s)
-            start=time.time();r.resume();pc=r.wait(timeout);seconds=time.time()-start
+            # Stop at the continuation, or at a kernel-mode exception vector entered more often than the live call entered
+            # it: a fault or interrupt the live call did not take. One it took (a user-access page fault the kernel fixes
+            # up) is followed; the instruction comparison still checks where and when it happens.
+            vectors=[vbar+o for o in (0x200,0x280,0x300,0x380)]
+            live_entries={v:0 for v in vectors}
+            for line in (capture_dir/'trace.txt').read_text().splitlines():
+                if line.startswith('I ') and int(line.split()[1],16) in live_entries:live_entries[int(line.split()[1],16)]+=1
+            for s in [continuation]+vectors:r.breakpoint(s)
+            start=time.time();entered={v:0 for v in vectors}
+            r.resume();pc=r.wait(timeout)
+            while pc in entered:
+                entered[pc]+=1
+                if entered[pc]>live_entries[pc]:break
+                # Step off the vector's breakpoint (gdbstub would report it again), then run on.
+                r.breakpoint(pc,insert=False);r.step();r.breakpoint(pc)
+                pc=r.register('pc')
+                if pc==continuation:break
+                r.resume();pc=r.wait(timeout)
+            seconds=time.time()-start
             mode=r.register('cpsr')&15
             returned=dict(gprs=r.registers(GPRS),sp_el0=r.register('SP_EL0'),tpidr_el0=r.register('TPIDR_EL0'))
             data=[int(p,16) for p in capture['pages']['data']]

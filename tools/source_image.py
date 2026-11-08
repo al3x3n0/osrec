@@ -1,0 +1,391 @@
+#!/usr/bin/env python3
+"""Freestanding kernel image from post-boot state: the closure's own code, post-boot data, our own page tables.
+
+build: from a state dump (kernel_state_dump.py), the kernel build (vmlinux) and a profile closure
+(kernel_code_closure.py output), write an ELF image whose PT_LOAD segments are the data blob and whose
+manifest lists every mapped page:
+
+- kernel text: bytes of the closure's functions as the live kernel holds them after boot (its own build plus
+  boot-time patching); every other text word is `hvc #1`, a trap into the image's EL2 stop handler;
+- zero pages (the allocator's untouched memory among them) are mapped without blob bytes (RAM starts zeroed);
+- data pages reachable from the closure's data roots (conservative pointer scan), all of vmemmap, the kernel
+  image's data, the kernel stack, the live translation-table pages and the user pages are loaded as captured;
+- any other page (non-zero, unreachable; MMIO) is unmapped: touching it is a kernel fault, which reaches trap
+  code and stops the run.
+
+Virtual and physical addresses stay those of the live kernel. Our own TTBR1 tables (outside the kernel's RAM)
+map exactly these pages with the live attributes. The EL2 stub restores the captured EL1 and user state and
+returns to the user SVC instruction; the application is the captured user process itself, continuing its own
+call sequence.
+
+run: execute the image (or the native checkpoint) under a gdbstub and record the syscall sequence: number,
+arguments and result of every call, until the image stops (trap) or the call limit. compare: two recordings.
+"""
+import argparse,bisect,collections,hashlib,json,mmap,os,re,struct,subprocess,sys,time
+from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parent))
+from kernel_source_verify import Elf
+from kernel_boundary_replay import stub_source,elf as elf_image
+from gdb_remote import Remote,Exited
+from svc_boundary import free_port,validate_contract
+import qemu_vm_checkpoint as machine
+
+ROOT=Path(__file__).resolve().parents[1];FORMAT='osrec-source-image-v1';PAGE=4096
+LLVM=Path('/opt/homebrew/opt/llvm@16/bin');QEMU='qemu-system-aarch64'
+HVC=0xd4000022  # hvc #1
+IMAGE_RAM_MB=1024;PRIVATE=0x70000000  # our tables and stub: above the kernel's 512 MiB, inside the image's RAM
+# QEMU virt loads its device tree at the RAM base; blob pages there are staged above and copied by the stub.
+DTB=(0x40000000,0x40100000);STAGE=0x78000000
+ATTRS=((1<<12)-1)&~3|((0x3fff)<<50)   # descriptor attribute bits [11:2] and [63:50]
+CONTIGUOUS=1<<52;NT=1<<16
+
+
+class Ram:
+    """A RAM dump and the live EL1&0 translation tables in it."""
+    def __init__(self,dump):
+        self.state=json.load(open(Path(dump)/'state.json'));self.base=self.state['ram']['base'];self.size=self.state['ram']['size']
+        self.file=open(Path(dump)/'ram.bin','rb');self.ram=mmap.mmap(self.file.fileno(),0,access=mmap.ACCESS_READ)
+        sr=self.state['cpu']['sysregs'];self.sysregs=sr;tcr=sr['TCR_EL1']
+        self.bits={1:64-((tcr>>16)&0x3f),0:64-(tcr&0x3f)}
+        self.roots={1:sr['TTBR1_EL1']&((1<<48)-1)&~0xfff,0:sr['TTBR0_EL1']&((1<<48)-1)&~0xfff}
+    def page(self,pa):
+        o=pa-self.base
+        return self.ram[o:o+PAGE] if 0<=o and o+PAGE<=self.size else None
+    def q(self,pa):
+        o=pa-self.base
+        return struct.unpack_from('<Q',self.ram,o)[0] if 0<=o<=self.size-8 else None
+    def start(self,upper):return 3-(self.bits[upper]-12-1)//9
+    def mappings(self,upper):
+        """Every live leaf as 4 KiB pages: [(va, pa, leaf descriptor)] plus the table pages walked."""
+        bits=self.bits[upper];start=self.start(upper);leaves=[];tables=[]
+        def walk(table,level,prefix):
+            tables.append(table);shift=12+9*(3-level)
+            count=1<<(bits-shift) if level==start else 512
+            for i in range(count):
+                d=self.q(table+8*i)
+                if d is None or not d&1:continue
+                va=prefix|(i<<shift)
+                if level<3 and d&2:walk(d&((1<<48)-1)&~0xfff,level+1,va);continue
+                if level==3 and not d&2:continue
+                base=d&((1<<48)-1)&~((1<<shift)-1)
+                for k in range(0,1<<shift,PAGE):leaves.append((va+k,base+k,d))
+        top=((1<<64)-(1<<bits)) if upper else 0
+        walk(self.roots[upper],start,top);return leaves,tables
+
+
+def text_ranges(vmlinux):
+    """[(low, high)] of executable sections and the function extents of vmlinux."""
+    e=Elf(vmlinux);SHF_EXECINSTR=4
+    sections=[(s['addr'],s['addr']+s['size']) for s in e.sections if s['flags']&SHF_EXECINSTR and s['addr'] and not s['name'].startswith('.init')]
+    return e,sections
+
+
+def closure_extents(closure,e):
+    """[(low, high, name)] of the closure's functions in vmlinux (st_size, or up to the next symbol)."""
+    names=set(closure['closure']);syms=sorted(((s['value'],s) for s in e.symbols if s['value'] and s['shndx'] and s['type'] in (0,2) and s['name'] and not s['name'].startswith('$')),key=lambda x:x[0])
+    starts=[a for a,_ in syms];out={}
+    for i,(a,s) in enumerate(syms):
+        if s['name'] not in names:continue
+        end=a+s['size'] if s['type']==2 and s['size'] else next((b for b in starts[i+1:] if b>a),a+4)
+        out[a]=max(out.get(a,a),end)
+    return sorted((a,b) for a,b in out.items())
+
+
+def reachable(ram,leaves,closure,e,extra_roots):
+    """Physical pages reachable from the data roots by a conservative pointer scan (upper bound on the state)."""
+    by_va={va:pa for va,pa,_ in leaves}
+    pcpu=next((s for s in e.sections if s['name']=='.data..percpu'),None);tp=ram.sysregs['TPIDR_EL1']
+    roots=[]
+    for d in closure['data_roots']:
+        a=d['address']
+        if pcpu and pcpu['addr']<=a<pcpu['addr']+pcpu['size']:a+=tp
+        roots+=range(a&~0xfff,a+max(d['size'],8),PAGE)
+    roots+=[int(x,16) for x in closure['unnamed_data']]+extra_roots
+    seen=set();queue=collections.deque()
+    def add(va):
+        pa=by_va.get(va&~0xfff)
+        if pa is not None and pa not in seen:seen.add(pa);queue.append(pa)
+    for r in roots:add(r)
+    while queue:
+        data=ram.page(queue.popleft())
+        if data is None:continue
+        for (w,) in struct.iter_unpack('<Q',data):
+            if w>>48==0xffff:add(w)
+    return seen
+
+
+def boundary_extents(profile,e):
+    """[(low, high, name)] of the functions the profile declares boundaries (they become trap code)."""
+    patterns=[re.compile(x) for x in profile['boundaries'].values()]
+    syms=sorted(((s['value'],s) for s in e.symbols if s['value'] and s['shndx'] and s['type'] in (0,2) and s['name'] and not s['name'].startswith('$')),key=lambda x:x[0])
+    starts=[a for a,_ in syms];out=[]
+    for i,(a,s) in enumerate(syms):
+        if not any(p.fullmatch(s['name']) for p in patterns):continue
+        end=a+s['size'] if s['type']==2 and s['size'] else next((b for b in starts[i+1:] if b>a),a+4)
+        out.append((a,end,s['name']))
+    return sorted(out)
+
+
+def build(dump,vmlinux,profile_path,closure_path,out,state_mode):
+    out=Path(out);out.mkdir(parents=True,exist_ok=False)
+    ram=Ram(dump);e,text=text_ranges(vmlinux);profile=json.load(open(profile_path))
+    leaves,live_tables=ram.mappings(1);user,user_tables=ram.mappings(0)
+    def in_text(va):return any(lo<=va<hi for lo,hi in text)
+    if closure_path:
+        # Only the closure's functions: every other text word traps.
+        closure=json.load(open(closure_path));ext=closure_extents(closure,e);starts=[a for a,_ in ext]
+        def included(va):
+            i=bisect.bisect_right(starts,va)-1;return i>=0 and va<ext[i][1]
+        code_mode='closure'
+    else:
+        # The whole persistent kernel text; only the profile's boundary functions trap.
+        closure=None;cuts=boundary_extents(profile,e);starts=[a for a,_,_ in cuts]
+        def included(va):
+            i=bisect.bisect_right(starts,va)-1;return not (i>=0 and va<cuts[i][1])
+        code_mode='whole';ext=cuts
+    sym=lambda n:next(s['value'] for s in e.symbols if s['name']==n)
+    image=(sym('_text'),sym('_end'));init=(sym('__init_begin'),sym('__init_end'))
+    vmemmap_start=0xfffffc0000000000
+    sp=ram.state['cpu']['sp'];stack=list(range((sp-1)&~0x3fff,((sp-1)&~0x3fff)+0x4000,PAGE))
+    if state_mode=='reachable' and closure is None:raise ValueError('reachable state needs a closure (its data roots)')
+    reach=reachable(ram,leaves,closure,e,stack) if state_mode=='reachable' else None
+    always=set(live_tables)|set(user_tables)|{pa for _,pa,_ in user}
+    zero=bytes(PAGE);mapped=[];blob={};counts=collections.Counter()
+    devices=[(int(x['pa'],16),int(x['pa'],16)+int(x['size'],16)) for x in profile.get('devices',[])]
+    for va,pa,d in leaves:
+        data=ram.page(pa)
+        if data is None:
+            # MMIO: unmapped (an access stops the run), except the profile's devices, which pass through to the
+            # image machine's own device at the same physical address.
+            if any(lo<=pa<hi for lo,hi in devices):counts['device (pass-through)']+=1;mapped.append((va,pa,d,'device'));continue
+            counts['outside RAM (MMIO): unmapped']+=1;continue
+        if image[0]<=va<image[1] and in_text(va):
+            words=bytearray(data)
+            for k in range(0,PAGE,4):
+                if not included(va+k):words[k:k+4]=HVC.to_bytes(4,'little')
+            blob[pa]=bytes(words);kind='text'
+        elif image[0]<=va<image[1] and init[0]<=va<init[1]:counts['freed init image alias: unmapped']+=1;continue
+        elif data==zero:kind='zero'
+        elif image[0]<=va<image[1]:blob[pa]=data;kind='image data'
+        elif va>=vmemmap_start:blob[pa]=data;kind='vmemmap'
+        elif reach is None or pa in reach or pa in always or va in stack:blob.setdefault(pa,data);kind='data'
+        else:counts['unreachable: unmapped']+=1;continue
+        counts[kind]+=1;mapped.append((va,pa,d,kind))
+    # Text pages are also visible through the linear map; there they keep the live bytes (data reads only).
+    for pa in always:
+        data=ram.page(pa)
+        if data is not None and data!=zero:blob.setdefault(pa,data)
+    # Our TTBR1 tables over exactly the mapped pages, with the live leaf attributes as 4 KiB page descriptors.
+    bits=ram.bits[1];start=ram.start(1);tables={};next_table=[PRIVATE]
+    def table(key):
+        if key not in tables:tables[key]=(next_table[0],bytearray(PAGE));next_table[0]+=PAGE
+        return tables[key]
+    root=table(('root',))
+    for va,pa,d,_ in mapped:
+        node=root
+        for level in range(start,3):
+            shift=12+9*(3-level);i=(va>>shift)&((1<<(bits-shift))-1 if level==start else 511)
+            child=table((level+1,va>>(shift)))
+            struct.pack_into('<Q',node[1],8*i,child[0]|3);node=child
+        leaf=(d&ATTRS&~CONTIGUOUS&~NT)|pa|3
+        struct.pack_into('<Q',node[1],8*((va>>12)&511),leaf)
+    ttbr1=(ram.sysregs['TTBR1_EL1']&~((1<<48)-1))|root[0]
+    stub_at=next_table[0]+PAGE
+    capture=dict(entry=ram.state['cpu'],trap=dict(site=ram.sysregs['ELR_EL1']-4))
+    capture['entry']=dict(capture['entry'],sysregs=dict(capture['entry']['sysregs'],TTBR1_EL1=ttbr1))
+    source=stub_source(capture)
+    # EL2 stop handler: every EL2 vector records ESR/ELR/FAR in x0-x2 and the vector offset in x3, then stops.
+    vectors=['.balign 2048','el2_vectors:']
+    for k in range(16):vectors+=['.balign 128','    mov x3,#%d'%(k*0x80),'    b el2_stop']
+    vectors+=['el2_stop:','    mrs x0,esr_el2','    mrs x1,elr_el2','    mrs x2,far_el2','.global el2_stopped','el2_stopped:','    b el2_stopped']
+    source=source.replace('    mov x0,#(1<<31)\n','    adr x0,el2_vectors\n    msr vbar_el2,x0\n    mov x0,#(1<<31)\n',1)
+    source=source.replace('.balign 16\nregisters:','\n'.join(vectors)+'\n.balign 16\nregisters:',1)
+    staged=sorted(pa for pa in blob if DTB[0]<=pa<DTB[1])
+    copy=['    adr x4,staged_pages','    mov x5,#%d'%len(staged),'1:  cbz x5,3f','    ldp x6,x7,[x4],#16','    mov x9,#512',
+          '2:  ldr x10,[x6],#8','    str x10,[x7],#8','    subs x9,x9,#1','    b.ne 2b','    sub x5,x5,#1','    b 1b','3:  dc civac,xzr' if False else '3:']
+    source=source.replace('    mov x0,#(1<<31)\n','\n'.join(copy)+'\n    mov x0,#(1<<31)\n',1)
+    source+='.balign 16\nstaged_pages:\n'+''.join('    .quad 0x%x,0x%x\n'%(STAGE+i*PAGE,pa) for i,pa in enumerate(staged))
+    (out/'stub.S').write_text(source)
+    subprocess.run([str(LLVM/'clang'),'--target=aarch64-none-elf','-mcpu=cortex-a53','-nostdlib','-static','-fuse-ld=lld','-Wl,-Ttext=0x%x'%stub_at,'-Wl,-e,_start',
+                    str(out/'stub.S'),'-o',str(out/'stub.elf')],check=True,capture_output=True,text=True)
+    subprocess.run([str(LLVM/'llvm-objcopy'),'-O','binary','--only-section=.text',str(out/'stub.elf'),str(out/'stub.bin')],check=True)
+    nm=subprocess.run([str(LLVM/'llvm-nm'),str(out/'stub.elf')],capture_output=True,text=True,check=True).stdout
+    stopped=int(next(l.split()[0] for l in nm.splitlines() if l.endswith(' el2_stopped')),16)
+    pages={pa:data for pa,data in blob.items() if not DTB[0]<=pa<DTB[1]}
+    for i,pa in enumerate(staged):pages[STAGE+i*PAGE]=blob[pa]
+    for address,data in tables.values():pages[address]=bytes(data)
+    code=(out/'stub.bin').read_bytes();code+=bytes(-len(code)%PAGE)
+    for k in range(0,len(code),PAGE):pages[stub_at+k]=code[k:k+PAGE]
+    segments=[];run_start=None;run=b''
+    for pa in sorted(pages):
+        if run_start is not None and pa==run_start+len(run):run+=pages[pa]
+        else:
+            if run_start is not None:segments.append((run_start,run))
+            run_start,run=pa,pages[pa]
+    segments.append((run_start,run))
+    (out/'image.elf').write_bytes(elf_image(segments,stub_at))
+    manifest=dict(format=FORMAT,dump=str(Path(dump).resolve()),vmlinux=str(Path(vmlinux).resolve()),profile=str(Path(profile_path).resolve()),
+                  closure=str(Path(closure_path).resolve()) if closure_path else None,code=code_mode,state=state_mode,
+                  functions=len(ext),mapped_pages=dict(counts),blob_pages=len(blob),table_pages=len(tables),ttbr1=hex(ttbr1),stub=hex(stub_at),stop=hex(stopped),
+                  vector_base=hex(ram.sysregs['VBAR']),image_ram_mb=IMAGE_RAM_MB,
+                  pages=[dict(va=hex(va),pa=hex(pa),kind=kind) for va,pa,_,kind in mapped if kind!='zero'],
+                  zero_pages=sum(1 for *_,k in mapped if k=='zero'),
+                  image_sha256=hashlib.sha256((out/'image.elf').read_bytes()).hexdigest())
+    (out/'manifest.json').write_text(json.dumps(manifest,indent=1)+'\n')
+    if code_mode=='whole':manifest['boundary_functions']=[n for _,_,n in ext]
+    return {k:manifest[k] for k in ('code','state','functions','mapped_pages','blob_pages','table_pages','stop')}
+
+
+SVC_OFFSET=0x400;GPRS=['x%d'%i for i in range(31)]
+
+
+def record(r,svc_vector,stop,limit,timeout,symbols=None,counters=None):
+    """Syscalls from the current point: [{number, arguments, result}] and how the run ended."""
+    calls=[];r.breakpoint(svc_vector);counters=counters or {};counts={n:0 for n in counters}
+    for a in counters.values():r.breakpoint(a)
+    if stop is not None:r.breakpoint(stop)
+    pending=None;end=None;spurious=0;spurious_pcs=[]
+    r.resume()
+    while True:
+        try:pc=r.wait(timeout)
+        except Exited:end=dict(reason='exited');break
+        except Exception as error:end=dict(reason='timeout',detail=str(error));break
+        if stop is not None and pc==stop:
+            g=r.registers(['x0','x1','x2','x3'])
+            end=dict(reason='trap',esr_el2=hex(g['x0']),elr_el2=hex(g['x1']),far_el2=hex(g['x2']),vector=hex(g['x3']),
+                     el1=dict(esr=hex(r.register('ESR_EL1')),far=hex(r.register('FAR_EL1')),elr=hex(r.register('ELR_EL1'))))
+            if symbols:
+                end['function']=symbols(g['x1']-4)
+                # Kernel backtrace by the AArch64 frame records (x29 chain); the first return address is x30.
+                frames=[r.register('x30')];fp=r.register('x29')
+                for _ in range(32):
+                    if fp>>48!=0xffff:break
+                    try:record_=r.read(fp,16)
+                    except Exception:break
+                    fp,lr=int.from_bytes(record_[:8],'little'),int.from_bytes(record_[8:],'little')
+                    if not lr:break
+                    frames.append(lr)
+                end['backtrace']=[symbols(f&((1<<64)-1 if f>>48==0xffff else 0) or f) for f in frames]
+            break
+        hit=next((n for n,a in counters.items() if a==pc),None)
+        if hit:
+            counts[hit]+=1;r.breakpoint(pc,False);r.step();r.breakpoint(pc);r.resume();continue
+        if pc==svc_vector and r.register('ESR_EL1')>>26!=0x15:
+            # Not an SVC: a user exception (page fault) entering the same vector. Recorded as an event.
+            calls.append(dict(event='exception',number=-1,arguments=[r.register('ESR_EL1'),r.register('FAR_EL1'),r.register('ELR_EL1')],result=None))
+            r.breakpoint(svc_vector,False);r.step();r.breakpoint(svc_vector);r.resume();continue
+        if pc==svc_vector:
+            g=r.registers(GPRS[:9]);ret=r.register('ELR_EL1')
+            pending=dict(number=g['x8'],arguments=[g['x%d'%i] for i in range(6)],returns_to=ret)
+            if len(calls)>=limit:end=dict(reason='limit');break
+            r.breakpoint(ret);r.breakpoint(svc_vector,False);r.step();r.breakpoint(svc_vector);r.resume();continue
+        if pending and pc==pending['returns_to']:
+            pending['result']=r.register('x0');r.breakpoint(pc,False);calls.append(pending);pending=None;r.resume();continue
+        # A stop at a user address with no breakpoint left there (the gdbstub can report a just-removed breakpoint
+        # again around an interrupt on the live machine): counted and resumed.
+        if pc>>48==0 and not (pending and pc==pending['returns_to']):
+            spurious+=1;spurious_pcs.append(pc)
+            if len(spurious_pcs)>=1000 and len(set(spurious_pcs[-1000:]))==1:end=dict(reason='stuck',pc=hex(pc),calls=len(calls));break
+            # Make progress past it: drop any breakpoint left at this address, execute one instruction, go on.
+            try:r.breakpoint(pc,False)
+            except Exception:pass
+            r.step();r.resume();continue
+        end=dict(reason='unexpected stop',pc=hex(pc));break
+    if pending:calls.append(dict(pending,result=None))
+    if counters:end['counts']=counts
+    if spurious:end['spurious_stops']=spurious;end['spurious_pcs']=sorted({hex(p) for p in spurious_pcs})[:20]
+    return calls,end
+
+
+def run_image(image_dir,out,limit,timeout,count=()):
+    image_dir=Path(image_dir).resolve();out=Path(out);out.mkdir(parents=True,exist_ok=False)
+    m=json.load(open(image_dir/'manifest.json'));port=free_port()
+    e=Elf(m['vmlinux']);syms=sorted((s['value'],s['name']) for s in e.symbols if s['type'] in (0,2) and s['value'] and s['shndx'] and s['name'] and not s['name'].startswith('$'))
+    starts=[a for a,_ in syms]
+    def symbol(a):
+        i=bisect.bisect_right(starts,a)-1;return '%s+0x%x'%(syms[i][1],a-syms[i][0]) if i>=0 else hex(a)
+    command=[QEMU,'-M','virt-9.2,secure=off,virtualization=on','-cpu','cortex-a53','-accel','tcg','-smp','1','-m','%dM'%m['image_ram_mb'],'-nodefaults',
+             '-display','none','-monitor','none','-serial','file:%s'%(out/'console.txt'),'-semihosting-config','enable=off',
+             '-device','loader,file=%s,cpu-num=0'%(image_dir/'image.elf'),'-S','-gdb','tcp:127.0.0.1:%d'%port]
+    with open(out/'qemu.stderr.log','wb') as err:
+        p=subprocess.Popen(command,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=err)
+        try:
+            r=Remote(port,timeout=timeout);start=time.time()
+            address={s['name']:s['value'] for s in e.symbols if s['name'] in count}
+            calls,end=record(r,int(m['vector_base'],16)+SVC_OFFSET,int(m['stop'],16),limit,timeout,symbol,{n:address[n] for n in count})
+            if end.get('function'):
+                cut=next((label for label,pattern in json.load(open(m['profile']))['boundaries'].items() if re.fullmatch(pattern,end['function'].split('+')[0])),None)
+                end['boundary']=cut
+        finally:
+            p.terminate();p.wait()
+    report=dict(kind='image',image=str(image_dir),calls=calls,end=end,seconds=round(time.time()-start,2))
+    (out/'calls.json').write_text(json.dumps(report,indent=1)+'\n');return report
+
+
+def run_native(checkpoint,contract,select,occurrence,out,limit,timeout):
+    """The same recording on the live kernel, from the selected call of the checkpointed run."""
+    checkpoint=Path(checkpoint).resolve();out=Path(out).resolve();out.mkdir(parents=True,exist_ok=False)
+    spec=machine.verify(checkpoint);c=validate_contract(json.loads(Path(contract).read_text()));port=free_port()
+    with machine.Machine(checkpoint,'native',incoming=True,timeout=timeout,execution_dir=out,observer=('-gdb','tcp:127.0.0.1:%d'%port)) as mach:
+        mach.request('migrate-incoming',dict(uri='file:'+str(checkpoint/'vmstate.bin')));mach.migration_complete()
+        r=Remote(port,timeout=timeout);svc=r.register(c['entry']['vector_base_register'])+c['entry']['synchronous_vector_offset']
+        r.breakpoint(svc);r.resume();os.write(mach.serial_in,spec['protocol']['continue_line'].encode());seen=0
+        while True:
+            pc=r.wait(timeout);g=r.registers(GPRS[:9])
+            call=dict(number=g['x8'],**{'x%d'%i:g['x%d'%i] for i in range(6)})
+            if all(call[k]==v for k,v in select.items()):
+                seen+=1
+                if seen==occurrence:break
+            r.breakpoint(svc,False);r.step();r.breakpoint(svc);r.resume()
+        # Stopped at the selected entry: record from it (record() resumes onto the same breakpoint first).
+        r.breakpoint(svc,False);g=r.registers(GPRS[:9]);ret=r.register('ELR_EL1')
+        first=dict(number=g['x8'],arguments=[g['x%d'%i] for i in range(6)],returns_to=ret)
+        r.breakpoint(ret);r.resume();r.wait(timeout);first['result']=r.register('x0');r.breakpoint(ret,False)
+        calls,end=record(r,svc,None,limit-1,timeout)
+        if end['reason']!='exited':r.detach()
+    report=dict(kind='native',checkpoint=str(checkpoint),calls=[first]+calls,end=end)
+    (out/'calls.json').write_text(json.dumps(report,indent=1)+'\n');return report
+
+
+def compare(a,b):
+    x=json.load(open(a))['calls'];y=json.load(open(b))['calls'];rows=[];first=None
+    # A user exception repeated identically at once (the instruction retried after the kernel resolved it; the
+    # live machine can also report the vector stop twice) has no further effect: consecutive duplicates collapse.
+    def collapse(z):
+        out=[]
+        for c in z:
+            if c.get('event') and out and out[-1].get('event') and out[-1]['arguments']==c['arguments']:continue
+            out.append(c)
+        return out,len(z)-len(out)
+    (x,cx),(y,cy)=collapse(x),collapse(y)
+    events=[sum(1 for c in z if c.get('event')) for z in (x,y)]
+    for i,(p,q) in enumerate(zip(x,y)):
+        same=p['number']==q['number'] and p['arguments']==q['arguments'] and p['result']==q['result']
+        if not same and first is None:first=i
+        rows.append(same)
+    return dict(compared=len(rows),identical=sum(rows),first_difference=first,lengths=[len(x),len(y)],exception_events=events,collapsed_repeats=[cx,cy])
+
+
+def main():
+    p=argparse.ArgumentParser(description=__doc__);sub=p.add_subparsers(dest='command',required=True)
+    b=sub.add_parser('build');b.add_argument('--dump',required=True);b.add_argument('--vmlinux',required=True);b.add_argument('--profile',required=True)
+    b.add_argument('--closure',help='restrict code to this closure (kernel_code_closure.py); default: whole kernel text minus boundaries')
+    b.add_argument('--out',required=True);b.add_argument('--state',choices=['reachable','full'],default='full')
+    r=sub.add_parser('run');r.add_argument('--image',required=True);r.add_argument('--out',required=True)
+    r.add_argument('--limit',type=int,default=10000);r.add_argument('--timeout',type=int,default=120)
+    r.add_argument('--count',action='append',default=[],help='kernel function whose entries are counted (e.g. __switch_to)')
+    n=sub.add_parser('native');n.add_argument('--checkpoint',required=True);n.add_argument('--contract',default=str(ROOT/'integrations/linux_aarch64/svc-boundary.json'))
+    n.add_argument('--select',action='append',required=True);n.add_argument('--occurrence',type=int,default=1);n.add_argument('--out',required=True)
+    n.add_argument('--limit',type=int,default=10000);n.add_argument('--timeout',type=int,default=120)
+    c=sub.add_parser('compare');c.add_argument('a');c.add_argument('b')
+    a=p.parse_args()
+    if a.command=='build':print(json.dumps(build(a.dump,a.vmlinux,a.profile,a.closure,a.out,a.state)))
+    elif a.command=='run':
+        rep=run_image(a.image,a.out,a.limit,a.timeout,a.count);print(json.dumps(dict(calls=len(rep['calls']),end=rep['end'])))
+    elif a.command=='native':
+        select={k:int(v,0) for k,_,v in (x.partition('=') for x in a.select)}
+        rep=run_native(a.checkpoint,a.contract,select,a.occurrence,a.out,a.limit,a.timeout);print(json.dumps(dict(calls=len(rep['calls']),end=rep['end'])))
+    else:print(json.dumps(compare(a.a,a.b)))
+
+
+if __name__=='__main__':main()

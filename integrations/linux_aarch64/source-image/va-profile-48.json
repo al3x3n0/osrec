@@ -53,5 +53,106 @@
    "start": "0xffffffffff432000",
    "end": "0xffffffffff800000"
   }
+ ],
+ "derived": [
+  {
+   "name": "page_to_virt",
+   "expr": "PAGE_OFFSET - (VMEMMAP_START << 6)",
+   "offsets": [
+    0,
+    4095
+   ],
+   "note": "(page << 6) + this: page_address(), plus an offset within the page"
+  },
+  {
+   "name": "PAGE_OFFSET",
+   "expr": "PAGE_OFFSET",
+   "offsets": [
+    0,
+    0
+   ]
+  },
+  {
+   "name": "PAGE_END",
+   "expr": "PAGE_END",
+   "offsets": [
+    -1,
+    0
+   ]
+  },
+  {
+   "name": "VMEMMAP_START",
+   "expr": "VMEMMAP_START",
+   "offsets": [
+    0,
+    63
+   ],
+   "note": "plus a struct page field offset"
+  },
+  {
+   "name": "VMEMMAP_END",
+   "expr": "VMEMMAP_END",
+   "offsets": [
+    -1,
+    0
+   ]
+  },
+  {
+   "name": "VMALLOC_START",
+   "expr": "VMALLOC_START",
+   "offsets": [
+    -1,
+    0
+   ]
+  },
+  {
+   "name": "VMALLOC_END",
+   "expr": "VMALLOC_END",
+   "offsets": [
+    -1,
+    0
+   ]
+  },
+  {
+   "name": "MODULES_VADDR",
+   "expr": "MODULES_VADDR",
+   "offsets": [
+    -1,
+    0
+   ]
+  },
+  {
+   "name": "PCI_IO_START",
+   "expr": "PCI_IO_START",
+   "offsets": [
+    0,
+    16777215
+   ],
+   "note": "plus an I/O port number"
+  },
+  {
+   "name": "PCI_IO_END",
+   "expr": "PCI_IO_END",
+   "offsets": [
+    -1,
+    0
+   ]
+  },
+  {
+   "name": "FIXADDR_TOP",
+   "expr": "FIXADDR_TOP",
+   "offsets": [
+    -1,
+    0
+   ]
+  },
+  {
+   "name": "FIXADDR_TOT_START",
+   "expr": "FIXADDR_TOT_START",
+   "offsets": [
+    -1,
+    0
+   ]
+  }
  ]
 }

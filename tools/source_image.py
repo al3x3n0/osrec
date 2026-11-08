@@ -126,7 +126,7 @@ def boundary_extents(profile,e):
     return sorted(out)
 
 
-def build(dump,vmlinux,profile_path,closure_path,out,state_mode,delta=0,dwarf_db=None):
+def build(dump,vmlinux,profile_path,closure_path,out,state_mode,delta=0,dwarf_db=None,linear_offset=0,va_profile=None):
     out=Path(out);out.mkdir(parents=True,exist_ok=False)
     ram=Ram(dump);e,text=text_ranges(vmlinux);profile=json.load(open(profile_path))
     leaves,live_tables=ram.mappings(1);user,user_tables=ram.mappings(0)
@@ -175,6 +175,25 @@ def build(dump,vmlinux,profile_path,closure_path,out,state_mode,delta=0,dwarf_db
     for pa in always:
         data=ram.page(pa)
         if data is not None and data!=zero:blob.setdefault(pa,data)
+    def apply(patches):
+        for pa,(old,new,why) in patches.items():
+            page=pa&~0xfff
+            if page not in blob:
+                if ram.page(page)!=zero:raise ValueError('relocation patches an unloaded page at 0x%x (%s)'%(pa,why))
+                blob[page]=zero
+            b=bytearray(blob[page]);struct.pack_into('<Q',b,pa-page,new);blob[page]=bytes(b)
+    # Moving the linear map (and vmemmap) by linear_offset (va_relocation.py): patch the state on the old layout;
+    # pages are mapped at their moved virtual addresses below.
+    va_move=lambda va:va;va_cpu={};va_relocation=None
+    if linear_offset:
+        if delta:raise ValueError('RAM and linear-map relocation are not combined yet')
+        from va_relocation import relocate as relocate_va
+        symbols={}
+        for x in e.symbols:
+            if x['value'] and x['name']:symbols.setdefault(x['name'],x['value'])
+        from kernel_dwarf_db import load
+        patches,va_move,va_cpu,va_relocation=relocate_va(ram,symbols,json.load(open(va_profile)),linear_offset,{pa for _,pa,_ in user},load(dwarf_db))
+        apply(patches)
     # Moving RAM by delta (ram_relocation.py): patch stored physical addresses on the old layout, then place every
     # RAM page at its physical address + delta. Virtual addresses do not change.
     in_ram=lambda pa:ram.base<=pa<ram.base+ram.size
@@ -187,12 +206,7 @@ def build(dump,vmlinux,profile_path,closure_path,out,state_mode,delta=0,dwarf_db
         for x in e.symbols:
             if x['value'] and x['name']:symbols.setdefault(x['name'],x['value'])
         patches,relocation=relocate(ram,symbols,load(dwarf_db),delta)
-        for pa,(old,new,why) in patches.items():
-            page=pa&~0xfff
-            if page not in blob:
-                if ram.page(page)!=zero:raise ValueError('relocation patches an unloaded page at 0x%x (%s)'%(pa,why))
-                blob[page]=zero
-            b=bytearray(blob[page]);struct.pack_into('<Q',b,pa-page,new);blob[page]=bytes(b)
+        apply(patches)
         blob={moved(pa):data for pa,data in blob.items()}
     # Our TTBR1 tables over exactly the mapped pages, with the live leaf attributes as 4 KiB page descriptors.
     bits=ram.bits[1];start=ram.start(1);tables={};next_table=[PRIVATE]
@@ -201,6 +215,7 @@ def build(dump,vmlinux,profile_path,closure_path,out,state_mode,delta=0,dwarf_db
         return tables[key]
     root=table(('root',))
     for va,pa,d,_ in mapped:
+        va=va_move(va)
         node=root
         for level in range(start,3):
             shift=12+9*(3-level);i=(va>>shift)&((1<<(bits-shift))-1 if level==start else 511)
@@ -213,6 +228,7 @@ def build(dump,vmlinux,profile_path,closure_path,out,state_mode,delta=0,dwarf_db
     capture=dict(entry=ram.state['cpu'],trap=dict(site=ram.sysregs['ELR_EL1']-4))
     ttbr0=ram.sysregs['TTBR0_EL1'];ttbr0=(ttbr0&~((1<<48)-1)&~0xfff|ttbr0&0xfff)|moved(ram.roots[0])
     capture['entry']=dict(capture['entry'],sysregs=dict(capture['entry']['sysregs'],TTBR1_EL1=ttbr1,TTBR0_EL1=ttbr0))
+    if va_cpu:capture['entry']=dict(capture['entry'],sp=va_cpu['sp'],sysregs=dict(capture['entry']['sysregs'],TPIDR_EL1=va_cpu['TPIDR_EL1']))
     # The image machine's RAM (QEMU virt: from 0x40000000) must hold the moved RAM; our tables and stub stay outside it.
     top=max(moved(ram.base+ram.size-1)+1,PRIVATE+0x10000000);ram_mb=max(IMAGE_RAM_MB,(top-0x40000000+(1<<20)-1)>>20)
     if delta and moved(ram.base)<PRIVATE+0x10000000 and moved(ram.base+ram.size)>PRIVATE:raise ValueError('moved RAM overlaps the image tables at 0x%x'%PRIVATE)
@@ -250,13 +266,13 @@ def build(dump,vmlinux,profile_path,closure_path,out,state_mode,delta=0,dwarf_db
     manifest=dict(format=FORMAT,dump=str(Path(dump).resolve()),vmlinux=str(Path(vmlinux).resolve()),profile=str(Path(profile_path).resolve()),
                   closure=str(Path(closure_path).resolve()) if closure_path else None,code=code_mode,state=state_mode,
                   functions=len(ext),mapped_pages=dict(counts),blob_pages=len(blob),table_pages=len(tables),ttbr1=hex(ttbr1),stub=hex(stub_at),stop=hex(stopped),
-                  vector_base=hex(ram.sysregs['VBAR']),image_ram_mb=ram_mb,relocation=relocation,
+                  vector_base=hex(ram.sysregs['VBAR']),image_ram_mb=ram_mb,relocation=relocation,va_relocation=va_relocation,
                   pages=[dict(va=hex(va),pa=hex(pa),kind=kind) for va,pa,_,kind in mapped if kind!='zero'],
                   zero_pages=sum(1 for *_,k in mapped if k=='zero'),
                   image_sha256=hashlib.sha256((out/'image.elf').read_bytes()).hexdigest())
     (out/'manifest.json').write_text(json.dumps(manifest,indent=1)+'\n')
     if code_mode=='whole':manifest['boundary_functions']=[n for _,_,n in ext]
-    return {k:manifest[k] for k in ('code','state','functions','mapped_pages','blob_pages','table_pages','stop','image_ram_mb','relocation')}
+    return {k:manifest[k] for k in ('code','state','functions','mapped_pages','blob_pages','table_pages','stop','image_ram_mb','relocation','va_relocation')}
 
 
 SVC_OFFSET=0x400;GPRS=['x%d'%i for i in range(31)]
@@ -420,6 +436,8 @@ def main():
     b.add_argument('--out',required=True);b.add_argument('--state',choices=['reachable','full'],default='full')
     b.add_argument('--relocate',type=lambda v:int(v,0),default=0,help='move RAM by this many bytes (a multiple of 128 MiB)')
     b.add_argument('--dwarf-db',help='kernel_dwarf_db.py output (needed with --relocate)')
+    b.add_argument('--relocate-linear',type=lambda v:int(v,0),default=0,help='move the linear map (and vmemmap) by this many bytes')
+    b.add_argument('--va-profile',help='kernel_va_survey.py profile (needed with --relocate-linear)')
     r=sub.add_parser('run');r.add_argument('--image',required=True);r.add_argument('--out',required=True)
     r.add_argument('--limit',type=int,default=10000);r.add_argument('--timeout',type=int,default=120)
     r.add_argument('--count',action='append',default=[],help='kernel function whose entries are counted (e.g. __switch_to)')
@@ -429,7 +447,7 @@ def main():
     n.add_argument('--vmlinux',default=str(ROOT/'build/linux-kernel-clang19-20261108/vmlinux'),help='the live kernel build (its el0_svc result point)')
     c=sub.add_parser('compare');c.add_argument('a');c.add_argument('b')
     a=p.parse_args()
-    if a.command=='build':print(json.dumps(build(a.dump,a.vmlinux,a.profile,a.closure,a.out,a.state,a.relocate,a.dwarf_db)))
+    if a.command=='build':print(json.dumps(build(a.dump,a.vmlinux,a.profile,a.closure,a.out,a.state,a.relocate,a.dwarf_db,a.relocate_linear,a.va_profile)))
     elif a.command=='run':
         rep=run_image(a.image,a.out,a.limit,a.timeout,a.count);print(json.dumps(dict(calls=len(rep['calls']),end=rep['end'])))
     elif a.command=='native':

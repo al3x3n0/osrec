@@ -1,0 +1,57 @@
+{
+ "format": "osrec-kernel-va-profile-v1",
+ "parameters": {
+  "PAGE_OFFSET": "0xffff000000000000",
+  "PAGE_END": "0xffff800000000000",
+  "VA_BITS": "0x30",
+  "VA_BITS_MIN": "0x30",
+  "MODULES_VADDR": "0xffff800000000000",
+  "MODULES_END": "0xffff800080000000",
+  "KIMAGE_VADDR": "0xffff800080000000",
+  "VMALLOC_START": "0xffff800080000000",
+  "VMALLOC_END": "0xfffffdffbf800000",
+  "VMEMMAP_START": "0xfffffdffc0000000",
+  "VMEMMAP_END": "0xffffffffc0000000",
+  "FIXADDR_START": "0xffffffffff5f7000",
+  "FIXADDR_TOP": "0xffffffffff800000",
+  "FIXADDR_TOT_START": "0xffffffffff432000",
+  "PCI_IO_START": "0xffffffffc0800000",
+  "PCI_IO_END": "0xffffffffc1800000",
+  "PGDIR_SIZE": "0x8000000000",
+  "PUD_SIZE": "0x40000000",
+  "PMD_SIZE": "0x200000",
+  "TASK_SIZE_64": "0x1000000000000"
+ },
+ "regions": [
+  {
+   "name": "linear map",
+   "start": "0xffff000000000000",
+   "end": "0xffff800000000000"
+  },
+  {
+   "name": "modules",
+   "start": "0xffff800000000000",
+   "end": "0xffff800080000000"
+  },
+  {
+   "name": "image and vmalloc",
+   "start": "0xffff800080000000",
+   "end": "0xfffffdffbf800000"
+  },
+  {
+   "name": "vmemmap",
+   "start": "0xfffffdffc0000000",
+   "end": "0xffffffffc0000000"
+  },
+  {
+   "name": "PCI I/O",
+   "start": "0xffffffffc0800000",
+   "end": "0xffffffffc1800000"
+  },
+  {
+   "name": "fixmap",
+   "start": "0xffffffffff432000",
+   "end": "0xffffffffff800000"
+  }
+ ]
+}

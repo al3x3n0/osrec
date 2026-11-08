@@ -18,8 +18,8 @@ page), with no code change. What else must follow:
   sum lands in a vmalloc-backed chunk is lowered by OFFSET and keeps addressing the same place. Chunks come from
   the allocator's own lists (pcpu_chunk_lists, base_addr, pcpu_unit_offsets, pcpu_unit_size; layouts from DWARF).
 
-Values in a region but outside its used part are left and counted. Pointer-keyed hash tables (keyed by an object's
-address) are NOT rehashed here: see the report.
+Values in a region but outside its used part are left and counted. Tables keyed by addresses (dentry, mount,
+mountpoint and inode hashes) are rehashed by va_rehash.py; waiter tables must be empty.
 """
 import struct
 
@@ -107,8 +107,12 @@ def relocate(ram,symbols,profile,offset,user_pas,db):
             put(root+8*j,q(root+8*i),'TTBR1 top-level entry %d <- %d'%(j,i))
             if root+8*i not in patches:put(root+8*i,0,'TTBR1 top-level entry %d cleared'%i)
             moved+=1
+    # Tables keyed by addresses that moved: rehashed (overriding the plain pointer shifts of their links).
+    from va_rehash import rehash
+    lookup=next((x[3] for x in db['variables'] if x[0]=='in_lookup_hashtable'),8192)//8
+    rehashed=rehash(lambda a:ram.q(a),pa,pl['move'],lambda a,v,why:patches.__setitem__(a,(q(a),v,why)),lay,lambda n:symbols[n],lookup)
     cpu=dict(sp=pl['move'](ram.state['cpu']['sp']),TPIDR_EL1=(ram.sysregs['TPIDR_EL1']+offset)&((1<<64)-1))
     summary=dict(offset=hex(offset),vmemmap_offset=hex(pl['vm_offset']),pointers=counts,
-                 percpu_vmalloc_chunks=[(hex(a),hex(b)) for a,b in vm_chunks],top_level_entries_moved=moved,patches=len(patches),
-                 not_rehashed='pointer-keyed hash tables (dentry, inode, mount, private futex keys) keep their old buckets')
+                 percpu_vmalloc_chunks=[(hex(a),hex(b)) for a,b in vm_chunks],rehashed=rehashed,top_level_entries_moved=moved,patches=len(patches),
+                 )
     return patches,pl['move'],cpu,summary

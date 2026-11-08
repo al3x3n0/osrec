@@ -46,6 +46,13 @@ def dump(checkpoint,contract,select,out,occurrence=1,timeout=300):
         r.breakpoint(sync,False)
         state=dict(pc=pc,sp=r.register('sp'),cpsr=r.register('cpsr'),gprs=regs,sysregs=r.registers(SYSREGS),
                    fp=dict(v={'v%d'%i:'%032x'%r.register('v%d'%i) for i in range(32)},fpsr=r.register('fpsr'),fpcr=r.register('fpcr')))
+        # Every system register the gdbstub describes (by name; kernel_sysregs.py resolves names to encodings).
+        everything={}
+        for name in r.numbers:
+            if r.numbers[name][0]<68 or name in everything:continue  # core and FP/SIMD registers come first
+            try:everything[name]=r.register(name)
+            except (ValueError,KeyError):pass
+        state['sysregs_all']=everything
         # The gdbstub holds the vCPU stopped; pmemsave reads guest RAM as it is at this instruction.
         m.request('pmemsave',dict(val=RAM_BASE,size=size,filename=str(out/'ram.bin')))
         r.detach()

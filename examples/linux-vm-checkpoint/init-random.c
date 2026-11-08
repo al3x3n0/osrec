@@ -1,4 +1,4 @@
-/* PID 1 witness (random-sequence variant of init-state.c): direct SVC calls into the unmodified running Linux kernel.
+/* PID 1 witness (random-sequence variant of init-state.c, with signal delivery): direct SVC calls into the unmodified running Linux kernel.
    This variant lowers RLIMIT_NOFILE to 8, then changes descriptor and file state after the checkpoint (fcntl, pread64, pwrite64, ftruncate, writev with 2, 1, 0 and 9 segments)
    and makes futex calls that return at once: private and shared wait/wake, bitset variants, timeouts that do not fire,
    error returns, requeue and wake-op without waiters, and uncontended PI lock, trylock and unlock,
@@ -42,10 +42,37 @@ static unsigned char buf[192];
 static unsigned char lazy[256*1024];
 static volatile uint32_t word;
 static uint64_t next(void){rng^=rng<<13;rng^=rng>>7;rng^=rng<<17;return rng;}
+/* Signals: SA_SIGINFO handlers with our own rt_sigreturn restorer for SIGUSR1, SIGUSR2, SIGSEGV and SIGXFSZ. PID 1
+   drops signals it has no handler for, and a forced fatal one would kill it, so every signal raised has a handler.
+   The SIGSEGV handler resumes after the faulting load (ucontext.uc_mcontext.pc is at byte 440 on arm64). */
+static volatile unsigned long delivered[32];
+__attribute__((naked)) static void restorer(void){__asm__ volatile("mov x8,#139\n\tsvc #0");}
+static void handler(int sig,void *info,void *context)
+{
+    (void)info;delivered[sig&31]++;
+    if(sig==11)*(volatile uint64_t*)((char*)context+440)+=4;
+}
+__attribute__((noinline)) static void bad_load(long address)
+{
+    register long x0 __asm__("x0")=address;__asm__ volatile("ldr x0,[x0]":"+r"(x0)::"memory");
+}
+static void signals_begin(void)
+{
+    struct{long handler,flags,restorer,mask;}act={(long)handler,4|0x04000000,(long)restorer,0};
+    static const long sigs[4]={10,12,11,25};
+    for(unsigned i=0;i<4;++i)call(134,sigs[i],(long)&act,0,8);
+    unsigned long fsize[2]={16384,~0ul};call6(261,0,1,(long)fsize,0,0,0);
+}
+static void signals_end(void)
+{
+    unsigned long none=0,unlimited[2]={~0ul,~0ul};
+    call(135,2,(long)&none,0,8);call6(261,0,1,(long)unlimited,0,0,0);
+}
 static void prefault(void){for(unsigned i=0;i<sizeof buf;++i)buf[i]=(unsigned char)i;word=1;}
 static void random_sequence(void)
 {
     static const long fcntl_cmds[6]={1,2,3,4,0,1030};
+    signals_begin();
     call(279,(long)"random-a",0,0,0);call(279,(long)"random-b",1,0,0);
     for(unsigned i=0;i<OSREC_RANDOM_CALLS;++i){
         uint64_t r=next(),s=next();long fd=3+(long)((r>>8)%5);
@@ -77,12 +104,23 @@ static void random_sequence(void)
                      word^=m[((s>>36)%pages)*4096];call(215,a,pages*4096,0,0);}}
             break;
         default:if(((s>>3)&3)==0)lazy[(s>>16)%sizeof lazy]^=(unsigned char)s;
-                if(s&1)call(172,0,0,0,0);else if(s&2)call(178,0,0,0,0);else call(166,(long)(s>>8)&0777,0,0,0);
+                switch((s>>5)%8){
+                case 0:call(172,0,0,0,0);break;
+                case 1:call(178,0,0,0,0);break;
+                case 2:call(166,(long)(s>>8)&0777,0,0,0);break;
+                case 3:call(129,1,(s>>8)&1?10:12,0,0);break;                          /* kill(1, SIGUSR1/2) */
+                case 4:{unsigned long set=((s>>9)&1?1ul<<9:0)|((s>>10)&1?1ul<<11:0);  /* block, unblock, set USR1/USR2 */
+                        call(135,(long)((s>>11)%3),(long)&set,0,8);break;}
+                case 5:{unsigned long set;call(136,(long)&set,8,0,0);break;}          /* rt_sigpending */
+                case 6:bad_load((long)((s>>16)%0x10000)&~7l);break;                  /* SIGSEGV, resumed */
+                default:call(131,1,1,(s>>8)&1?10:12,0);break;                        /* tgkill(1, 1, SIGUSR1/2) */
+                }
                 if((s>>4)&1)word=(uint32_t)s;break;
         }
     }
     for(long f=3;f<8;++f)call(57,f,0,0,0);
     call(166,022,0,0,0);
+    signals_end();
 }
 void osrec_native_main(void)
 {

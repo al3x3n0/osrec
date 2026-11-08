@@ -262,13 +262,39 @@ def build(dump,vmlinux,profile_path,closure_path,out,state_mode,delta=0,dwarf_db
 SVC_OFFSET=0x400;GPRS=['x%d'%i for i in range(31)]
 
 
-def record(r,svc_vector,stop,limit,timeout,symbols=None,counters=None):
-    """Syscalls from the current point: [{number, arguments, result}] and how the run ended."""
-    calls=[];r.breakpoint(svc_vector);counters=counters or {};counts={n:0 for n in counters}
+PT_REGS_OFFSET=0x150  # the EL0 vector's `sub sp, sp, #0x150`: pt_regs sit there below the entry stack pointer
+
+
+def result_point(vmlinux):
+    """The instruction after el0_svc's call of do_el0_svc: the syscall has finished, its result is in pt_regs and
+    return-to-user work (signal delivery among it) has not started."""
+    e=Elf(vmlinux);f={x['name']:x for x in e.symbols if x['type']==2}
+    a=f['el0_svc'];target=f['do_el0_svc']['value'];code=e.read(a['value'],a['size'])
+    for k in range(0,len(code),4):
+        w,=struct.unpack_from('<I',code,k)
+        if w&0xfc000000==0x94000000 and a['value']+k+4*(w&0x3ffffff)-(4<<26 if w&0x2000000 else 0)==target:return a['value']+k+4
+    raise ValueError('el0_svc does not call do_el0_svc')
+
+
+def svc_entry(r):
+    """The call at an SVC vector stop (EL1, before kernel_entry), with the address of its pt_regs."""
+    g=r.registers(GPRS[:9])
+    return dict(number=g['x8'],arguments=[g['x%d'%i] for i in range(6)],regs=r.register('sp')-PT_REGS_OFFSET)
+
+
+def record(r,svc_vector,stop,limit,timeout,symbols=None,counters=None,result_at=None,pending=None):
+    """Syscalls and user exceptions from the current point and how the run ended.
+
+    A call is taken at the SVC vector; its result is read from pt_regs.regs[0] at `result_at`, before any signal
+    is delivered, so calls made by signal handlers (rt_sigreturn among them) are recorded in order. `pending` is
+    a call already entered when recording starts."""
+    calls=[];r.breakpoint(svc_vector);r.breakpoint(result_at);counters=counters or {};counts={n:0 for n in counters}
     for a in counters.values():r.breakpoint(a)
     if stop is not None:r.breakpoint(stop)
-    pending=None;end=None;spurious=0;spurious_pcs=[]
-    r.resume()
+    end=None;spurious=0;spurious_pcs=[]
+    def step_over(pc):r.breakpoint(pc,False);r.step();r.breakpoint(pc);r.resume()
+    if pending:step_over(svc_vector)
+    else:r.resume()
     while True:
         try:pc=r.wait(timeout)
         except Exited:end=dict(reason='exited');break
@@ -298,15 +324,15 @@ def record(r,svc_vector,stop,limit,timeout,symbols=None,counters=None):
             calls.append(dict(event='exception',number=-1,arguments=[r.register('ESR_EL1'),r.register('FAR_EL1'),r.register('ELR_EL1')],result=None))
             r.breakpoint(svc_vector,False);r.step();r.breakpoint(svc_vector);r.resume();continue
         if pc==svc_vector:
-            g=r.registers(GPRS[:9]);ret=r.register('ELR_EL1')
-            pending=dict(number=g['x8'],arguments=[g['x%d'%i] for i in range(6)],returns_to=ret)
             if len(calls)>=limit:end=dict(reason='limit');break
-            r.breakpoint(ret);r.breakpoint(svc_vector,False);r.step();r.breakpoint(svc_vector);r.resume();continue
-        if pending and pc==pending['returns_to']:
-            pending['result']=r.register('x0');r.breakpoint(pc,False);calls.append(pending);pending=None;r.resume();continue
-        # A stop at a user address with no breakpoint left there (the gdbstub can report a just-removed breakpoint
-        # again around an interrupt on the live machine): counted and resumed.
-        if pc>>48==0 and not (pending and pc==pending['returns_to']):
+            pending=svc_entry(r);step_over(pc);continue
+        if pc==result_at:
+            if pending:
+                pending['result']=int.from_bytes(r.read(pending.pop('regs'),8),'little');calls.append(pending);pending=None
+            step_over(pc);continue
+        # A stop at a user address with no breakpoint there (the gdbstub can report a just-removed breakpoint again
+        # around an interrupt on the live machine): counted, stepped past and resumed.
+        if pc>>48==0:
             spurious+=1;spurious_pcs.append(pc)
             if len(spurious_pcs)>=1000 and len(set(spurious_pcs[-1000:]))==1:end=dict(reason='stuck',pc=hex(pc),calls=len(calls));break
             # Make progress past it: drop any breakpoint left at this address, execute one instruction, go on.
@@ -314,7 +340,7 @@ def record(r,svc_vector,stop,limit,timeout,symbols=None,counters=None):
             except Exception:pass
             r.step();r.resume();continue
         end=dict(reason='unexpected stop',pc=hex(pc));break
-    if pending:calls.append(dict(pending,result=None))
+    if pending:pending.pop('regs',None);calls.append(dict(pending,result=None))
     if counters:end['counts']=counts
     if spurious:end['spurious_stops']=spurious;end['spurious_pcs']=sorted({hex(p) for p in spurious_pcs})[:20]
     return calls,end
@@ -335,7 +361,7 @@ def run_image(image_dir,out,limit,timeout,count=()):
         try:
             r=Remote(port,timeout=timeout);start=time.time()
             address={s['name']:s['value'] for s in e.symbols if s['name'] in count}
-            calls,end=record(r,int(m['vector_base'],16)+SVC_OFFSET,int(m['stop'],16),limit,timeout,symbol,{n:address[n] for n in count})
+            calls,end=record(r,int(m['vector_base'],16)+SVC_OFFSET,int(m['stop'],16),limit,timeout,symbol,{n:address[n] for n in count},result_point(m['vmlinux']))
             if end.get('function'):
                 cut=next((label for label,pattern in json.load(open(m['profile']))['boundaries'].items() if re.fullmatch(pattern,end['function'].split('+')[0])),None)
                 end['boundary']=cut
@@ -345,7 +371,7 @@ def run_image(image_dir,out,limit,timeout,count=()):
     (out/'calls.json').write_text(json.dumps(report,indent=1)+'\n');return report
 
 
-def run_native(checkpoint,contract,select,occurrence,out,limit,timeout):
+def run_native(checkpoint,contract,select,occurrence,out,limit,timeout,vmlinux):
     """The same recording on the live kernel, from the selected call of the checkpointed run."""
     checkpoint=Path(checkpoint).resolve();out=Path(out).resolve();out.mkdir(parents=True,exist_ok=False)
     spec=machine.verify(checkpoint);c=validate_contract(json.loads(Path(contract).read_text()));port=free_port()
@@ -360,13 +386,11 @@ def run_native(checkpoint,contract,select,occurrence,out,limit,timeout):
                 seen+=1
                 if seen==occurrence:break
             r.breakpoint(svc,False);r.step();r.breakpoint(svc);r.resume()
-        # Stopped at the selected entry: record from it (record() resumes onto the same breakpoint first).
-        r.breakpoint(svc,False);g=r.registers(GPRS[:9]);ret=r.register('ELR_EL1')
-        first=dict(number=g['x8'],arguments=[g['x%d'%i] for i in range(6)],returns_to=ret)
-        r.breakpoint(ret);r.resume();r.wait(timeout);first['result']=r.register('x0');r.breakpoint(ret,False)
-        calls,end=record(r,svc,None,limit-1,timeout)
+        # Stopped at the selected entry: it is the first call recorded.
+        first=svc_entry(r);r.breakpoint(svc,False)  # record() inserts its own breakpoints once each
+        calls,end=record(r,svc,None,limit,timeout,result_at=result_point(vmlinux),pending=first)
         if end['reason']!='exited':r.detach()
-    report=dict(kind='native',checkpoint=str(checkpoint),calls=[first]+calls,end=end)
+    report=dict(kind='native',checkpoint=str(checkpoint),calls=calls,end=end)
     (out/'calls.json').write_text(json.dumps(report,indent=1)+'\n');return report
 
 
@@ -402,6 +426,7 @@ def main():
     n=sub.add_parser('native');n.add_argument('--checkpoint',required=True);n.add_argument('--contract',default=str(ROOT/'integrations/linux_aarch64/svc-boundary.json'))
     n.add_argument('--select',action='append',required=True);n.add_argument('--occurrence',type=int,default=1);n.add_argument('--out',required=True)
     n.add_argument('--limit',type=int,default=10000);n.add_argument('--timeout',type=int,default=120)
+    n.add_argument('--vmlinux',default=str(ROOT/'build/linux-kernel-clang19-20261108/vmlinux'),help='the live kernel build (its el0_svc result point)')
     c=sub.add_parser('compare');c.add_argument('a');c.add_argument('b')
     a=p.parse_args()
     if a.command=='build':print(json.dumps(build(a.dump,a.vmlinux,a.profile,a.closure,a.out,a.state,a.relocate,a.dwarf_db)))
@@ -409,7 +434,7 @@ def main():
         rep=run_image(a.image,a.out,a.limit,a.timeout,a.count);print(json.dumps(dict(calls=len(rep['calls']),end=rep['end'])))
     elif a.command=='native':
         select={k:int(v,0) for k,_,v in (x.partition('=') for x in a.select)}
-        rep=run_native(a.checkpoint,a.contract,select,a.occurrence,a.out,a.limit,a.timeout);print(json.dumps(dict(calls=len(rep['calls']),end=rep['end'])))
+        rep=run_native(a.checkpoint,a.contract,select,a.occurrence,a.out,a.limit,a.timeout,a.vmlinux);print(json.dumps(dict(calls=len(rep['calls']),end=rep['end'])))
     else:print(json.dumps(compare(a.a,a.b)))
 
 

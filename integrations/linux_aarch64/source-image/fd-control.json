@@ -18,11 +18,10 @@
  ],
  "boundaries": {
   "error reporting": "(_printk|__warn_printk|printk|vprintk.*|__stack_chk_fail|refcount_warn_saturate|__list_.*_report|panic|die|__ubsan.*|warn_.*|dump_stack.*|report_bug)",
-  "signal delivery (not admitted yet)": "(force_sig.*|send_sig.*|do_send_sig_info|arm64_force_sig.*|arm64_notify_die|do_signal|get_signal)",
-  "audit, seccomp, tracing": "(__audit_.*|audit_.*|__secure_computing|__seccomp_filter|syscall_trace_.*|ptrace_.*|uprobe_.*)",
   "idle: nothing runnable (native would wait for an interrupt)": "(default_idle_call|arch_cpu_idle|cpu_do_idle|cpu_idle_poll|cpuidle_idle_call)",
   "exit: power off (the program ends; host exit for now)": "(kernel_power_off|machine_power_off)",
-  "EL0 exceptions other than SVC and page faults": "el0_(fpsimd_acc|sve_acc|sme_acc|fpsimd_exc|sys|sp|pc|undef|bti|mops|gcs|inv|dbg|fpac|cp15|svc_compat|interrupt|irq|fiq|error.*)"
+  "EL0 exceptions needing state the image does not model (debug, SVE/SME, compat, MOPS, GCS, asynchronous)": "el0_(dbg|sve_acc|sme_acc|cp15|svc_compat|mops|gcs|interrupt|irq|fiq|error.*)",
+  "active audit, seccomp filters, tracing (only reached when enabled)": "(__audit_.*|audit_log.*|__secure_computing|__seccomp_filter|syscall_trace_.*)"
  },
  "devices": [
   {

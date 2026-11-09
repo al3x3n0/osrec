@@ -45,7 +45,8 @@ def from_cpu_data(ram, image, database):
     """Registers omitted by QEMU's gdbstub, from the captured Linux CPU record.
 
     Offsets come from this build's DWARF; no ID value is invented. cpu_data is
-    per-CPU, relative to TPIDR_EL1. The supported checkpoint has one CPU.
+    per-CPU, relative to TPIDR_EL1. MPIDR is deliberately not reconstructed from
+    __cpu_logical_map, which drops architectural bits (including MPIDR.U).
     """
     import struct
     symbols={s['name']:s['value'] for s in image.symbols if s['value']}
@@ -64,5 +65,4 @@ def from_cpu_data(ram, image, database):
         suffix=field[4:]
         name=special.get(suffix,suffix.upper()+'_EL1')
         result[name]=read(base+offset//8)
-    result['MPIDR_EL1']=read(symbols['__cpu_logical_map'])
     return result

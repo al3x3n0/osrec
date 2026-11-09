@@ -17,6 +17,9 @@ class Remote:
             except OSError:
                 if time.monotonic()>deadline:raise TimeoutError('gdbstub connection timed out')
                 time.sleep(.05)
+        # RSP sends acknowledgements separately from the next small request.
+        # Nagle plus delayed ACKs otherwise stalls page-by-page state reads.
+        self.socket.setsockopt(socket.IPPROTO_TCP,socket.TCP_NODELAY,1)
         self.request('qSupported:xmlRegisters=aarch64');self.numbers={}
         for name in re.findall(r'xi:include href="([^"]+)"',self.document('target.xml')):
             number=0

@@ -1,0 +1,3 @@
+# Construction/validation environment only; never part of the replay image.
+FROM osrec-kbuild-clang19:latest
+RUN apt-get update && apt-get install -y --no-install-recommends qemu-user && rm -rf /var/lib/apt/lists/*

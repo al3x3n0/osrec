@@ -18,6 +18,30 @@ from kernel_boundary_capture import GPRS,SYSREGS
 
 ROOT=Path(__file__).resolve().parents[1];FORMAT='osrec-kernel-state-dump-v1';RAM_BASE=0x40000000
 
+# Architectural registers QEMU's target description omits. Each probe is one
+# side-effect-free MRS at the stopped EL1 vector. Restore both bytes and CPU
+# registers before saving RAM. An unsupported probe aborts this disposable run.
+PROBES={'MIDR_EL1':0xd5380000,'MPIDR_EL1':0xd53800a0,
+        'DCZID_EL0':0xd53b00e0,'ID_AA64PFR0_EL1':0xd5380400}
+
+
+def probe_registers(remote,pc):
+    original=remote.read(pc,4);saved_x0=remote.register('x0');result={}
+    def register(name,value):
+        number,bits=remote.numbers[name]
+        packet='P%x=%s'%(number,value.to_bytes(bits//8,'little').hex())
+        if remote.request(packet)!='OK':raise ValueError('cannot restore '+name)
+    def write(data):
+        if remote.request('M%x,4:%s'%(pc,data.hex()))!='OK':raise ValueError('cannot write register probe')
+    try:
+        for name,word in PROBES.items():
+            write(word.to_bytes(4,'little'));register('pc',pc);remote.step()
+            if remote.register('pc')!=pc+4:raise ValueError('system-register probe trapped: '+name)
+            result[name]=remote.register('x0')
+    finally:
+        write(original);register('x0',saved_x0);register('pc',pc)
+    return result
+
 
 def ram_size(spec):
     value=spec['arguments'][spec['arguments'].index('-m')+1]
@@ -53,6 +77,7 @@ def dump(checkpoint,contract,select,out,occurrence=1,timeout=300):
             try:everything[name]=r.register(name)
             except (ValueError,KeyError):pass
         state['sysregs_all']=everything
+        everything.update(probe_registers(r,pc))
         # The gdbstub holds the vCPU stopped; pmemsave reads guest RAM as it is at this instruction.
         m.request('pmemsave',dict(val=RAM_BASE,size=size,filename=str(out/'ram.bin')))
         r.detach()

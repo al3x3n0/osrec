@@ -2,14 +2,22 @@
 
 The end goal is a self-contained executable that reproduces a captured OpenHarmony execution scenario. Its scope includes selected user/kernel code and the relevant scheduling, blocking, wakeup and interrupt interactions. The executable packages the code closure, entry state, ordered external inputs, replay runtime and validation checks. It runs on a declared platform without the original source checkout, a separate capture file, a running source kernel or the original device. Recording and analysis are construction stages for this executable.
 
-The first target milestone should export one bounded scenario that blocks and resumes with an interrupt-driven completion. Running the exported executable must re-execute the included code and reproduce the scenario contract, including required context relationships, return value and observable memory changes. Measure capture overhead on the source device separately from replay performance.
+The current checkpoint milestone is native execution of restored user code and captured kernel code/state in one self-contained **EL0-only** RTL/model executable for microarchitecture research. All delivered runtime, adapter, user and kernel instructions execute at EL0. Its architectural external effects are confined to its own RAM, apart from an optional terminal exit. Linux arm64 is the test kernel; OpenHarmony remains the broader target. Resume the post-boot checkpoint rather than rerunning Linux boot. UART writes become RAM output/checks, and timer observations come from embedded RAM inputs; delivery requires no physical UART, timer interrupts or other devices.
+
+A full scenario milestone must also export a bounded execution that blocks and resumes with an interrupt-driven completion. Running the exported executable must re-execute the included code and reproduce the scenario contract, including required context relationships, return value and observable memory changes. Measure capture overhead on the source device separately from replay performance. Functional comparisons do not establish cycle fidelity: declare the measured interval, emulation/instrumentation overhead, and model cache/TLB initialization independently.
 
 ## RTL and cycle-accurate execution target
 
 The intended delivery artifact is a self-contained image loaded into an RTL or
 cycle-accurate processor model. Runtime execution must require no host
-interaction. Host capture, source extraction, compilation, KLEE and artifact
-inspection remain construction/validation tools.
+interaction. **All delivered code executes at EL0**, including startup, context
+switches, architecture adapters and validation. Captured kernel privilege is
+logical state in RAM. Syscall sites enter the linked captured-kernel backend
+through internal gateways; privileged operations, device accesses and address
+translation/fault behavior require EL0 software adaptations. An EL1 monitor,
+host signal delivery or hardware IRQ service is outside this delivery contract.
+Host capture, source extraction, compilation, KLEE and artifact inspection
+remain construction/validation tools.
 
 The image must embed its code, checkpoint, recorded inputs, reconstruction
 runtime, dependency models and validation checks. Startup, stack, writable
@@ -29,15 +37,17 @@ opened on the host. Scalar widths, endianness, errno values and layout rules
 must be bound to the target ABI; host capture adapters must normalize or
 translate their observations before image construction.
 
-The existing native executables are functional validation harnesses and still
-use the host C runtime. The QEMU semihost/ABI demos also remain development
-harnesses. AArch64 delivery images now implement four-call `SysRead` object-backed
+Existing Linux executors are functional validation harnesses, including the
+libc-free variant that still uses Linux syscalls and signals. Existing EL1
+monitor and QEMU semihost/ABI images also remain development harnesses. The
+earlier freestanding AArch64 prototypes implement four-call `SysRead` object-backed
 sessions, the `SysUmask` stateful session, UID/GID/process-group identity queries,
 scheduler-limit/PID scalar queries, parent/task queries, effective credential queries, and process-priority queries. The supplied ELF defines the entry point
 and physical load segments; no fixed entry or result address is part of the RTL
-contract. Load each PT_LOAD segment's bytes, zero its remaining memory extent,
-and start the CPU at e_entry in privileged EL1 with interrupts masked and the
-MMU disabled. Startup installs a stack and exception vectors. The testbench
+contract. Those earlier prototypes load each PT_LOAD segment, zero its remaining
+memory extent, and start at e_entry in privileged EL1 with interrupts masked
+and the MMU disabled. Their startup installs a stack and exception vectors;
+this historical entry contract does not satisfy the EL0-only delivery goal. The testbench
 observes the 128-byte `osrec_result` symbol; ABI versions 1–7 define their
 result layouts. Checkpoints and dependency data are embedded, and logical object
 references reconstruct into target RAM. The captured LiteOS syscall scalars
@@ -76,7 +86,7 @@ The key analysis question is which information must be recorded and embedded so 
 
 The user selected OHOS, a task/syscall replay scope, and the LiteOS-A repository for combined user/kernel KLEE analysis. The first extracted slice is pinned to revision `4ac7f3aed67000b47bc14d6fe79d63ada708d780`; its `SysRead` source and function hashes are checked before building. The target configuration, compiler and board remain unresolved. The host KLEE scenario abstracts architecture entry and dependencies; it is not a target kernel build. See [the implemented KLEE integration](klee-liteos.md).
 
-A snippet is the self-contained executable defined above. Its replay backend must support the included code's ABI and architecture operations. Portable extracted code can use a linked host runtime for development validation. Delivery images instead execute with an embedded freestanding runtime on the declared RTL/cycle-accurate target; privileged or architecture-specific code requires supported target execution state. A matching kernel harness or emulator can also validate the reconstruction during development. Host replay timing must not be interpreted as kernel execution cost.
+A snippet is the self-contained executable defined above. Its replay backend must support the included code's ABI and architecture operations. Portable extracted code can use a linked host runtime for development validation. Delivery images execute entirely at EL0 with an embedded runtime on the declared RTL/cycle-accurate target; privileged semantics and device interactions must be adapted into ordinary instructions and RAM state. A matching kernel harness or emulator can also validate the reconstruction during development. Host replay timing must not be interpreted as kernel execution cost.
 
 The implemented [scalar EL0 exporter](el0-export.md) now handles closed modular integer computation with initialized private stack state. It extracts a root slice, compares return bits against reference IR with KLEE, checks generated cases natively and packages one concrete checkpoint. The pinned LiteOS-A `LOS_Align` helper demonstrates this path with explicit AArch32 scalar widths. General pointer/global state and scheduler/interrupt replay remain outside this initial contract.
 

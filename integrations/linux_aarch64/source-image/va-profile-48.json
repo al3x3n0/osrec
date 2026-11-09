@@ -153,6 +153,31 @@
     -1,
     0
    ]
+  },
+  {
+   "name": "-PAGE_OFFSET",
+   "expr": "-PAGE_OFFSET",
+   "offsets": [
+    0,
+    0
+   ],
+   "uses": [
+    "add",
+    "sub"
+   ],
+   "note": "x - PAGE_OFFSET folded into x + this; the same value as a compare operand is TASK_SIZE and is left alone"
+  },
+  {
+   "name": "-VMEMMAP_START",
+   "expr": "-VMEMMAP_START",
+   "offsets": [
+    -63,
+    0
+   ],
+   "uses": [
+    "add",
+    "sub"
+   ]
   }
  ]
 }

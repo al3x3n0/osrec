@@ -126,7 +126,7 @@ def boundary_extents(profile,e):
     return sorted(out)
 
 
-def build(dump,vmlinux,profile_path,closure_path,out,state_mode,delta=0,dwarf_db=None,linear_offset=0,va_profile=None):
+def build(dump,vmlinux,profile_path,closure_path,out,state_mode,delta=0,dwarf_db=None,linear_offset=0,va_profile=None,kernel_shift=0,lower_linear=0):
     out=Path(out);out.mkdir(parents=True,exist_ok=False)
     ram=Ram(dump);e,text=text_ranges(vmlinux);profile=json.load(open(profile_path))
     leaves,live_tables=ram.mappings(1);user,user_tables=ram.mappings(0)
@@ -194,6 +194,21 @@ def build(dump,vmlinux,profile_path,closure_path,out,state_mode,delta=0,dwarf_db
         from kernel_dwarf_db import load
         patches,va_move,va_cpu,va_relocation=relocate_va(ram,symbols,json.load(open(va_profile)),linear_offset,{pa for _,pa,_ in user},load(dwarf_db))
         apply(patches)
+    elif kernel_shift or lower_linear:
+        # The whole kernel address space moved by kernel_shift (va_shift.py): data, code constants, tables; or
+        # lowered (va_shift.lower: the linear map moved off 0 by lower_linear, then every address + 2^48).
+        if delta:raise ValueError('RAM relocation and a kernel shift are not combined yet')
+        from va_shift import relocate as shift_kernel,lower as lower_kernel
+        if lower_linear:shift_kernel=lambda r,sy,pr,_,up,db,tx:lower_kernel(r,sy,pr,lower_linear,up,db,tx);kernel_shift=1<<48
+        from kernel_dwarf_db import load
+        symbols={}
+        for x in e.symbols:
+            if x['value'] and x['name']:symbols.setdefault(x['name'],x['value'])
+        patches,text_patches,va_move,va_cpu,va_relocation=shift_kernel(ram,symbols,json.load(open(va_profile)),kernel_shift,{pa for _,pa,_ in user},load(dwarf_db),text)
+        apply(patches)
+        for pa,(old,new,why) in text_patches.items():  # a word replaced by a boundary trap keeps the trap
+            page=pa&~0xfff;cur=struct.unpack_from('<I',blob[page],pa-page)[0]
+            if cur==old:b=bytearray(blob[page]);struct.pack_into('<I',b,pa-page,new);blob[page]=bytes(b)
     # Moving RAM by delta (ram_relocation.py): patch stored physical addresses on the old layout, then place every
     # RAM page at its physical address + delta. Virtual addresses do not change.
     in_ram=lambda pa:ram.base<=pa<ram.base+ram.size
@@ -216,6 +231,7 @@ def build(dump,vmlinux,profile_path,closure_path,out,state_mode,delta=0,dwarf_db
     root=table(('root',))
     for va,pa,d,_ in mapped:
         va=va_move(va)
+        if lower_linear and va>>48:continue  # not lowered (fixmap, PCI I/O): left unmapped
         node=root
         for level in range(start,3):
             shift=12+9*(3-level);i=(va>>shift)&((1<<(bits-shift))-1 if level==start else 511)
@@ -224,11 +240,22 @@ def build(dump,vmlinux,profile_path,closure_path,out,state_mode,delta=0,dwarf_db
         leaf=(d&ATTRS&~CONTIGUOUS&~NT)|moved(pa)|3
         struct.pack_into('<Q',node[1],8*((va>>12)&511),leaf)
     ttbr1=(ram.sysregs['TTBR1_EL1']&~((1<<48)-1))|root[0]
+    if lower_linear:
+        # The lowered kernel lives in the user program's own TTBR0 top-level table, at slots the program does not
+        # use; TTBR1 is never walked (TCR_EL1.EPD1), so an address the lowering missed faults.
+        user_root=moved(ram.roots[0]);page=bytearray(blob.get(user_root) or ram.page(ram.roots[0]))
+        for i in range(512):
+            entry=struct.unpack_from('<Q',root[1],8*i)[0]
+            if not entry:continue
+            if struct.unpack_from('<Q',page,8*i)[0]:raise ValueError('user top-level slot %d is in use; the lowered kernel cannot go there'%i)
+            struct.pack_into('<Q',page,8*i,entry)
+        blob[user_root]=bytes(page)
     stub_at=next_table[0]+PAGE
     capture=dict(entry=ram.state['cpu'],trap=dict(site=ram.sysregs['ELR_EL1']-4))
     ttbr0=ram.sysregs['TTBR0_EL1'];ttbr0=(ttbr0&~((1<<48)-1)&~0xfff|ttbr0&0xfff)|moved(ram.roots[0])
     capture['entry']=dict(capture['entry'],sysregs=dict(capture['entry']['sysregs'],TTBR1_EL1=ttbr1,TTBR0_EL1=ttbr0))
-    if va_cpu:capture['entry']=dict(capture['entry'],sp=va_cpu['sp'],sysregs=dict(capture['entry']['sysregs'],TPIDR_EL1=va_cpu['TPIDR_EL1']))
+    if va_cpu:capture['entry']=dict(capture['entry'],sp=va_cpu['sp'],sysregs=dict(capture['entry']['sysregs'],TPIDR_EL1=va_cpu['TPIDR_EL1'],VBAR=va_cpu.get('VBAR',ram.sysregs['VBAR'])))
+    if lower_linear:capture['entry']['sysregs']=dict(capture['entry']['sysregs'],TCR_EL1=capture['entry']['sysregs']['TCR_EL1']|(1<<23))
     # The image machine's RAM (QEMU virt: from 0x40000000) must hold the moved RAM; our tables and stub stay outside it.
     top=max(moved(ram.base+ram.size-1)+1,PRIVATE+0x10000000);ram_mb=max(IMAGE_RAM_MB,(top-0x40000000+(1<<20)-1)>>20)
     if delta and moved(ram.base)<PRIVATE+0x10000000 and moved(ram.base+ram.size)>PRIVATE:raise ValueError('moved RAM overlaps the image tables at 0x%x'%PRIVATE)
@@ -264,9 +291,9 @@ def build(dump,vmlinux,profile_path,closure_path,out,state_mode,delta=0,dwarf_db
     segments.append((run_start,run))
     (out/'image.elf').write_bytes(elf_image(segments,stub_at))
     manifest=dict(format=FORMAT,dump=str(Path(dump).resolve()),vmlinux=str(Path(vmlinux).resolve()),profile=str(Path(profile_path).resolve()),
-                  closure=str(Path(closure_path).resolve()) if closure_path else None,code=code_mode,state=state_mode,
+                  closure=str(Path(closure_path).resolve()) if closure_path else None,code=code_mode,state=state_mode,ram=ram.state['ram'],
                   functions=len(ext),mapped_pages=dict(counts),blob_pages=len(blob),table_pages=len(tables),ttbr1=hex(ttbr1),stub=hex(stub_at),stop=hex(stopped),
-                  vector_base=hex(ram.sysregs['VBAR']),image_ram_mb=ram_mb,relocation=relocation,va_relocation=va_relocation,
+                  vector_base=hex(va_cpu.get('VBAR',ram.sysregs['VBAR'])),kernel_shift=hex(kernel_shift),image_ram_mb=ram_mb,relocation=relocation,va_relocation=va_relocation,
                   pages=[dict(va=hex(va),pa=hex(pa),kind=kind) for va,pa,_,kind in mapped if kind!='zero'],
                   zero_pages=sum(1 for *_,k in mapped if k=='zero'),
                   image_sha256=hashlib.sha256((out/'image.elf').read_bytes()).hexdigest())
@@ -298,7 +325,7 @@ def svc_entry(r):
     return dict(number=g['x8'],arguments=[g['x%d'%i] for i in range(6)],regs=r.register('sp')-PT_REGS_OFFSET)
 
 
-def record(r,svc_vector,stop,limit,timeout,symbols=None,counters=None,result_at=None,pending=None):
+def record(r,svc_vector,stop,limit,timeout,symbols=None,counters=None,result_at=None,pending=None,shadow_pa=None,memory=False,context_pointer_pa=None,monitor_offset=0,memory_ram=None,progress=None,clock_sites=None,clock_events=None,mmio_sites=None,mmio_ranges=(),mmio_events=None):
     """Syscalls and user exceptions from the current point and how the run ended.
 
     A call is taken at the SVC vector; its result is read from pt_regs.regs[0] at `result_at`, before any signal
@@ -306,8 +333,32 @@ def record(r,svc_vector,stop,limit,timeout,symbols=None,counters=None,result_at=
     a call already entered when recording starts."""
     calls=[];r.breakpoint(svc_vector);r.breakpoint(result_at);counters=counters or {};counts={n:0 for n in counters}
     for a in counters.values():r.breakpoint(a)
+    clock_sites=clock_sites or {}
+    if clock_events is None:clock_events=[]
+    if mmio_events is None:mmio_events=[]
+    mmio_sites=mmio_sites or {};mmio_enabled=False
+    for a in clock_sites:r.breakpoint(a)
     if stop is not None:r.breakpoint(stop)
     end=None;spurious=0;spurious_pcs=[]
+    def exception_state():
+        if shadow_pa is None:return r.registers(['ESR_EL1','FAR_EL1','ELR_EL1'])
+        # Actual EL1 registers describe the monitor trap; the captured kernel's
+        # ELR/ESR/FAR live in the shadow, read independently of the current TTBR0.
+        from kernel_boundary_capture import physical
+        physical(r,True)
+        try:elr,spsr,esr,far=struct.unpack('<4Q',r.read(shadow_pa+16,32))
+        finally:physical(r,False)
+        return dict(ESR_EL1=esr,FAR_EL1=far,ELR_EL1=elr)
+    def memory_root():
+        if shadow_pa is None:return r.register('TTBR0_EL1')
+        from kernel_boundary_capture import physical
+        physical(r,True)
+        try:return r.u(shadow_pa+72)
+        finally:physical(r,False)
+    if memory:
+        from source_image_memory import snapshot
+        memory_tcr=r.register('TCR_EL1') if pending else None
+        if pending:pending['_memory_root']=memory_root()
     def step_over(pc):r.breakpoint(pc,False);r.step();r.breakpoint(pc);r.resume()
     if pending:step_over(svc_vector)
     else:r.resume()
@@ -317,12 +368,35 @@ def record(r,svc_vector,stop,limit,timeout,symbols=None,counters=None,result_at=
         except Exception as error:end=dict(reason='timeout',detail=str(error));break
         if stop is not None and pc==stop:
             g=r.registers(['x0','x1','x2','x3'])
-            end=dict(reason='trap',esr_el2=hex(g['x0']),elr_el2=hex(g['x1']),far_el2=hex(g['x2']),vector=hex(g['x3']),
-                     el1=dict(esr=hex(r.register('ESR_EL1')),far=hex(r.register('FAR_EL1')),elr=hex(r.register('ELR_EL1'))))
+            if shadow_pa is not None:
+                reasons={1:'boundary',2:'unknown sysreg',3:'unsupported instruction',4:'missing site',5:'undefined instruction',6:'unhandled exception',7:'monitor fault',8:'user access to kernel address space'}
+                reasons[9]='unclassified lowered-address operation'
+                end=dict(reason='trap',stop_reason=reasons.get(g['x0'],'unknown stop'),stop_code=g['x0'],pc=hex(g['x1']),detail=hex(g['x2']),far=hex(g['x3']))
+                from kernel_boundary_capture import physical
+                physical(r,True)
+                try:emulated,entries=struct.unpack('<2Q',r.read(shadow_pa+88,16))
+                finally:physical(r,False)
+                end['emulated_sites']=emulated;end['kernel_entries']=entries
+                state_=exception_state()
+                end['el1']={name:hex(state_[register]) for name,register in [('elr','ELR_EL1'),('esr','ESR_EL1'),('far','FAR_EL1')]}
+            else:
+                end=dict(reason='trap',esr_el2=hex(g['x0']),elr_el2=hex(g['x1']),far_el2=hex(g['x2']),vector=hex(g['x3']),
+                         el1=dict(esr=hex(r.register('ESR_EL1')),far=hex(r.register('FAR_EL1')),elr=hex(r.register('ELR_EL1'))))
             if symbols:
-                end['function']=symbols(g['x1']-4)
+                end['function']=symbols(g['x1'] if shadow_pa is not None else g['x1']-4)
                 # Kernel backtrace by the AArch64 frame records (x29 chain); the first return address is x30.
-                frames=[r.register('x30')];fp=r.register('x29')
+                if context_pointer_pa is not None:
+                    physical(r,True)
+                    try:
+                        pointer=r.u(context_pointer_pa)
+                        if pointer and g['x0']!=7:
+                            context=pointer+monitor_offset
+                            fp,lr=struct.unpack('<2Q',r.read(context+29*8,16))
+                            frames=[lr]
+                        else:frames=[];fp=0
+                    finally:physical(r,False)
+                elif shadow_pa is not None:frames=[];fp=0
+                else:frames=[r.register('x30')];fp=r.register('x29')
                 for _ in range(32):
                     if fp>>48!=0xffff:break
                     try:record_=r.read(fp,16)
@@ -335,16 +409,41 @@ def record(r,svc_vector,stop,limit,timeout,symbols=None,counters=None,result_at=
         hit=next((n for n,a in counters.items() if a==pc),None)
         if hit:
             counts[hit]+=1;r.breakpoint(pc,False);r.step();r.breakpoint(pc);r.resume();continue
-        if pc==svc_vector and r.register('ESR_EL1')>>26!=0x15:
+        if pc in clock_sites:
+            word=clock_sites[pc];r.breakpoint(pc,False);r.step()
+            value=r.register('x%d'%(word&31))
+            clock_events.append((pc,(word>>5)&65535,value))
+            r.breakpoint(pc);r.resume();continue
+        if mmio_enabled and pc in mmio_sites:
+            word=mmio_sites[pc];size=1<<(word>>30);rn=word>>5&31;rt=word&31;write=not bool(word&(1<<22))
+            address=r.register('sp' if rn==31 else 'x%d'%rn)+(word>>10&4095)*size
+            device=any(lo<=address and address+size<=hi for lo,hi in mmio_ranges)
+            value=(0 if rt==31 else r.register('x%d'%rt))&((1<<(size*8))-1) if device and write else 0
+            r.breakpoint(pc,False);r.step()
+            if device:
+                if not write:value=(0 if rt==31 else r.register('x%d'%rt))&((1<<(size*8))-1)
+                mmio_events.append((pc,address,size,int(write),value))
+            r.breakpoint(pc);r.resume();continue
+        exception=exception_state() if pc==svc_vector else None
+        if pc==svc_vector and exception['ESR_EL1']>>26!=0x15:
             # Not an SVC: a user exception (page fault) entering the same vector. Recorded as an event.
-            calls.append(dict(event='exception',number=-1,arguments=[r.register('ESR_EL1'),r.register('FAR_EL1'),r.register('ELR_EL1')],result=None))
+            calls.append(dict(event='exception',number=-1,arguments=[exception['ESR_EL1'],exception['FAR_EL1'],exception['ELR_EL1']],result=None))
             r.breakpoint(svc_vector,False);r.step();r.breakpoint(svc_vector);r.resume();continue
         if pc==svc_vector:
             if len(calls)>=limit:end=dict(reason='limit');break
-            pending=svc_entry(r);step_over(pc);continue
+            pending=svc_entry(r)
+            if mmio_sites and not mmio_enabled and pending['number']==64 and pending['arguments'][0]==1:
+                for a in mmio_sites:r.breakpoint(a)
+                mmio_enabled=True
+            if memory:
+                pending['_memory_root']=memory_root();memory_tcr=r.register('TCR_EL1')
+            step_over(pc);continue
         if pc==result_at:
             if pending:
-                pending['result']=int.from_bytes(r.read(pending.pop('regs'),8),'little');calls.append(pending);pending=None
+                pending['result']=int.from_bytes(r.read(pending.pop('regs'),8),'little')
+                if memory:pending['memory']=snapshot(r,pending.pop('_memory_root'),memory_tcr,memory_ram)
+                calls.append(pending);pending=None
+                if progress and len(calls)%100==0:progress(len(calls))
             step_over(pc);continue
         # A stop at a user address with no breakpoint there (the gdbstub can report a just-removed breakpoint again
         # around an interrupt on the live machine): counted, stepped past and resumed.
@@ -356,38 +455,71 @@ def record(r,svc_vector,stop,limit,timeout,symbols=None,counters=None,result_at=
             except Exception:pass
             r.step();r.resume();continue
         end=dict(reason='unexpected stop',pc=hex(pc));break
-    if pending:pending.pop('regs',None);calls.append(dict(pending,result=None))
+    if pending:pending.pop('regs',None);pending.pop('_memory_root',None);calls.append(dict(pending,result=None))
     if counters:end['counts']=counts
     if spurious:end['spurious_stops']=spurious;end['spurious_pcs']=sorted({hex(p) for p in spurious_pcs})[:20]
     return calls,end
 
 
-def run_image(image_dir,out,limit,timeout,count=()):
+def run_image(image_dir,out,limit,timeout,count=(),memory=False,clock_package=None):
     image_dir=Path(image_dir).resolve();out=Path(out);out.mkdir(parents=True,exist_ok=False)
     m=json.load(open(image_dir/'manifest.json'));port=free_port()
-    e=Elf(m['vmlinux']);syms=sorted((s['value'],s['name']) for s in e.symbols if s['type'] in (0,2) and s['value'] and s['shndx'] and s['name'] and not s['name'].startswith('$'))
+    e=Elf(m['vmlinux']);kernel_base=next(s['value'] for s in e.symbols if s['name']=='_text')
+    syms=sorted((s['value'],s['name']) for s in e.symbols if s['type'] in (0,2) and s['value']>=kernel_base and s['shndx'] and s['name'] and '$' not in s['name'])
     starts=[a for a,_ in syms]
+    kshift=int(m.get('kernel_shift','0x0'),16)  # a shifted kernel runs at vmlinux's addresses + kernel_shift
     def symbol(a):
+        if m.get('lowered') and a<0x800000000000:return hex(a)
+        a=(a-kshift)&((1<<64)-1)
         i=bisect.bisect_right(starts,a)-1;return '%s+0x%x'%(syms[i][1],a-syms[i][0]) if i>=0 else hex(a)
-    command=[QEMU,'-M','virt-9.2,secure=off,virtualization=on','-cpu','cortex-a53','-accel','tcg','-smp','1','-m','%dM'%m['image_ram_mb'],'-nodefaults',
+    el0=m.get('execution')=='el0-minios'
+    clock_sites={};clock_events=[];mmio_sites={};mmio_events=[];mmio_ranges=[]
+    if clock_package:
+        cp=Path(clock_package)
+        if json.loads((cp/'manifest.json').read_text())['source_image_sha256']!=m['image_sha256']:
+            raise ValueError('counter package and image identities differ')
+        raw=(cp/'native.bin').read_bytes();h=struct.unpack_from('<10Q',raw)
+        at=80+272+520+532584+16*h[5]
+        clock_sites={pc:word for pc,word,_ in struct.iter_unpack('<QII',raw[at:at+16*h[6]])
+                     if word&0xfff00000==0xd5300000 and (word>>5&65535) in (0xdf01,0xdf02)}
+        for s in e.symbols:
+            if s['type']==2 and s['size'] and s['name'].startswith('pl011_'):
+                for off in range(0,s['size'],4):
+                    word,=struct.unpack('<I',e.read(s['value']+off,4))
+                    if word&0x3b000000==0x39000000 and not word&(1<<26) and (word>>22&3)<2:
+                        mmio_sites[(s['value']+off+kshift)&((1<<64)-1)]=word
+        mmio_ranges=[(int(p['va'],16),int(p['va'],16)+PAGE) for p in m['pages'] if p['kind']=='device']
+    command=[QEMU,'-M','virt-9.2,secure=off,virtualization='+('off' if el0 else 'on'),'-cpu','cortex-a53','-accel','tcg','-smp','1','-m','%dM'%m['image_ram_mb'],'-nodefaults',
              '-display','none','-monitor','none','-serial','file:%s'%(out/'console.txt'),'-semihosting-config','enable=off',
              '-device','loader,file=%s,cpu-num=0'%(image_dir/'image.elf'),'-S','-gdb','tcp:127.0.0.1:%d'%port]
     with open(out/'qemu.stderr.log','wb') as err:
         p=subprocess.Popen(command,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=err)
         try:
             r=Remote(port,timeout=timeout);start=time.time()
-            address={s['name']:s['value'] for s in e.symbols if s['name'] in count}
-            calls,end=record(r,int(m['vector_base'],16)+SVC_OFFSET,int(m['stop'],16),limit,timeout,symbol,{n:address[n] for n in count},result_point(m['vmlinux']))
+            address={s['name']:(s['value']+kshift)&((1<<64)-1) for s in e.symbols if s['name'] in count}
+            calls,end=record(r,int(m['vector_base'],16)+SVC_OFFSET,int(m['stop'],16),limit,timeout,symbol,{n:address[n] for n in count},(result_point(m['vmlinux'])+kshift)&((1<<64)-1),
+                             shadow_pa=int(m['shadow_pa'],16) if el0 else None,memory=memory,
+                             context_pointer_pa=int(m['context_pointer_pa'],16) if el0 and m.get('context_pointer_pa') else None,
+                             monitor_offset=int(m['monitor_pa'],16)-int(m['monitor_va'],16) if el0 and m.get('monitor_va') else 0,
+                             memory_ram=(m.get('ram',{}).get('base',0x40000000),m.get('ram',{}).get('base',0x40000000)+m.get('ram',{}).get('size',512<<20)),
+                             progress=lambda n:(out/'progress.json').write_text(json.dumps(dict(events=n,seconds=round(time.time()-start,2)))+'\n'),
+                             clock_sites=clock_sites,clock_events=clock_events,
+                             mmio_sites=mmio_sites,mmio_ranges=mmio_ranges,mmio_events=mmio_events)
             if end.get('function'):
                 cut=next((label for label,pattern in json.load(open(m['profile']))['boundaries'].items() if re.fullmatch(pattern,end['function'].split('+')[0])),None)
                 end['boundary']=cut
         finally:
             p.terminate();p.wait()
-    report=dict(kind='image',image=str(image_dir),calls=calls,end=end,seconds=round(time.time()-start,2))
+    report=dict(kind='image',image=str(image_dir),source_image_sha256=m['image_sha256'],calls=calls,end=end,seconds=round(time.time()-start,2))
+    if clock_package:
+        (out/'counters.bin').write_bytes(b''.join(struct.pack('<3Q',*v) for v in clock_events))
+        report['counter_reads']=len(clock_events)
+        (out/'mmio.bin').write_bytes(b''.join(struct.pack('<5Q',*v) for v in mmio_events))
+        report['mmio_accesses']=len(mmio_events)
     (out/'calls.json').write_text(json.dumps(report,indent=1)+'\n');return report
 
 
-def run_native(checkpoint,contract,select,occurrence,out,limit,timeout,vmlinux):
+def run_native(checkpoint,contract,select,occurrence,out,limit,timeout,vmlinux,memory=False):
     """The same recording on the live kernel, from the selected call of the checkpointed run."""
     checkpoint=Path(checkpoint).resolve();out=Path(out).resolve();out.mkdir(parents=True,exist_ok=False)
     spec=machine.verify(checkpoint);c=validate_contract(json.loads(Path(contract).read_text()));port=free_port()
@@ -404,14 +536,16 @@ def run_native(checkpoint,contract,select,occurrence,out,limit,timeout,vmlinux):
             r.breakpoint(svc,False);r.step();r.breakpoint(svc);r.resume()
         # Stopped at the selected entry: it is the first call recorded.
         first=svc_entry(r);r.breakpoint(svc,False)  # record() inserts its own breakpoints once each
-        calls,end=record(r,svc,None,limit,timeout,result_at=result_point(vmlinux),pending=first)
+        from kernel_state_dump import RAM_BASE,ram_size
+        calls,end=record(r,svc,None,limit,timeout,result_at=result_point(vmlinux),pending=first,memory=memory,
+                         memory_ram=(RAM_BASE,RAM_BASE+ram_size(spec)))
         if end['reason']!='exited':r.detach()
     report=dict(kind='native',checkpoint=str(checkpoint),calls=calls,end=end)
     (out/'calls.json').write_text(json.dumps(report,indent=1)+'\n');return report
 
 
 def compare(a,b):
-    x=json.load(open(a))['calls'];y=json.load(open(b))['calls'];rows=[];first=None
+    x=json.loads(Path(a).read_text())['calls'];y=json.loads(Path(b).read_text())['calls'];rows=[];first=None
     # A user exception repeated identically at once (the instruction retried after the kernel resolved it; the
     # live machine can also report the vector stop twice) has no further effect: consecutive duplicates collapse.
     def collapse(z):
@@ -422,11 +556,21 @@ def compare(a,b):
         return out,len(z)-len(out)
     (x,cx),(y,cy)=collapse(x),collapse(y)
     events=[sum(1 for c in z if c.get('event')) for z in (x,y)]
+    memory_compared=0;memory_identical=0;first_memory_difference=None
     for i,(p,q) in enumerate(zip(x,y)):
         same=p['number']==q['number'] and p['arguments']==q['arguments'] and p['result']==q['result']
+        if 'memory' in p or 'memory' in q:
+            # Missing memory on one side is a failed comparison, never silently
+            # accepted as coverage. Compare virtual pages, not their host PFNs.
+            memory_compared+=1;memory_same='memory' in p and 'memory' in q and p['memory']==q['memory']
+            memory_identical+=memory_same;same=bool(same and memory_same)
+            if not memory_same and first_memory_difference is None:first_memory_difference=i
         if not same and first is None:first=i
         rows.append(same)
-    return dict(compared=len(rows),identical=sum(rows),first_difference=first,lengths=[len(x),len(y)],exception_events=events,collapsed_repeats=[cx,cy])
+    if first is None and len(x)!=len(y):first=len(rows)
+    return dict(compared=len(rows),identical=sum(rows),first_difference=first,lengths=[len(x),len(y)],exception_events=events,collapsed_repeats=[cx,cy],
+                memory_compared=memory_compared,memory_identical=memory_identical,first_memory_difference=first_memory_difference,
+                matches=first is None)
 
 
 def main():
@@ -435,25 +579,40 @@ def main():
     b.add_argument('--closure',help='restrict code to this closure (kernel_code_closure.py); default: whole kernel text minus boundaries')
     b.add_argument('--out',required=True);b.add_argument('--state',choices=['reachable','full'],default='full')
     b.add_argument('--relocate',type=lambda v:int(v,0),default=0,help='move RAM by this many bytes (a multiple of 128 MiB)')
-    b.add_argument('--dwarf-db',help='kernel_dwarf_db.py output (needed with --relocate)')
+    b.add_argument('--dwarf-db',help='kernel DWARF database (required for --relocate; optional EL0 CPU-data recovery)')
     b.add_argument('--relocate-linear',type=lambda v:int(v,0),default=0,help='move the linear map (and vmemmap) by this many bytes')
     b.add_argument('--va-profile',help='kernel_va_survey.py profile (needed with --relocate-linear)')
+    b.add_argument('--shift-kernel',type=lambda v:int(v,0),default=0,help='move the whole kernel address space by this many bytes (va_shift.py)')
+    b.add_argument('--lower-kernel',type=lambda v:int(v,0),default=0,help='lower the kernel into the user half; the value moves the linear map off address 0 first (va_shift.lower)')
+    b.add_argument('--execution',choices=['el1','el0-minios'],default='el1',help='kernel execution runtime')
+    b.add_argument('--el0-dispatch',choices=['traps','branches'],default='traps',help='EL0 architecture-edge dispatch; branches use stack-free shadow-register veneers where supported')
     r=sub.add_parser('run');r.add_argument('--image',required=True);r.add_argument('--out',required=True)
     r.add_argument('--limit',type=int,default=10000);r.add_argument('--timeout',type=int,default=120)
     r.add_argument('--count',action='append',default=[],help='kernel function whose entries are counted (e.g. __switch_to)')
+    r.add_argument('--memory',action='store_true',help='hash every accessible user page after each syscall')
+    r.add_argument('--native-counters',help='matching native package: record ordered architecture counter inputs')
     n=sub.add_parser('native');n.add_argument('--checkpoint',required=True);n.add_argument('--contract',default=str(ROOT/'integrations/linux_aarch64/svc-boundary.json'))
     n.add_argument('--select',action='append',required=True);n.add_argument('--occurrence',type=int,default=1);n.add_argument('--out',required=True)
     n.add_argument('--limit',type=int,default=10000);n.add_argument('--timeout',type=int,default=120)
     n.add_argument('--vmlinux',default=str(ROOT/'build/linux-kernel-clang19-20261108/vmlinux'),help='the live kernel build (its el0_svc result point)')
+    n.add_argument('--memory',action='store_true',help='hash every accessible user page after each syscall')
     c=sub.add_parser('compare');c.add_argument('a');c.add_argument('b')
     a=p.parse_args()
-    if a.command=='build':print(json.dumps(build(a.dump,a.vmlinux,a.profile,a.closure,a.out,a.state,a.relocate,a.dwarf_db,a.relocate_linear,a.va_profile)))
+    if a.command=='build':
+        if a.execution!='el0-minios' and a.el0_dispatch!='traps':p.error('--el0-dispatch requires --execution el0-minios')
+        if a.execution=='el0-minios':
+            if a.closure or a.state!='full' or a.relocate:p.error('el0-minios currently requires whole text, full state and no physical relocation')
+            from source_image_el0 import build as build_el0
+            print(json.dumps(build_el0(a.dump,a.vmlinux,a.profile,a.out,a.dwarf_db,a.lower_kernel,a.va_profile,a.el0_dispatch)))
+        else:print(json.dumps(build(a.dump,a.vmlinux,a.profile,a.closure,a.out,a.state,a.relocate,a.dwarf_db,a.relocate_linear,a.va_profile,a.shift_kernel,a.lower_kernel)))
     elif a.command=='run':
-        rep=run_image(a.image,a.out,a.limit,a.timeout,a.count);print(json.dumps(dict(calls=len(rep['calls']),end=rep['end'])))
+        rep=run_image(a.image,a.out,a.limit,a.timeout,a.count,a.memory,a.native_counters);print(json.dumps(dict(calls=len(rep['calls']),end=rep['end'],counter_reads=rep.get('counter_reads'))))
     elif a.command=='native':
         select={k:int(v,0) for k,_,v in (x.partition('=') for x in a.select)}
-        rep=run_native(a.checkpoint,a.contract,select,a.occurrence,a.out,a.limit,a.timeout,a.vmlinux);print(json.dumps(dict(calls=len(rep['calls']),end=rep['end'])))
-    else:print(json.dumps(compare(a.a,a.b)))
+        rep=run_native(a.checkpoint,a.contract,select,a.occurrence,a.out,a.limit,a.timeout,a.vmlinux,a.memory);print(json.dumps(dict(calls=len(rep['calls']),end=rep['end'])))
+    else:
+        result=compare(a.a,a.b);print(json.dumps(result))
+        if not result['matches']:sys.exit(1)
 
 
 if __name__=='__main__':main()

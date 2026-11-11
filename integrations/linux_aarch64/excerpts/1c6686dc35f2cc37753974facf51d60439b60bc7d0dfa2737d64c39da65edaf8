@@ -1,0 +1,306 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Reviewed original Linux v6.10 kernel/futex/waitwake.c definitions. */
+
+int futex_wake(u32 __user *uaddr, unsigned int flags, int nr_wake, u32 bitset)
+{
+	struct futex_hash_bucket *hb;
+	struct futex_q *this, *next;
+	union futex_key key = FUTEX_KEY_INIT;
+	DEFINE_WAKE_Q(wake_q);
+	int ret;
+
+	if (!bitset)
+		return -EINVAL;
+
+	ret = get_futex_key(uaddr, flags, &key, FUTEX_READ);
+	if (unlikely(ret != 0))
+		return ret;
+
+	if ((flags & FLAGS_STRICT) && !nr_wake)
+		return 0;
+
+	hb = futex_hash(&key);
+
+	/* Make sure we really have tasks to wakeup */
+	if (!futex_hb_waiters_pending(hb))
+		return ret;
+
+	spin_lock(&hb->lock);
+
+	plist_for_each_entry_safe(this, next, &hb->chain, list) {
+		if (futex_match (&this->key, &key)) {
+			if (this->pi_state || this->rt_waiter) {
+				ret = -EINVAL;
+				break;
+			}
+
+			/* Check if one of the bits is set in both bitsets */
+			if (!(this->bitset & bitset))
+				continue;
+
+			this->wake(&wake_q, this);
+			if (++ret >= nr_wake)
+				break;
+		}
+	}
+
+	spin_unlock(&hb->lock);
+	wake_up_q(&wake_q);
+	return ret;
+}
+
+int futex_wait_setup(u32 __user *uaddr, u32 val, unsigned int flags,
+		     struct futex_q *q, struct futex_hash_bucket **hb)
+{
+	u32 uval;
+	int ret;
+
+	/*
+	 * Access the page AFTER the hash-bucket is locked.
+	 * Order is important:
+	 *
+	 *   Userspace waiter: val = var; if (cond(val)) futex_wait(&var, val);
+	 *   Userspace waker:  if (cond(var)) { var = new; futex_wake(&var); }
+	 *
+	 * The basic logical guarantee of a futex is that it blocks ONLY
+	 * if cond(var) is known to be true at the time of blocking, for
+	 * any cond.  If we locked the hash-bucket after testing *uaddr, that
+	 * would open a race condition where we could block indefinitely with
+	 * cond(var) false, which would violate the guarantee.
+	 *
+	 * On the other hand, we insert q and release the hash-bucket only
+	 * after testing *uaddr.  This guarantees that futex_wait() will NOT
+	 * absorb a wakeup if *uaddr does not match the desired values
+	 * while the syscall executes.
+	 */
+retry:
+	ret = get_futex_key(uaddr, flags, &q->key, FUTEX_READ);
+	if (unlikely(ret != 0))
+		return ret;
+
+retry_private:
+	*hb = futex_q_lock(q);
+
+	ret = futex_get_value_locked(&uval, uaddr);
+
+	if (ret) {
+		futex_q_unlock(*hb);
+
+		ret = get_user(uval, uaddr);
+		if (ret)
+			return ret;
+
+		if (!(flags & FLAGS_SHARED))
+			goto retry_private;
+
+		goto retry;
+	}
+
+	if (uval != val) {
+		futex_q_unlock(*hb);
+		ret = -EWOULDBLOCK;
+	}
+
+	return ret;
+}
+
+int __futex_wait(u32 __user *uaddr, unsigned int flags, u32 val,
+		 struct hrtimer_sleeper *to, u32 bitset)
+{
+	struct futex_q q = futex_q_init;
+	struct futex_hash_bucket *hb;
+	int ret;
+
+	if (!bitset)
+		return -EINVAL;
+
+	q.bitset = bitset;
+
+retry:
+	/*
+	 * Prepare to wait on uaddr. On success, it holds hb->lock and q
+	 * is initialized.
+	 */
+	ret = futex_wait_setup(uaddr, val, flags, &q, &hb);
+	if (ret)
+		return ret;
+
+	/* futex_queue and wait for wakeup, timeout, or a signal. */
+	futex_wait_queue(hb, &q, to);
+
+	/* If we were woken (and unqueued), we succeeded, whatever. */
+	if (!futex_unqueue(&q))
+		return 0;
+
+	if (to && !to->task)
+		return -ETIMEDOUT;
+
+	/*
+	 * We expect signal_pending(current), but we might be the
+	 * victim of a spurious wakeup as well.
+	 */
+	if (!signal_pending(current))
+		goto retry;
+
+	return -ERESTARTSYS;
+}
+
+int futex_wait(u32 __user *uaddr, unsigned int flags, u32 val, ktime_t *abs_time, u32 bitset)
+{
+	struct hrtimer_sleeper timeout, *to;
+	struct restart_block *restart;
+	int ret;
+
+	to = futex_setup_timer(abs_time, &timeout, flags,
+			       current->timer_slack_ns);
+
+	ret = __futex_wait(uaddr, flags, val, to, bitset);
+
+	/* No timeout, nothing to clean up. */
+	if (!to)
+		return ret;
+
+	hrtimer_cancel(&to->timer);
+	destroy_hrtimer_on_stack(&to->timer);
+
+	if (ret == -ERESTARTSYS) {
+		restart = &current->restart_block;
+		restart->futex.uaddr = uaddr;
+		restart->futex.val = val;
+		restart->futex.time = *abs_time;
+		restart->futex.bitset = bitset;
+		restart->futex.flags = flags | FLAGS_HAS_TIMEOUT;
+
+		return set_restart_fn(restart, futex_wait_restart);
+	}
+
+	return ret;
+}
+
+static int futex_atomic_op_inuser(unsigned int encoded_op, u32 __user *uaddr)
+{
+	unsigned int op =	  (encoded_op & 0x70000000) >> 28;
+	unsigned int cmp =	  (encoded_op & 0x0f000000) >> 24;
+	int oparg = sign_extend32((encoded_op & 0x00fff000) >> 12, 11);
+	int cmparg = sign_extend32(encoded_op & 0x00000fff, 11);
+	int oldval, ret;
+
+	if (encoded_op & (FUTEX_OP_OPARG_SHIFT << 28)) {
+		if (oparg < 0 || oparg > 31) {
+			char comm[sizeof(current->comm)];
+			/*
+			 * kill this print and return -EINVAL when userspace
+			 * is sane again
+			 */
+			pr_info_ratelimited("futex_wake_op: %s tries to shift op by %d; fix this program\n",
+					get_task_comm(comm, current), oparg);
+			oparg &= 31;
+		}
+		oparg = 1 << oparg;
+	}
+
+	pagefault_disable();
+	ret = arch_futex_atomic_op_inuser(op, oparg, &oldval, uaddr);
+	pagefault_enable();
+	if (ret)
+		return ret;
+
+	switch (cmp) {
+	case FUTEX_OP_CMP_EQ:
+		return oldval == cmparg;
+	case FUTEX_OP_CMP_NE:
+		return oldval != cmparg;
+	case FUTEX_OP_CMP_LT:
+		return oldval < cmparg;
+	case FUTEX_OP_CMP_GE:
+		return oldval >= cmparg;
+	case FUTEX_OP_CMP_LE:
+		return oldval <= cmparg;
+	case FUTEX_OP_CMP_GT:
+		return oldval > cmparg;
+	default:
+		return -ENOSYS;
+	}
+}
+
+int futex_wake_op(u32 __user *uaddr1, unsigned int flags, u32 __user *uaddr2,
+		  int nr_wake, int nr_wake2, int op)
+{
+	union futex_key key1 = FUTEX_KEY_INIT, key2 = FUTEX_KEY_INIT;
+	struct futex_hash_bucket *hb1, *hb2;
+	struct futex_q *this, *next;
+	int ret, op_ret;
+	DEFINE_WAKE_Q(wake_q);
+
+retry:
+	ret = get_futex_key(uaddr1, flags, &key1, FUTEX_READ);
+	if (unlikely(ret != 0))
+		return ret;
+	ret = get_futex_key(uaddr2, flags, &key2, FUTEX_WRITE);
+	if (unlikely(ret != 0))
+		return ret;
+
+	hb1 = futex_hash(&key1);
+	hb2 = futex_hash(&key2);
+
+retry_private:
+	double_lock_hb(hb1, hb2);
+	op_ret = futex_atomic_op_inuser(op, uaddr2);
+	if (unlikely(op_ret < 0)) {
+		double_unlock_hb(hb1, hb2);
+
+		if (!IS_ENABLED(CONFIG_MMU) ||
+		    unlikely(op_ret != -EFAULT && op_ret != -EAGAIN)) {
+			/*
+			 * we don't get EFAULT from MMU faults if we don't have
+			 * an MMU, but we might get them from range checking
+			 */
+			ret = op_ret;
+			return ret;
+		}
+
+		if (op_ret == -EFAULT) {
+			ret = fault_in_user_writeable(uaddr2);
+			if (ret)
+				return ret;
+		}
+
+		cond_resched();
+		if (!(flags & FLAGS_SHARED))
+			goto retry_private;
+		goto retry;
+	}
+
+	plist_for_each_entry_safe(this, next, &hb1->chain, list) {
+		if (futex_match (&this->key, &key1)) {
+			if (this->pi_state || this->rt_waiter) {
+				ret = -EINVAL;
+				goto out_unlock;
+			}
+			this->wake(&wake_q, this);
+			if (++ret >= nr_wake)
+				break;
+		}
+	}
+
+	if (op_ret > 0) {
+		op_ret = 0;
+		plist_for_each_entry_safe(this, next, &hb2->chain, list) {
+			if (futex_match (&this->key, &key2)) {
+				if (this->pi_state || this->rt_waiter) {
+					ret = -EINVAL;
+					goto out_unlock;
+				}
+				this->wake(&wake_q, this);
+				if (++op_ret >= nr_wake2)
+					break;
+			}
+		}
+		ret += op_ret;
+	}
+
+out_unlock:
+	double_unlock_hb(hb1, hb2);
+	wake_up_q(&wake_q);
+	return ret;
+}

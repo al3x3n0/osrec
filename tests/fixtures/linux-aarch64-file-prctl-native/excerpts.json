@@ -1,0 +1,21 @@
+{
+ "files": {
+  "fs/file.c": "2ca43b502039d9cc59aa8a3f29bec2a6ad45db0732f6b4f6ce8f6de2e2d673c9",
+  "fs/open.c": "6ec6e90fac696061dc5995dda45741a10853793492b7c02ae2b5b558ab9c3d7e",
+  "fs/read_write.c": "4ed51c1f62d1063fe7485c4683049c6959907a67f7eef2b9e1899d1782edbea7",
+  "fs/stat.c": "dd513f2c313fc9e4022adf6d09ba83b2f3f1a230351ad9ae78e40b96a81770a8",
+  "include/linux/capability.h": "f3ecb56ab007c8dd6f500e6760a79f438fec94dbe932e5cd0b6e62910445d184",
+  "include/uapi/asm-generic/fcntl.h": "d00825b065851e8b00bc65225f1631807af63d7a1a021146cd4b854ba6112c4e",
+  "include/uapi/asm-generic/stat.h": "a72ea1ea8861f90afec442d62a36e00f9ff4e4897aa6740ff60064cd3665d8f1",
+  "include/uapi/asm-generic/unistd.h": "7b8859c027f2bb2d4801ed1594513970a4ad0aeed83d74ad8e4e1ceda29fc8ba",
+  "include/uapi/linux/capability.h": "d424a94f4b53ce44c5841a0c5836377dab0bf53d6ab51da6db77188abfeae79b",
+  "include/uapi/linux/prctl.h": "435a8306038df37beba70afa7ed3c29522c4198e2d291465abe1cf2bf6b0279d",
+  "include/uapi/linux/securebits.h": "21590a54266efd535e94d51fb1ec051534df1583ebb57e05000210ee71e2d080",
+  "kernel/capability.c": "eedb22947859414eb20ea1181a777a4cce9dd8dca115a27aa6926c948dbcb8b2",
+  "kernel/groups.c": "177f28fc3d5353b69be67bfe621bb62c74d7cb7a5253e8689c86600d5d670c57",
+  "kernel/prctl-dispatch-prefix.txt": "ab479a2a34bd5f22d9c05c4f50ee1166492f53b68a82ae094179dd776d7458fa",
+  "kernel/sys.c": "f7bc69f020c6a44a6a363556ede246cca7e6087013c341e42b169fca849fd53d",
+  "security/commoncap.c": "01ebe9308bc281abe161d998786ea1f36d7e5c88d8b60717469b4e851f6f5367"
+ },
+ "format": "osrec-kernel-excerpts-v1"
+}

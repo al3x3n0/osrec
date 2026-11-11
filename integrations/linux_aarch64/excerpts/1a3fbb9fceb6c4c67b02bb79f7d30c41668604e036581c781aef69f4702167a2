@@ -1,0 +1,430 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+/* Reviewed original Linux v6.10 lib/iov_iter.c definitions. */
+
+static inline bool page_copy_sane(struct page *page, size_t offset, size_t n)
+{
+	struct page *head;
+	size_t v = n + offset;
+
+	/*
+	 * The general case needs to access the page order in order
+	 * to compute the page size.
+	 * However, we mostly deal with order-0 pages and thus can
+	 * avoid a possible cache line miss for requests that fit all
+	 * page orders.
+	 */
+	if (n <= v && v <= PAGE_SIZE)
+		return true;
+
+	head = compound_head(page);
+	v += (page - head) << PAGE_SHIFT;
+
+	if (WARN_ON(n > v || v > page_size(head)))
+		return false;
+	return true;
+}
+
+size_t copy_page_to_iter(struct page *page, size_t offset, size_t bytes,
+			 struct iov_iter *i)
+{
+	size_t res = 0;
+	if (!page_copy_sane(page, offset, bytes))
+		return 0;
+	if (WARN_ON_ONCE(i->data_source))
+		return 0;
+	page += offset / PAGE_SIZE; // first subpage
+	offset %= PAGE_SIZE;
+	while (1) {
+		void *kaddr = kmap_local_page(page);
+		size_t n = min(bytes, (size_t)PAGE_SIZE - offset);
+		n = _copy_to_iter(kaddr + offset, n, i);
+		kunmap_local(kaddr);
+		res += n;
+		bytes -= n;
+		if (!bytes || !n)
+			break;
+		offset += n;
+		if (offset == PAGE_SIZE) {
+			page++;
+			offset = 0;
+		}
+	}
+	return res;
+}
+
+size_t fault_in_iov_iter_readable(const struct iov_iter *i, size_t size)
+{
+	if (iter_is_ubuf(i)) {
+		size_t n = min(size, iov_iter_count(i));
+		n -= fault_in_readable(i->ubuf + i->iov_offset, n);
+		return size - n;
+	} else if (iter_is_iovec(i)) {
+		size_t count = min(size, iov_iter_count(i));
+		const struct iovec *p;
+		size_t skip;
+
+		size -= count;
+		for (p = iter_iov(i), skip = i->iov_offset; count; p++, skip = 0) {
+			size_t len = min(count, p->iov_len - skip);
+			size_t ret;
+
+			if (unlikely(!len))
+				continue;
+			ret = fault_in_readable(p->iov_base + skip, len);
+			count -= len - ret;
+			if (ret)
+				break;
+		}
+		return count + size;
+	}
+	return 0;
+}
+
+size_t copy_page_from_iter_atomic(struct page *page, size_t offset,
+		size_t bytes, struct iov_iter *i)
+{
+	size_t n, copied = 0;
+
+	if (!page_copy_sane(page, offset, bytes))
+		return 0;
+	if (WARN_ON_ONCE(!i->data_source))
+		return 0;
+
+	do {
+		char *p;
+
+		n = bytes - copied;
+		if (PageHighMem(page)) {
+			page += offset / PAGE_SIZE;
+			offset %= PAGE_SIZE;
+			n = min_t(size_t, n, PAGE_SIZE - offset);
+		}
+
+		p = kmap_atomic(page) + offset;
+		n = __copy_from_iter(p, n, i);
+		kunmap_atomic(p);
+		copied += n;
+		offset += n;
+	} while (PageHighMem(page) && copied != bytes && n > 0);
+
+	return copied;
+}
+
+void iov_iter_revert(struct iov_iter *i, size_t unroll)
+{
+	if (!unroll)
+		return;
+	if (WARN_ON(unroll > MAX_RW_COUNT))
+		return;
+	i->count += unroll;
+	if (unlikely(iov_iter_is_discard(i)))
+		return;
+	if (unroll <= i->iov_offset) {
+		i->iov_offset -= unroll;
+		return;
+	}
+	unroll -= i->iov_offset;
+	if (iov_iter_is_xarray(i) || iter_is_ubuf(i)) {
+		BUG(); /* We should never go beyond the start of the specified
+			* range since we might then be straying into pages that
+			* aren't pinned.
+			*/
+	} else if (iov_iter_is_bvec(i)) {
+		const struct bio_vec *bvec = i->bvec;
+		while (1) {
+			size_t n = (--bvec)->bv_len;
+			i->nr_segs++;
+			if (unroll <= n) {
+				i->bvec = bvec;
+				i->iov_offset = n - unroll;
+				return;
+			}
+			unroll -= n;
+		}
+	} else { /* same logics for iovec and kvec */
+		const struct iovec *iov = iter_iov(i);
+		while (1) {
+			size_t n = (--iov)->iov_len;
+			i->nr_segs++;
+			if (unroll <= n) {
+				i->__iov = iov;
+				i->iov_offset = n - unroll;
+				return;
+			}
+			unroll -= n;
+		}
+	}
+}
+
+static __always_inline
+size_t copy_to_user_iter(void __user *iter_to, size_t progress,
+			 size_t len, void *from, void *priv2)
+{
+	if (should_fail_usercopy())
+		return len;
+	if (access_ok(iter_to, len)) {
+		from += progress;
+		instrument_copy_to_user(iter_to, from, len);
+		len = raw_copy_to_user(iter_to, from, len);
+	}
+	return len;
+}
+
+static __always_inline
+size_t copy_from_user_iter(void __user *iter_from, size_t progress,
+			   size_t len, void *to, void *priv2)
+{
+	size_t res = len;
+
+	if (should_fail_usercopy())
+		return len;
+	if (access_ok(iter_from, len)) {
+		to += progress;
+		instrument_copy_from_user_before(to, iter_from, len);
+		res = raw_copy_from_user(to, iter_from, len);
+		instrument_copy_from_user_after(to, iter_from, len, res);
+	}
+	return res;
+}
+
+static __always_inline
+size_t memcpy_to_iter(void *iter_to, size_t progress,
+		      size_t len, void *from, void *priv2)
+{
+	memcpy(iter_to, from + progress, len);
+	return 0;
+}
+
+static __always_inline
+size_t memcpy_from_iter(void *iter_from, size_t progress,
+			size_t len, void *to, void *priv2)
+{
+	memcpy(to + progress, iter_from, len);
+	return 0;
+}
+
+size_t _copy_to_iter(const void *addr, size_t bytes, struct iov_iter *i)
+{
+	if (WARN_ON_ONCE(i->data_source))
+		return 0;
+	if (user_backed_iter(i))
+		might_fault();
+	return iterate_and_advance(i, bytes, (void *)addr,
+				   copy_to_user_iter, memcpy_to_iter);
+}
+
+static __always_inline
+size_t __copy_from_iter(void *addr, size_t bytes, struct iov_iter *i)
+{
+	return iterate_and_advance(i, bytes, addr,
+				   copy_from_user_iter, memcpy_from_iter);
+}
+
+void iov_iter_init(struct iov_iter *i, unsigned int direction,
+			const struct iovec *iov, unsigned long nr_segs,
+			size_t count)
+{
+	WARN_ON(direction & ~(READ | WRITE));
+	*i = (struct iov_iter) {
+		.iter_type = ITER_IOVEC,
+		.nofault = false,
+		.data_source = direction,
+		.__iov = iov,
+		.nr_segs = nr_segs,
+		.iov_offset = 0,
+		.count = count
+	};
+}
+
+static __noclone int copy_iovec_from_user(struct iovec *iov,
+		const struct iovec __user *uiov, unsigned long nr_segs)
+{
+	int ret = -EFAULT;
+
+	if (!user_access_begin(uiov, nr_segs * sizeof(*uiov)))
+		return -EFAULT;
+
+	do {
+		void __user *buf;
+		ssize_t len;
+
+		unsafe_get_user(len, &uiov->iov_len, uaccess_end);
+		unsafe_get_user(buf, &uiov->iov_base, uaccess_end);
+
+		/* check for size_t not fitting in ssize_t .. */
+		if (unlikely(len < 0)) {
+			ret = -EINVAL;
+			goto uaccess_end;
+		}
+		iov->iov_base = buf;
+		iov->iov_len = len;
+
+		uiov++; iov++;
+	} while (--nr_segs);
+
+	ret = 0;
+uaccess_end:
+	user_access_end();
+	return ret;
+}
+
+struct iovec *iovec_from_user(const struct iovec __user *uvec,
+		unsigned long nr_segs, unsigned long fast_segs,
+		struct iovec *fast_iov, bool compat)
+{
+	struct iovec *iov = fast_iov;
+	int ret;
+
+	/*
+	 * SuS says "The readv() function *may* fail if the iovcnt argument was
+	 * less than or equal to 0, or greater than {IOV_MAX}.  Linux has
+	 * traditionally returned zero for zero segments, so...
+	 */
+	if (nr_segs == 0)
+		return iov;
+	if (nr_segs > UIO_MAXIOV)
+		return ERR_PTR(-EINVAL);
+	if (nr_segs > fast_segs) {
+		iov = kmalloc_array(nr_segs, sizeof(struct iovec), GFP_KERNEL);
+		if (!iov)
+			return ERR_PTR(-ENOMEM);
+	}
+
+	if (unlikely(compat))
+		ret = copy_compat_iovec_from_user(iov, uvec, nr_segs);
+	else
+		ret = copy_iovec_from_user(iov, uvec, nr_segs);
+	if (ret) {
+		if (iov != fast_iov)
+			kfree(iov);
+		return ERR_PTR(ret);
+	}
+
+	return iov;
+}
+
+static ssize_t __import_iovec_ubuf(int type, const struct iovec __user *uvec,
+				   struct iovec **iovp, struct iov_iter *i,
+				   bool compat)
+{
+	struct iovec *iov = *iovp;
+	ssize_t ret;
+
+	if (compat)
+		ret = copy_compat_iovec_from_user(iov, uvec, 1);
+	else
+		ret = copy_iovec_from_user(iov, uvec, 1);
+	if (unlikely(ret))
+		return ret;
+
+	ret = import_ubuf(type, iov->iov_base, iov->iov_len, i);
+	if (unlikely(ret))
+		return ret;
+	*iovp = NULL;
+	return i->count;
+}
+
+ssize_t __import_iovec(int type, const struct iovec __user *uvec,
+		 unsigned nr_segs, unsigned fast_segs, struct iovec **iovp,
+		 struct iov_iter *i, bool compat)
+{
+	ssize_t total_len = 0;
+	unsigned long seg;
+	struct iovec *iov;
+
+	if (nr_segs == 1)
+		return __import_iovec_ubuf(type, uvec, iovp, i, compat);
+
+	iov = iovec_from_user(uvec, nr_segs, fast_segs, *iovp, compat);
+	if (IS_ERR(iov)) {
+		*iovp = NULL;
+		return PTR_ERR(iov);
+	}
+
+	/*
+	 * According to the Single Unix Specification we should return EINVAL if
+	 * an element length is < 0 when cast to ssize_t or if the total length
+	 * would overflow the ssize_t return value of the system call.
+	 *
+	 * Linux caps all read/write calls to MAX_RW_COUNT, and avoids the
+	 * overflow case.
+	 */
+	for (seg = 0; seg < nr_segs; seg++) {
+		ssize_t len = (ssize_t)iov[seg].iov_len;
+
+		if (!access_ok(iov[seg].iov_base, len)) {
+			if (iov != *iovp)
+				kfree(iov);
+			*iovp = NULL;
+			return -EFAULT;
+		}
+
+		if (len > MAX_RW_COUNT - total_len) {
+			len = MAX_RW_COUNT - total_len;
+			iov[seg].iov_len = len;
+		}
+		total_len += len;
+	}
+
+	iov_iter_init(i, type, iov, nr_segs, total_len);
+	if (iov == *iovp)
+		*iovp = NULL;
+	else
+		*iovp = iov;
+	return total_len;
+}
+
+ssize_t import_iovec(int type, const struct iovec __user *uvec,
+		 unsigned nr_segs, unsigned fast_segs,
+		 struct iovec **iovp, struct iov_iter *i)
+{
+	return __import_iovec(type, uvec, nr_segs, fast_segs, iovp, i,
+			      in_compat_syscall());
+}
+
+int import_ubuf(int rw, void __user *buf, size_t len, struct iov_iter *i)
+{
+	if (len > MAX_RW_COUNT)
+		len = MAX_RW_COUNT;
+	if (unlikely(!access_ok(buf, len)))
+		return -EFAULT;
+
+	iov_iter_ubuf(i, rw, buf, len);
+	return 0;
+}
+
+static void iov_iter_iovec_advance(struct iov_iter *i, size_t size)
+{
+	const struct iovec *iov, *end;
+
+	if (!i->count)
+		return;
+	i->count -= size;
+
+	size += i->iov_offset; // from beginning of current segment
+	for (iov = iter_iov(i), end = iov + i->nr_segs; iov < end; iov++) {
+		if (likely(size < iov->iov_len))
+			break;
+		size -= iov->iov_len;
+	}
+	i->iov_offset = size;
+	i->nr_segs -= iov - iter_iov(i);
+	i->__iov = iov;
+}
+
+void iov_iter_advance(struct iov_iter *i, size_t size)
+{
+	if (unlikely(i->count < size))
+		size = i->count;
+	if (likely(iter_is_ubuf(i)) || unlikely(iov_iter_is_xarray(i))) {
+		i->iov_offset += size;
+		i->count -= size;
+	} else if (likely(iter_is_iovec(i) || iov_iter_is_kvec(i))) {
+		/* iovec and kvec have identical layouts */
+		iov_iter_iovec_advance(i, size);
+	} else if (iov_iter_is_bvec(i)) {
+		iov_iter_bvec_advance(i, size);
+	} else if (iov_iter_is_discard(i)) {
+		i->count -= size;
+	}
+}

@@ -1,0 +1,12 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Reviewed original Linux v6.10 include/linux/time_namespace.h definitions (6.10.14, the running kernel). */
+
+static inline ktime_t timens_ktime_to_host(clockid_t clockid, ktime_t tim)
+{
+	struct time_namespace *ns = current->nsproxy->time_ns;
+
+	if (likely(ns == &init_time_ns))
+		return tim;
+
+	return do_timens_ktime_to_host(clockid, tim, &ns->offsets);
+}

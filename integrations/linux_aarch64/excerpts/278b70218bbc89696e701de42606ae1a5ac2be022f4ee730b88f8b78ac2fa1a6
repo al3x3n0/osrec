@@ -1,0 +1,45 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Reviewed original Linux v6.10 arch/arm64/include/asm/pgtable.h definitions (6.10.14, the running kernel). */
+
+static inline unsigned long pmd_page_vaddr(pmd_t pmd)
+{
+	return (unsigned long)__va(pmd_page_paddr(pmd));
+}
+
+static inline pmd_t *pud_pgtable(pud_t pud)
+{
+	return (pmd_t *)__va(pud_page_paddr(pud));
+}
+
+static inline pud_t *p4d_to_folded_pud(p4d_t *p4dp, unsigned long addr)
+{
+	return (pud_t *)PTR_ALIGN_DOWN(p4dp, PAGE_SIZE) + pud_index(addr);
+}
+
+static inline
+pud_t *pud_offset_lockless(p4d_t *p4dp, p4d_t p4d, unsigned long addr)
+{
+	if (!pgtable_l4_enabled())
+		return p4d_to_folded_pud(p4dp, addr);
+	return (pud_t *)__va(p4d_page_paddr(p4d)) + pud_index(addr);
+}
+
+static inline pte_t ptep_get(pte_t *ptep)
+{
+	pte_t pte = __ptep_get(ptep);
+
+	if (likely(!pte_valid_cont(pte)))
+		return pte;
+
+	return contpte_ptep_get(ptep, pte);
+}
+
+static inline pte_t ptep_get_lockless(pte_t *ptep)
+{
+	pte_t pte = __ptep_get(ptep);
+
+	if (likely(!pte_valid_cont(pte)))
+		return pte;
+
+	return contpte_ptep_get_lockless(ptep);
+}

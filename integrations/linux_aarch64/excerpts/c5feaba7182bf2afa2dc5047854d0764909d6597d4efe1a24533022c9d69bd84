@@ -1,0 +1,15 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Reviewed original Linux v6.10 include/linux/ktime.h definitions (6.10.14, the running kernel). */
+
+static inline ktime_t ktime_set(const s64 secs, const unsigned long nsecs)
+{
+	if (unlikely(secs >= KTIME_SEC_MAX))
+		return KTIME_MAX;
+
+	return secs * NSEC_PER_SEC + (s64)nsecs;
+}
+
+static inline ktime_t timespec64_to_ktime(struct timespec64 ts)
+{
+	return ktime_set(ts.tv_sec, ts.tv_nsec);
+}

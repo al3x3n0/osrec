@@ -1,10 +1,10 @@
 """Binary kernel boundaries: table walks, trace parsing, the replay image and stub, and a live capture/replay."""
-import json,struct,sys,tempfile,unittest
+import json,struct,subprocess,sys,tempfile,unittest
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'tools'))
 from kernel_boundary_capture import walk,parse_trace,PLUGIN,capture
 from kernel_boundary_replay import elf,stub_source,RESTORE,replay
-from kernel_authenticity import measure
+from kernel_authenticity import measure,LLVM
 
 class Physical:
     """Physical memory of 8-byte descriptors, as the gdbstub reads it in physical mode."""
@@ -70,6 +70,23 @@ class AuthenticityTests(unittest.TestCase):
             # memset.S defines __pi_memset with memset as its weak alias; memcpy.S is not called.
             (d/'linux-memset.S').write_text('SYM_FUNC_START(__pi_memset)\nret\nSYM_FUNC_END(__pi_memset)\nSYM_FUNC_ALIAS_WEAK(memset, __pi_memset)\n')
             (d/'linux-memcpy.S').write_text('SYM_FUNC_START(memcpy)\nret\nSYM_FUNC_END(memcpy)\n')
+            s=measure(d,symbols,d)['source_slice']
+            self.assertEqual((s['original']['instructions'],s['absent']['instructions']),(3,1))
+
+    def test_macro_and_compiled_calls_reach_their_callees(self):
+        # cond_resched() is a model.h macro calling _cond_resched; a call only the compiled image shows (a macro
+        # local to the source) is found in slices.elf beside the sources.
+        with tempfile.TemporaryDirectory() as name:
+            d=Path(name)/'sources';d.mkdir();(d/'capture.json').write_text(json.dumps(dict(call=dict(number=64))))
+            (d/'trace.txt').write_text(''.join('I %x\n'%pc for pc in [0x200,0x300,0x400,0x500]))
+            symbols=lambda pc:{0x200:'__arm64_sys_write',0x300:'_cond_resched',0x400:'hidden',0x500:'unreached'}[pc]
+            (d/'model.h').write_text('#define cond_resched() ({\\\n\tosrec_kernel__cond_resched();\\\n})\n')
+            body='#define CALL_HIDDEN() osrec_kernel_ ## hidden()\nint osrec_kernel__cond_resched(void)\n{\n\treturn 0;\n}\nint osrec_kernel_hidden(void)\n{\n\treturn 1;\n}\nint osrec_kernel_unreached(void)\n{\n\treturn 2;\n}\n'
+            (d/'syscalls.c').write_text(body+'long osrec_kernel_linux_write(void)\n{\n\tcond_resched();\n\treturn CALL_HIDDEN();\n}\n');(d/'models.c').write_text('')
+            s=measure(d,symbols,d)['source_slice']
+            self.assertEqual((s['original']['instructions'],s['absent']['instructions']),(2,2))
+            source=Path(name)/'image.c';source.write_text('volatile int state;\n__attribute__((noinline)) int osrec_kernel_hidden(void){return state;}\nint osrec_kernel_linux_write(void){return osrec_kernel_hidden()+1;}\n')
+            subprocess.run([str(LLVM/'clang'),'--target=aarch64-none-elf','-O1','-ffreestanding','-nostdlib','-fuse-ld=lld','-Wl,-e,osrec_kernel_linux_write',str(source),'-o',str(Path(name)/'slices.elf')],check=True,capture_output=True)
             s=measure(d,symbols,d)['source_slice']
             self.assertEqual((s['original']['instructions'],s['absent']['instructions']),(3,1))
 

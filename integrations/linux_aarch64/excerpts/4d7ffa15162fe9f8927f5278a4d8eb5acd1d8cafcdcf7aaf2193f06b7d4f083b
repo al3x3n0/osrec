@@ -1,0 +1,538 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Reviewed original Linux v6.10 mm/slub.c definitions (6.10.14, the running kernel). */
+
+static inline void stat(const struct kmem_cache *s, enum stat_item si)
+{
+#ifdef CONFIG_SLUB_STATS
+	/*
+	 * The rmw is racy on a preemptible kernel but this is acceptable, so
+	 * avoid this_cpu_add()'s irq-disable overhead.
+	 */
+	raw_cpu_inc(s->cpu_slab->stat[si]);
+#endif
+}
+
+static inline
+void stat_add(const struct kmem_cache *s, enum stat_item si, int v)
+{
+#ifdef CONFIG_SLUB_STATS
+	raw_cpu_add(s->cpu_slab->stat[si], v);
+#endif
+}
+
+static inline freeptr_t freelist_ptr_encode(const struct kmem_cache *s,
+					    void *ptr, unsigned long ptr_addr)
+{
+	unsigned long encoded;
+
+#ifdef CONFIG_SLAB_FREELIST_HARDENED
+	encoded = (unsigned long)ptr ^ s->random ^ swab(ptr_addr);
+#else
+	encoded = (unsigned long)ptr;
+#endif
+	return (freeptr_t){.v = encoded};
+}
+
+static inline void *freelist_ptr_decode(const struct kmem_cache *s,
+					freeptr_t ptr, unsigned long ptr_addr)
+{
+	void *decoded;
+
+#ifdef CONFIG_SLAB_FREELIST_HARDENED
+	decoded = (void *)(ptr.v ^ s->random ^ swab(ptr_addr));
+#else
+	decoded = (void *)ptr.v;
+#endif
+	return decoded;
+}
+
+static inline void *get_freepointer(struct kmem_cache *s, void *object)
+{
+	unsigned long ptr_addr;
+	freeptr_t p;
+
+	object = kasan_reset_tag(object);
+	ptr_addr = (unsigned long)object + s->offset;
+	p = *(freeptr_t *)(ptr_addr);
+	return freelist_ptr_decode(s, p, ptr_addr);
+}
+
+static void prefetch_freepointer(const struct kmem_cache *s, void *object)
+{
+	prefetchw(object + s->offset);
+}
+
+static inline void *get_freepointer_safe(struct kmem_cache *s, void *object)
+{
+	unsigned long freepointer_addr;
+	freeptr_t p;
+
+	if (!debug_pagealloc_enabled_static())
+		return get_freepointer(s, object);
+
+	object = kasan_reset_tag(object);
+	freepointer_addr = (unsigned long)object + s->offset;
+	copy_from_kernel_nofault(&p, (freeptr_t *)freepointer_addr, sizeof(p));
+	return freelist_ptr_decode(s, p, freepointer_addr);
+}
+
+static inline void set_freepointer(struct kmem_cache *s, void *object, void *fp)
+{
+	unsigned long freeptr_addr = (unsigned long)object + s->offset;
+
+#ifdef CONFIG_SLAB_FREELIST_HARDENED
+	BUG_ON(object == fp); /* naive detection of double free or corruption */
+#endif
+
+	freeptr_addr = (unsigned long)kasan_reset_tag((void *)freeptr_addr);
+	*(freeptr_t *)freeptr_addr = freelist_ptr_encode(s, fp, freeptr_addr);
+}
+
+static __fastpath_inline
+bool memcg_slab_post_alloc_hook(struct kmem_cache *s, struct list_lru *lru,
+				gfp_t flags, size_t size, void **p)
+{
+	if (likely(!memcg_kmem_online()))
+		return true;
+
+	if (likely(!(flags & __GFP_ACCOUNT) && !(s->flags & SLAB_ACCOUNT)))
+		return true;
+
+	if (likely(__memcg_slab_post_alloc_hook(s, lru, flags, size, p)))
+		return true;
+
+	if (likely(size == 1)) {
+		memcg_alloc_abort_single(s, *p);
+		*p = NULL;
+	} else {
+		kmem_cache_free_bulk(s, size, p);
+	}
+
+	return false;
+}
+
+static __fastpath_inline
+void memcg_slab_free_hook(struct kmem_cache *s, struct slab *slab, void **p,
+			  int objects)
+{
+	struct slabobj_ext *obj_exts;
+
+	if (!memcg_kmem_online())
+		return;
+
+	obj_exts = slab_obj_exts(slab);
+	if (likely(!obj_exts))
+		return;
+
+	__memcg_slab_free_hook(s, slab, p, objects, obj_exts);
+}
+
+static __always_inline
+bool slab_free_hook(struct kmem_cache *s, void *x, bool init)
+{
+	kmemleak_free_recursive(x, s->flags);
+	kmsan_slab_free(s, x);
+
+	debug_check_no_locks_freed(x, s->object_size);
+
+	if (!(s->flags & SLAB_DEBUG_OBJECTS))
+		debug_check_no_obj_freed(x, s->object_size);
+
+	/* Use KCSAN to help debug racy use-after-free. */
+	if (!(s->flags & SLAB_TYPESAFE_BY_RCU))
+		__kcsan_check_access(x, s->object_size,
+				     KCSAN_ACCESS_WRITE | KCSAN_ACCESS_ASSERT);
+
+	if (kfence_free(x))
+		return false;
+
+	/*
+	 * As memory initialization might be integrated into KASAN,
+	 * kasan_slab_free and initialization memset's must be
+	 * kept together to avoid discrepancies in behavior.
+	 *
+	 * The initialization memset's clear the object and the metadata,
+	 * but don't touch the SLAB redzone.
+	 *
+	 * The object's freepointer is also avoided if stored outside the
+	 * object.
+	 */
+	if (unlikely(init)) {
+		int rsize;
+		unsigned int inuse, orig_size;
+
+		inuse = get_info_end(s);
+		orig_size = get_orig_size(s, x);
+		if (!kasan_has_integrated_init())
+			memset(kasan_reset_tag(x), 0, orig_size);
+		rsize = (s->flags & SLAB_RED_ZONE) ? s->red_left_pad : 0;
+		memset((char *)kasan_reset_tag(x) + inuse, 0,
+		       s->size - inuse - rsize);
+		/*
+		 * Restore orig_size, otherwize kmalloc redzone overwritten
+		 * would be reported
+		 */
+		set_orig_size(s, x, orig_size);
+
+	}
+	/* KASAN might put x into memory quarantine, delaying its reuse. */
+	return !kasan_slab_free(s, x, init);
+}
+
+static inline unsigned long next_tid(unsigned long tid)
+{
+	return tid + TID_STEP;
+}
+
+static inline int node_match(struct slab *slab, int node)
+{
+#ifdef CONFIG_NUMA
+	if (node != NUMA_NO_NODE && slab_nid(slab) != node)
+		return 0;
+#endif
+	return 1;
+}
+
+static inline bool
+__update_cpu_freelist_fast(struct kmem_cache *s,
+			   void *freelist_old, void *freelist_new,
+			   unsigned long tid)
+{
+	freelist_aba_t old = { .freelist = freelist_old, .counter = tid };
+	freelist_aba_t new = { .freelist = freelist_new, .counter = next_tid(tid) };
+
+	return this_cpu_try_cmpxchg_freelist(s->cpu_slab->freelist_tid.full,
+					     &old.full, new.full);
+}
+
+static __always_inline void *__slab_alloc_node(struct kmem_cache *s,
+		gfp_t gfpflags, int node, unsigned long addr, size_t orig_size)
+{
+	struct kmem_cache_cpu *c;
+	struct slab *slab;
+	unsigned long tid;
+	void *object;
+
+redo:
+	/*
+	 * Must read kmem_cache cpu data via this cpu ptr. Preemption is
+	 * enabled. We may switch back and forth between cpus while
+	 * reading from one cpu area. That does not matter as long
+	 * as we end up on the original cpu again when doing the cmpxchg.
+	 *
+	 * We must guarantee that tid and kmem_cache_cpu are retrieved on the
+	 * same cpu. We read first the kmem_cache_cpu pointer and use it to read
+	 * the tid. If we are preempted and switched to another cpu between the
+	 * two reads, it's OK as the two are still associated with the same cpu
+	 * and cmpxchg later will validate the cpu.
+	 */
+	c = raw_cpu_ptr(s->cpu_slab);
+	tid = READ_ONCE(c->tid);
+
+	/*
+	 * Irqless object alloc/free algorithm used here depends on sequence
+	 * of fetching cpu_slab's data. tid should be fetched before anything
+	 * on c to guarantee that object and slab associated with previous tid
+	 * won't be used with current tid. If we fetch tid first, object and
+	 * slab could be one associated with next tid and our alloc/free
+	 * request will be failed. In this case, we will retry. So, no problem.
+	 */
+	barrier();
+
+	/*
+	 * The transaction ids are globally unique per cpu and per operation on
+	 * a per cpu queue. Thus they can be guarantee that the cmpxchg_double
+	 * occurs on the right processor and that there was no operation on the
+	 * linked list in between.
+	 */
+
+	object = c->freelist;
+	slab = c->slab;
+
+	if (!USE_LOCKLESS_FAST_PATH() ||
+	    unlikely(!object || !slab || !node_match(slab, node))) {
+		object = __slab_alloc(s, gfpflags, node, addr, c, orig_size);
+	} else {
+		void *next_object = get_freepointer_safe(s, object);
+
+		/*
+		 * The cmpxchg will only match if there was no additional
+		 * operation and if we are on the right processor.
+		 *
+		 * The cmpxchg does the following atomically (without lock
+		 * semantics!)
+		 * 1. Relocate first pointer to the current per cpu area.
+		 * 2. Verify that tid and freelist have not been changed
+		 * 3. If they were not changed replace tid and freelist
+		 *
+		 * Since this is without lock semantics the protection is only
+		 * against code executing on this cpu *not* from access by
+		 * other cpus.
+		 */
+		if (unlikely(!__update_cpu_freelist_fast(s, object, next_object, tid))) {
+			note_cmpxchg_failure("slab_alloc", s, tid);
+			goto redo;
+		}
+		prefetch_freepointer(s, next_object);
+		stat(s, ALLOC_FASTPATH);
+	}
+
+	return object;
+}
+
+static __always_inline void maybe_wipe_obj_freeptr(struct kmem_cache *s,
+						   void *obj)
+{
+	if (unlikely(slab_want_init_on_free(s)) && obj &&
+	    !freeptr_outside_object(s))
+		memset((void *)((char *)kasan_reset_tag(obj) + s->offset),
+			0, sizeof(void *));
+}
+
+noinline int should_failslab(struct kmem_cache *s, gfp_t gfpflags)
+{
+	if (__should_failslab(s, gfpflags))
+		return -ENOMEM;
+	return 0;
+}
+
+static __fastpath_inline
+struct kmem_cache *slab_pre_alloc_hook(struct kmem_cache *s, gfp_t flags)
+{
+	flags &= gfp_allowed_mask;
+
+	might_alloc(flags);
+
+	if (unlikely(should_failslab(s, flags)))
+		return NULL;
+
+	return s;
+}
+
+static __fastpath_inline
+bool slab_post_alloc_hook(struct kmem_cache *s, struct list_lru *lru,
+			  gfp_t flags, size_t size, void **p, bool init,
+			  unsigned int orig_size)
+{
+	unsigned int zero_size = s->object_size;
+	bool kasan_init = init;
+	size_t i;
+	gfp_t init_flags = flags & gfp_allowed_mask;
+
+	/*
+	 * For kmalloc object, the allocated memory size(object_size) is likely
+	 * larger than the requested size(orig_size). If redzone check is
+	 * enabled for the extra space, don't zero it, as it will be redzoned
+	 * soon. The redzone operation for this extra space could be seen as a
+	 * replacement of current poisoning under certain debug option, and
+	 * won't break other sanity checks.
+	 */
+	if (kmem_cache_debug_flags(s, SLAB_STORE_USER | SLAB_RED_ZONE) &&
+	    (s->flags & SLAB_KMALLOC))
+		zero_size = orig_size;
+
+	/*
+	 * When slab_debug is enabled, avoid memory initialization integrated
+	 * into KASAN and instead zero out the memory via the memset below with
+	 * the proper size. Otherwise, KASAN might overwrite SLUB redzones and
+	 * cause false-positive reports. This does not lead to a performance
+	 * penalty on production builds, as slab_debug is not intended to be
+	 * enabled there.
+	 */
+	if (__slub_debug_enabled())
+		kasan_init = false;
+
+	/*
+	 * As memory initialization might be integrated into KASAN,
+	 * kasan_slab_alloc and initialization memset must be
+	 * kept together to avoid discrepancies in behavior.
+	 *
+	 * As p[i] might get tagged, memset and kmemleak hook come after KASAN.
+	 */
+	for (i = 0; i < size; i++) {
+		p[i] = kasan_slab_alloc(s, p[i], init_flags, kasan_init);
+		if (p[i] && init && (!kasan_init ||
+				     !kasan_has_integrated_init()))
+			memset(p[i], 0, zero_size);
+		kmemleak_alloc_recursive(p[i], s->object_size, 1,
+					 s->flags, init_flags);
+		kmsan_slab_alloc(s, p[i], init_flags);
+#ifdef CONFIG_MEM_ALLOC_PROFILING
+		if (need_slab_obj_ext()) {
+			struct slabobj_ext *obj_exts;
+
+			obj_exts = prepare_slab_obj_exts_hook(s, flags, p[i]);
+			/*
+			 * Currently obj_exts is used only for allocation profiling.
+			 * If other users appear then mem_alloc_profiling_enabled()
+			 * check should be added before alloc_tag_add().
+			 */
+			if (likely(obj_exts))
+				alloc_tag_add(&obj_exts->ref, current->alloc_tag, s->size);
+		}
+#endif
+	}
+
+	return memcg_slab_post_alloc_hook(s, lru, flags, size, p);
+}
+
+static __fastpath_inline void *slab_alloc_node(struct kmem_cache *s, struct list_lru *lru,
+		gfp_t gfpflags, int node, unsigned long addr, size_t orig_size)
+{
+	void *object;
+	bool init = false;
+
+	s = slab_pre_alloc_hook(s, gfpflags);
+	if (unlikely(!s))
+		return NULL;
+
+	object = kfence_alloc(s, orig_size, gfpflags);
+	if (unlikely(object))
+		goto out;
+
+	object = __slab_alloc_node(s, gfpflags, node, addr, orig_size);
+
+	maybe_wipe_obj_freeptr(s, object);
+	init = slab_want_init_on_alloc(gfpflags, s);
+
+out:
+	/*
+	 * When init equals 'true', like for kzalloc() family, only
+	 * @orig_size bytes might be zeroed instead of s->object_size
+	 * In case this fails due to memcg_slab_post_alloc_hook(),
+	 * object is set to NULL
+	 */
+	slab_post_alloc_hook(s, lru, gfpflags, 1, &object, init, orig_size);
+
+	return object;
+}
+
+static __always_inline
+void *__do_kmalloc_node(size_t size, gfp_t flags, int node,
+			unsigned long caller)
+{
+	struct kmem_cache *s;
+	void *ret;
+
+	if (unlikely(size > KMALLOC_MAX_CACHE_SIZE)) {
+		ret = __kmalloc_large_node(size, flags, node);
+		trace_kmalloc(caller, ret, size,
+			      PAGE_SIZE << get_order(size), flags, node);
+		return ret;
+	}
+
+	if (unlikely(!size))
+		return ZERO_SIZE_PTR;
+
+	s = kmalloc_slab(size, flags, caller);
+
+	ret = slab_alloc_node(s, NULL, flags, node, caller, size);
+	ret = kasan_kmalloc(s, ret, size, flags);
+	trace_kmalloc(caller, ret, size, s->size, flags, node);
+	return ret;
+}
+
+void *__kmalloc_noprof(size_t size, gfp_t flags)
+{
+	return __do_kmalloc_node(size, flags, NUMA_NO_NODE, _RET_IP_);
+}
+
+static __always_inline void do_slab_free(struct kmem_cache *s,
+				struct slab *slab, void *head, void *tail,
+				int cnt, unsigned long addr)
+{
+	struct kmem_cache_cpu *c;
+	unsigned long tid;
+	void **freelist;
+
+redo:
+	/*
+	 * Determine the currently cpus per cpu slab.
+	 * The cpu may change afterward. However that does not matter since
+	 * data is retrieved via this pointer. If we are on the same cpu
+	 * during the cmpxchg then the free will succeed.
+	 */
+	c = raw_cpu_ptr(s->cpu_slab);
+	tid = READ_ONCE(c->tid);
+
+	/* Same with comment on barrier() in __slab_alloc_node() */
+	barrier();
+
+	if (unlikely(slab != c->slab)) {
+		__slab_free(s, slab, head, tail, cnt, addr);
+		return;
+	}
+
+	if (USE_LOCKLESS_FAST_PATH()) {
+		freelist = READ_ONCE(c->freelist);
+
+		set_freepointer(s, tail, freelist);
+
+		if (unlikely(!__update_cpu_freelist_fast(s, freelist, head, tid))) {
+			note_cmpxchg_failure("slab_free", s, tid);
+			goto redo;
+		}
+	} else {
+		/* Update the free list under the local lock */
+		local_lock(&s->cpu_slab->lock);
+		c = this_cpu_ptr(s->cpu_slab);
+		if (unlikely(slab != c->slab)) {
+			local_unlock(&s->cpu_slab->lock);
+			goto redo;
+		}
+		tid = c->tid;
+		freelist = c->freelist;
+
+		set_freepointer(s, tail, freelist);
+		c->freelist = head;
+		c->tid = next_tid(tid);
+
+		local_unlock(&s->cpu_slab->lock);
+	}
+	stat_add(s, FREE_FASTPATH, cnt);
+}
+
+static __fastpath_inline
+void slab_free(struct kmem_cache *s, struct slab *slab, void *object,
+	       unsigned long addr)
+{
+	memcg_slab_free_hook(s, slab, &object, 1);
+	alloc_tagging_slab_free_hook(s, slab, &object, 1);
+
+	if (likely(slab_free_hook(s, object, slab_want_init_on_free(s))))
+		do_slab_free(s, slab, object, object, 1, addr);
+}
+
+void kfree(const void *object)
+{
+	struct folio *folio;
+	struct slab *slab;
+	struct kmem_cache *s;
+	void *x = (void *)object;
+
+	trace_kfree(_RET_IP_, object);
+
+	if (unlikely(ZERO_OR_NULL_PTR(object)))
+		return;
+
+	folio = virt_to_folio(object);
+	if (unlikely(!folio_test_slab(folio))) {
+		free_large_kmalloc(folio, (void *)object);
+		return;
+	}
+
+	slab = folio_slab(folio);
+	s = slab->slab_cache;
+	slab_free(s, slab, x, _RET_IP_);
+}
+
+void *kmalloc_trace_noprof(struct kmem_cache *s, gfp_t gfpflags, size_t size)
+{
+	void *ret = slab_alloc_node(s, NULL, gfpflags, NUMA_NO_NODE,
+					    _RET_IP_, size);
+
+	trace_kmalloc(_RET_IP_, ret, size, s->size, gfpflags, NUMA_NO_NODE);
+
+	ret = kasan_kmalloc(s, ret, size, gfpflags);
+	return ret;
+}

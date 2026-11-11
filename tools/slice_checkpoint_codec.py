@@ -8,7 +8,7 @@ from pathlib import Path
 from contextify_slice import walk
 from import_application_checkpoint import digest
 
-SCALAR=re.compile(r'(?:u?int(?:8|16|32|64)_t|unsigned int|int|unsigned char|char)(?:\[\d+\])?$')
+SCALAR=re.compile(r'(?:u?int(?:8|16|32|64)_t|unsigned long|unsigned int|int|unsigned char|char)(?:\[\d+\])?$')
 NAME=re.compile(r'[A-Za-z_]\w*$')
 PATH=re.compile(r'[A-Za-z_]\w*(?:\[\d+\]|\.[A-Za-z_]\w*)*$')
 ARRAY=re.compile(r'(.+)\[(\d+)\]$')
@@ -29,6 +29,22 @@ def generate(sources,clang,contract,identity):
         refs=[n for c in candidates for n in walk(c) if n['kind']=='RecordType']
         if len(refs)!=1:raise ValueError('unsupported checkpoint aggregate '+t)
         return byid[refs[0]['decl']['id']]
+    def plain(t,depth=0):
+        # Integer bytes: a scalar, an integer typedef (pteval_t), an array of plain values, or a record of only plain
+        # members (pud_t, a page table's descriptor); no pointer, so the bytes persist as they are.
+        t=t.strip()
+        if SCALAR.fullmatch(t):return True
+        if depth>8 or '*' in t:return False
+        array=ARRAY.fullmatch(t)
+        if array:return plain(array[1],depth+1)
+        typedefs=[n for n in nodes if n['kind']=='TypedefDecl' and n.get('name')==t]
+        if len(typedefs)==1 and not t.startswith('struct '):
+            under=typedefs[0].get('type',{}).get('qualType','')
+            if under!=t and not under.startswith('struct {') and plain(under,depth+1):return True
+        try:rec=record(t)
+        except (ValueError,StopIteration):return False
+        fields=[n for n in rec.get('inner',[]) if n['kind']=='FieldDecl']
+        return rec.get('tagUsed')!='union' and bool(fields) and all(n.get('name') and plain(n['type']['qualType'],depth+1) for n in fields)
     leaves=[];objects={}
     def value(path,t,spec):
         if len(objects)>=8192 or len(leaves)>=4096:raise ValueError('checkpoint field expansion exceeds bounded codec')
@@ -39,11 +55,12 @@ def generate(sources,clang,contract,identity):
             if rec.get('tagUsed')=='union':raise ValueError('checkpoint union requires an explicit adapter: '+path)
             visit(rec,spec.get('members'),path+'.');return
         if kind=='elements':
-            array=ARRAY.fullmatch(t)
-            if not array or not 0<int(array[2])<=256:raise ValueError('checkpoint elements need a bounded array: '+path)
-            for i in range(int(array[2])):value(path+'['+str(i)+']',array[1].strip(),spec.get('element'))
+            # The first subscript is the outer dimension: T[4][14] has 4 elements of T[14].
+            array=re.fullmatch(r'(.+?)\[(\d+)\]((?:\[\d+\])*)',t)
+            if not array or not 0<int(array[2])<=512:raise ValueError('checkpoint elements need a bounded array: '+path)
+            for i in range(int(array[2])):value(path+'['+str(i)+']',array[1].strip()+array[3],spec.get('element'))
             return
-        if kind=='persist' and not SCALAR.fullmatch(t):raise ValueError('persistent field is not a plain integer/byte leaf: '+path)
+        if kind=='persist' and not plain(t):raise ValueError('persistent field is not a plain integer/byte leaf: '+path)
         if kind=='self_reference':
             target=spec.get('target','')
             if not NAME.fullmatch(target) or target not in policy['fields'] or '*' not in t:raise ValueError('invalid self reference '+path)
@@ -53,9 +70,30 @@ def generate(sources,clang,contract,identity):
             if kind=='context_buffer_reference' and type(spec.get('allow_one_past',False)) is not bool:raise ValueError('invalid buffer end policy '+path)
         elif kind not in ('persist','transient'):raise ValueError('invalid field policy '+path)
         leaves.append(dict(path=path,**spec))
+    def named(rec,prefix):
+        # Members of an anonymous struct or union are members of the enclosing record (C11 6.7.2.1).
+        # An anonymous union persists one member; its other members must be transient aliases.
+        out={};groups=[];inner=rec.get('inner',[])
+        for k,n in enumerate(inner):
+            if n['kind']!='FieldDecl':continue
+            if n.get('name'):out[n['name']]=n;continue
+            anonymous=inner[k-1] if k and inner[k-1]['kind']=='RecordDecl' and not inner[k-1].get('name') else None
+            if anonymous is None or not anonymous.get('completeDefinition'):raise ValueError('unsupported unnamed checkpoint field: '+prefix)
+            sub=named(anonymous,prefix);out.update(sub[0]);groups+=sub[1]
+            if anonymous.get('tagUsed')=='union':groups.append([list(named(c,prefix)[0]) if not c.get('name') else [c['name']] for c in [inner_field_records(anonymous)][0]])
+        return out,groups
+    def inner_field_records(union):
+        # Each member of a union: a named field, or an anonymous record standing for its fields.
+        members=[];inner=union.get('inner',[])
+        for k,n in enumerate(inner):
+            if n['kind']!='FieldDecl':continue
+            members.append(n if n.get('name') else inner[k-1])
+        return members
     def visit(rec,pol,prefix=''):
-        fields={n['name']:n for n in rec.get('inner',[]) if n['kind']=='FieldDecl'}
+        fields,unions=named(rec,prefix)
         if not isinstance(pol,dict):raise ValueError('missing checkpoint member policy: '+prefix)
+        for union in unions:
+            if sum(any(pol.get(n,{}).get('policy')!='transient' for n in member) for member in union)>1:raise ValueError('an anonymous union persists more than one member: '+prefix)
         if fields.keys()!=pol.keys():raise ValueError('checkpoint policy does not cover context fields: '+prefix)
         for name,f in fields.items():
             path=prefix+name
@@ -77,6 +115,8 @@ def generate(sources,clang,contract,identity):
                 enums['TARGET_OFFSET_'+suffix]='offsetof(struct osrec_kernel_context,'+target+')'
                 enums['TARGET_BYTES_'+suffix]='sizeof(((struct osrec_kernel_context *)0)->'+target+')'
                 element=target+('[0]' if buffer else '')
+                # An untyped object pointer (SLUB's void **freelist) may name any persistent object.
+                if f['type'] in ('void *','void **'):enums['TARGET_TYPE_'+suffix]='1';continue
                 enums['TARGET_TYPE_'+suffix]='__builtin_types_compatible_p(__typeof__(*(((struct osrec_kernel_context *)0)->'+f['path']+')),__typeof__(((struct osrec_kernel_context *)0)->'+element+'))'
                 if buffer:enums['TARGET_ELEMENT_BYTES_'+suffix]='sizeof(((struct osrec_kernel_context *)0)->'+element+')'
     probe.write_text('#include "slice_context.h"\nenum{'+','.join(k+'='+v for k,v in enums.items())+'};\n')
@@ -122,7 +162,7 @@ def generate(sources,clang,contract,identity):
                 if f['policy']=='context_buffer_reference':
                     limit=obj['bytes']-(0 if f.get('allow_one_past',False) else obj['element_bytes'])
                     source+='{uintptr_t p=(uintptr_t)ctx->'+f['path']+',base=(uintptr_t)&ctx->'+target+'[0];if(p>=base && p-base<='+str(limit)+' && (p-base)%'+str(obj['element_bytes'])+'==0)return '+str(j+1)+';}\n'
-                else:source+='if(ctx->'+f['path']+'==&ctx->'+target+')return '+str(j+1)+';\n'
+                else:source+='if((const void *)ctx->'+f['path']+'==(const void *)&ctx->'+target+')return '+str(j+1)+';\n'
             source+='return UINT64_MAX;}\n'
             if f['policy']=='context_buffer_reference':
                 source+='static uint64_t reference_offset_'+str(i)+'(const struct osrec_kernel_context *ctx){switch(reference_'+str(i)+'(ctx)){\n'
@@ -146,7 +186,7 @@ def generate(sources,clang,contract,identity):
             for obj in f['reference_objects']:
                 target=obj['path']
                 if f['policy']=='context_buffer_reference':target+='[read_reference(p+'+str(f['wire_offset']+8)+')/'+str(obj['element_bytes'])+']'
-                source+='case '+str(obj['id'])+':ctx->'+f['path']+'=&ctx->'+target+';break;\n'
+                source+='case '+str(obj['id'])+':ctx->'+f['path']+'=(__typeof__(ctx->'+f['path']+'))(void *)&ctx->'+target+';break;\n'
             source+='default:ctx->'+f['path']+'=NULL;break;}\n'
     source+='}\nstatic uint32_t validate(const unsigned char *p,uint64_t next){\n'
     for i,f in references:
@@ -159,7 +199,8 @@ def generate(sources,clang,contract,identity):
             source+='default:return OSREC_SLICE_BAD_INPUT;}\n'
         source+='}\n'
     check='check' if references else 'osrec_kernel_checkpoint_check'
-    source+='struct osrec_kernel_context temporary;decode(&temporary,p);return '+check+'(&temporary,next);}\n'
+    # The candidate state is decoded into static storage, not the stack: a context can outgrow the image's 16 KiB stack.
+    source+='static struct osrec_kernel_context temporary;decode(&temporary,p);return '+check+'(&temporary,next);}\n'
     source+='const struct osrec_slice_checkpoint_codec osrec_kernel_checkpoint_codec={OSREC_SLICE_CHECKPOINT_ABI,{'+','.join(str(v) for v in bytes.fromhex(schema))+'},'+str(cursor)+',&osrec_kernel_adapter,'+check+',encode,validate,decode};\n'
     (sources/'slice_codec.c').write_text(source);(sources/'slice_checkpoint_schema.json').write_text(json.dumps(report,indent=2)+'\n')
     return report

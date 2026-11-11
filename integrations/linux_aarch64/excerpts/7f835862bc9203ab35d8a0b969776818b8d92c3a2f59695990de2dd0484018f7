@@ -1,0 +1,281 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Reviewed original Linux v6.10 kernel/futex/core.c definitions. */
+
+struct futex_hash_bucket *futex_hash(union futex_key *key)
+{
+	u32 hash = jhash2((u32 *)key, offsetof(typeof(*key), both.offset) / 4,
+			  key->both.offset);
+
+	return &futex_queues[hash & (futex_hashsize - 1)];
+}
+
+struct hrtimer_sleeper *
+futex_setup_timer(ktime_t *time, struct hrtimer_sleeper *timeout,
+		  int flags, u64 range_ns)
+{
+	if (!time)
+		return NULL;
+
+	hrtimer_init_sleeper_on_stack(timeout, (flags & FLAGS_CLOCKRT) ?
+				      CLOCK_REALTIME : CLOCK_MONOTONIC,
+				      HRTIMER_MODE_ABS);
+	/*
+	 * If range_ns is 0, calling hrtimer_set_expires_range_ns() is
+	 * effectively the same as calling hrtimer_set_expires().
+	 */
+	hrtimer_set_expires_range_ns(&timeout->timer, *time, range_ns);
+
+	return timeout;
+}
+
+int get_futex_key(u32 __user *uaddr, unsigned int flags, union futex_key *key,
+		  enum futex_access rw)
+{
+	unsigned long address = (unsigned long)uaddr;
+	struct mm_struct *mm = current->mm;
+	struct page *page;
+	struct folio *folio;
+	struct address_space *mapping;
+	int err, ro = 0;
+	bool fshared;
+
+	fshared = flags & FLAGS_SHARED;
+
+	/*
+	 * The futex address must be "naturally" aligned.
+	 */
+	key->both.offset = address % PAGE_SIZE;
+	if (unlikely((address % sizeof(u32)) != 0))
+		return -EINVAL;
+	address -= key->both.offset;
+
+	if (unlikely(!access_ok(uaddr, sizeof(u32))))
+		return -EFAULT;
+
+	if (unlikely(should_fail_futex(fshared)))
+		return -EFAULT;
+
+	/*
+	 * PROCESS_PRIVATE futexes are fast.
+	 * As the mm cannot disappear under us and the 'key' only needs
+	 * virtual address, we dont even have to find the underlying vma.
+	 * Note : We do have to check 'uaddr' is a valid user address,
+	 *        but access_ok() should be faster than find_vma()
+	 */
+	if (!fshared) {
+		/*
+		 * On no-MMU, shared futexes are treated as private, therefore
+		 * we must not include the current process in the key. Since
+		 * there is only one address space, the address is a unique key
+		 * on its own.
+		 */
+		if (IS_ENABLED(CONFIG_MMU))
+			key->private.mm = mm;
+		else
+			key->private.mm = NULL;
+
+		key->private.address = address;
+		return 0;
+	}
+
+again:
+	/* Ignore any VERIFY_READ mapping (futex common case) */
+	if (unlikely(should_fail_futex(true)))
+		return -EFAULT;
+
+	err = get_user_pages_fast(address, 1, FOLL_WRITE, &page);
+	/*
+	 * If write access is not required (eg. FUTEX_WAIT), try
+	 * and get read-only access.
+	 */
+	if (err == -EFAULT && rw == FUTEX_READ) {
+		err = get_user_pages_fast(address, 1, 0, &page);
+		ro = 1;
+	}
+	if (err < 0)
+		return err;
+	else
+		err = 0;
+
+	/*
+	 * The treatment of mapping from this point on is critical. The folio
+	 * lock protects many things but in this context the folio lock
+	 * stabilizes mapping, prevents inode freeing in the shared
+	 * file-backed region case and guards against movement to swap cache.
+	 *
+	 * Strictly speaking the folio lock is not needed in all cases being
+	 * considered here and folio lock forces unnecessarily serialization.
+	 * From this point on, mapping will be re-verified if necessary and
+	 * folio lock will be acquired only if it is unavoidable
+	 *
+	 * Mapping checks require the folio so it is looked up now. For
+	 * anonymous pages, it does not matter if the folio is split
+	 * in the future as the key is based on the address. For
+	 * filesystem-backed pages, the precise page is required as the
+	 * index of the page determines the key.
+	 */
+	folio = page_folio(page);
+	mapping = READ_ONCE(folio->mapping);
+
+	/*
+	 * If folio->mapping is NULL, then it cannot be an anonymous
+	 * page; but it might be the ZERO_PAGE or in the gate area or
+	 * in a special mapping (all cases which we are happy to fail);
+	 * or it may have been a good file page when get_user_pages_fast
+	 * found it, but truncated or holepunched or subjected to
+	 * invalidate_complete_page2 before we got the folio lock (also
+	 * cases which we are happy to fail).  And we hold a reference,
+	 * so refcount care in invalidate_inode_page's remove_mapping
+	 * prevents drop_caches from setting mapping to NULL beneath us.
+	 *
+	 * The case we do have to guard against is when memory pressure made
+	 * shmem_writepage move it from filecache to swapcache beneath us:
+	 * an unlikely race, but we do need to retry for folio->mapping.
+	 */
+	if (unlikely(!mapping)) {
+		int shmem_swizzled;
+
+		/*
+		 * Folio lock is required to identify which special case above
+		 * applies. If this is really a shmem page then the folio lock
+		 * will prevent unexpected transitions.
+		 */
+		folio_lock(folio);
+		shmem_swizzled = folio_test_swapcache(folio) || folio->mapping;
+		folio_unlock(folio);
+		folio_put(folio);
+
+		if (shmem_swizzled)
+			goto again;
+
+		return -EFAULT;
+	}
+
+	/*
+	 * Private mappings are handled in a simple way.
+	 *
+	 * If the futex key is stored in anonymous memory, then the associated
+	 * object is the mm which is implicitly pinned by the calling process.
+	 *
+	 * NOTE: When userspace waits on a MAP_SHARED mapping, even if
+	 * it's a read-only handle, it's expected that futexes attach to
+	 * the object not the particular process.
+	 */
+	if (folio_test_anon(folio)) {
+		/*
+		 * A RO anonymous page will never change and thus doesn't make
+		 * sense for futex operations.
+		 */
+		if (unlikely(should_fail_futex(true)) || ro) {
+			err = -EFAULT;
+			goto out;
+		}
+
+		key->both.offset |= FUT_OFF_MMSHARED; /* ref taken on mm */
+		key->private.mm = mm;
+		key->private.address = address;
+
+	} else {
+		struct inode *inode;
+
+		/*
+		 * The associated futex object in this case is the inode and
+		 * the folio->mapping must be traversed. Ordinarily this should
+		 * be stabilised under folio lock but it's not strictly
+		 * necessary in this case as we just want to pin the inode, not
+		 * update i_pages or anything like that.
+		 *
+		 * The RCU read lock is taken as the inode is finally freed
+		 * under RCU. If the mapping still matches expectations then the
+		 * mapping->host can be safely accessed as being a valid inode.
+		 */
+		rcu_read_lock();
+
+		if (READ_ONCE(folio->mapping) != mapping) {
+			rcu_read_unlock();
+			folio_put(folio);
+
+			goto again;
+		}
+
+		inode = READ_ONCE(mapping->host);
+		if (!inode) {
+			rcu_read_unlock();
+			folio_put(folio);
+
+			goto again;
+		}
+
+		key->both.offset |= FUT_OFF_INODE; /* inode-based key */
+		key->shared.i_seq = get_inode_sequence_number(inode);
+		key->shared.pgoff = folio->index + folio_page_idx(folio, page);
+		rcu_read_unlock();
+	}
+
+out:
+	folio_put(folio);
+	return err;
+}
+
+int futex_get_value_locked(u32 *dest, u32 __user *from)
+{
+	int ret;
+
+	pagefault_disable();
+	ret = __get_user(*dest, from);
+	pagefault_enable();
+
+	return ret ? -EFAULT : 0;
+}
+
+struct futex_hash_bucket *futex_q_lock(struct futex_q *q)
+	__acquires(&hb->lock)
+{
+	struct futex_hash_bucket *hb;
+
+	hb = futex_hash(&q->key);
+
+	/*
+	 * Increment the counter before taking the lock so that
+	 * a potential waker won't miss a to-be-slept task that is
+	 * waiting for the spinlock. This is safe as all futex_q_lock()
+	 * users end up calling futex_queue(). Similarly, for housekeeping,
+	 * decrement the counter at futex_q_unlock() when some error has
+	 * occurred and we don't end up adding the task to the list.
+	 */
+	futex_hb_waiters_inc(hb); /* implies smp_mb(); (A) */
+
+	q->lock_ptr = &hb->lock;
+
+	spin_lock(&hb->lock);
+	return hb;
+}
+
+void futex_q_unlock(struct futex_hash_bucket *hb)
+	__releases(&hb->lock)
+{
+	spin_unlock(&hb->lock);
+	futex_hb_waiters_dec(hb);
+}
+
+struct futex_q *futex_top_waiter(struct futex_hash_bucket *hb, union futex_key *key)
+{
+	struct futex_q *this;
+
+	plist_for_each_entry(this, &hb->chain, list) {
+		if (futex_match(&this->key, key))
+			return this;
+	}
+	return NULL;
+}
+
+int futex_cmpxchg_value_locked(u32 *curval, u32 __user *uaddr, u32 uval, u32 newval)
+{
+	int ret;
+
+	pagefault_disable();
+	ret = futex_atomic_cmpxchg_inatomic(curval, uaddr, uval, newval);
+	pagefault_enable();
+
+	return ret;
+}

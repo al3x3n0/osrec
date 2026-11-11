@@ -345,6 +345,7 @@ def observe(image, qemu=None, descriptor=None, initial_memory_dir=None, load_bun
                     names=('call_count','pause_ordinal','completed_sessions','kernel_checkpoint_checks','routed_calls','application_exits','checkpoint_bytes','producer_state_address','current_state_address','application_assertion_checks','saved_frame_checks','gateway_abi','stack_guard_checks','application_frame_abi','checkpoint_rejections','checkpoint_abi','initial_memory_checks')
                     report.update(dict(zip(names,words[5:22])));report['session']='standalone-pause' if words[1]==23 else 'standalone-resume'
                     if words[1]==25:
+                        if words[3]==99:report.update(fault_esr=words[28],fault_pc=words[29])
                         report['session']='standalone-advance';report.update(dict(zip(('checkpoint_start_ordinal','checkpoint_loads','checkpoint_saves'),words[22:25])))
                     for k in ('actual_calls','initial_mask','final_mask','locks','unlocks','process_accesses'):report.pop(k,None)
                 if words[1] in (21,22):

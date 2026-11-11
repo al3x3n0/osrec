@@ -23,12 +23,13 @@ It covers three of the gaps listed for the proprietary-kernel path:
 | --- | --- |
 | `integrations/linux_aarch64/svc-boundary.json` | Linux arm64 `svc #0` contract: `x8` number, `x0`–`x5` arguments, `x0` result, all other GPRs and the user SP preserved, synchronous lower-EL vector at `VBAR+0x400` with ESR class `0x15`, asynchronous lower-EL vectors, `SP_EL0` as the `current` anchor. Kernel memory is read only in EL1, which holds whether or not KPTI is active. |
 | `integrations/linux_aarch64/file-io/live-binding.json` | Reviewed correspondence between `file-io` checkpoint-policy fields and kernel paths such as `.files->fdt->open_fds[0]` and `.f_count.counter`. It includes the descriptor-pool classification by inode type, the `f_mode` projection mask and shmem page-cache bytes. |
-| `integrations/linux_aarch64/fd-control/live-binding.json` | The `file-io` binding extended to the `fd-control` slice (`fcntl`, `pread64`, `pwrite64`, `ftruncate`). It binds each live file's dentry and inode as related objects (see [related objects](#related-objects)). The `f_mode` mask also keeps `FMODE_PREAD` and `FMODE_PWRITE`. A precondition requires `RLIMIT_NOFILE` to be the model's 8 (see [preconditions](#preconditions)). |
+| `integrations/linux_aarch64/fd-control/live-binding.json` | The `file-io` binding extended to the `fd-control` slice (`fcntl`, `writev`, `pread64`, `pwrite64`, `ftruncate`). It binds each live file's dentry and inode as related objects (see [related objects](#related-objects)). The `f_mode` mask also keeps `FMODE_PREAD` and `FMODE_PWRITE`. A precondition requires `RLIMIT_NOFILE` to be the model's 8 (see [preconditions](#preconditions)). |
 | `tools/gdb_remote.py` | Minimal GDB remote client for QEMU's TCG gdbstub. |
-| `tools/kernel_btf.py` | Embedded BTF reader and typed path resolver (`.member`, `->member`, `[n]`, anonymous records; bitfields rejected). |
+| `tools/kernel_btf.py` | Embedded BTF reader and typed path resolver (`.member`, `->member`, `[n]`, anonymous records, `-><record.member>` container steps and `->(record)` casts of untyped pointers; bitfields rejected). |
 | `tools/live_kernel_binding.py` | Applies a binding to live memory. It rejects unbound object classes, more than one live object per pool class, a mismatched embedded `fdt`, a descriptor capacity differing from the model, and file bytes beyond `i_size`. |
 | `tools/svc_boundary.py` | Captures the boundary from a machine checkpoint. |
 | `tools/reduced_boundary_replay.py` | Runs the footprint check, generates the image, executes it in QEMU and compares the result. |
+| `tools/kernel_data_symbols.py` | Derives reviewed data-symbol addresses (ADRP pairs) from the pinned Image and its kallsyms text dump, and checks their layout against live memory (see [kernel data symbols](#kernel-data-symbols-2026-11-04)). |
 
 `qemu_vm_checkpoint.Machine` accepts only a loopback `-gdb tcp:127.0.0.1:PORT`
 observer. Recipe arguments and the immutable-asset rule are unchanged.
@@ -442,6 +443,377 @@ origins and local pointers, and `ftruncate` also hits 75 analysis limits.
 and concrete validation still check these boundaries. The analysis is
 cached per input under `build/footprint-cache/`, and `OSREC_FOOTPRINT_TIMEOUT`
 (default 300 s) bounds it.
+
+### Binding the page-cache footprint (2026-11-03)
+
+The `pread64` and `pwrite64` footprints became blocker-free on 2026-11-03 (see
+[entry-state analysis](entry-state-analysis.md#flow-sensitive-values-and-path-correlations-2026-11-03)).
+The replay then stopped at the binding check, with 46 and 48 schema fields
+that the binding did not supply. All six `pread64`/`pwrite64` boundaries now
+replay as equivalent.
+
+The gap had four causes.
+
+**Field mapping in `normalize`.** Three mapping bugs made reads that the
+binding already supplied look unbound:
+- An indexed member array (`uid_map.extent[2].count`) gained a second `[]`.
+- A reference whose targets are one member of a pool (`i_mapping` →
+  `inode_pool[0].i_data` / `inode_pool[1].i_data`) was rejected as ambiguous.
+- A read below a transient leaf (`inode_wb.list_lock`,
+  `s_fsnotify_info->watched_objects[0]`) ended in `?`. It now keeps its
+  sub-path and is covered by that leaf.
+
+A record read (`i_uid`) is covered when each of its leaves is.
+
+**State the task reaches, now live-bound.**
+- Per class: the inode's `i_uid`, `i_gid`, `i_state`, `i_version` and mapping
+  `gfp_mask`, and the dentry's `DCACHE_FSNOTIFY_PARENT_WATCHED` bit.
+- `task.thread_info.flags`, masked to `TIF_TAGGED_ADDR`.
+- The regular file's folio: `flags`, `index` and `_refcount`. The xarray head is
+  an untyped `void *`. The new `->(folio)` path step reads it as a
+  `struct folio`, as `file_data` already does for the page bytes.
+
+New links wire and check the class's pointers:
+- `f_op`, `i_op` and `a_ops`;
+- `f_mapping` and `i_mapping`, which must be the inode's own `i_data` (`object`);
+- `i_data.host`, which must be the inode (`same_as`);
+- the class-2 xarray head and the folio's `mapping` (links with a `class`).
+
+The bound values differ from the old model seeds where it matters:
+- The folio has no `PG_lru` and holds two references.
+- The inode is clean before the first read; `pread` sets `I_DIRTY_SYNC`.
+- `PG_workingset` and the MGLRU reference count (`LRU_REFS_MASK`, bit 57)
+  advance on each access. The live bits move exactly as the model's
+  `lru_gen_inc_refs` predicts. Bound without them, three boundaries diverged
+  on the folio flags.
+
+**Configuration held by preconditions.** A related precondition can name the
+schema `field` whose model value it holds. The replay counts that field as
+covered. The image exports the model value under the precondition's mask, and
+the replay compares it with the precondition's value before and after the
+call. This covers:
+- the superblock flags, `s_maxbytes` and the mount flags (existing
+  preconditions);
+- `s_time_gran` = 1 and the full time64 range (new; all hold live);
+- the null `s_fsnotify_info`;
+- the bdi capabilities (0, now unmasked);
+- one cached page, no writable mapping, no lock context, the unhashed inode
+  and `VM_NORESERVE`.
+
+A new precondition ties the shm superblock's user namespace to the initial
+one. Inode locks and the mount writer count are transient zeroes.
+
+**Declared model state.** The binding's `model_state` section lists fields it
+cannot observe, each with its reason:
+- the coarse clock `tk_core`: it is not reachable from the task, and
+  `CONFIG_KALLSYMS_ALL` is off, so it has no data symbol;
+- the inode timestamps, which are compared with and set from that clock;
+- the per-class operation tables;
+- the writeback association of a clean inode.
+
+The replay report lists these reads under `footprint.model_state` and the
+precondition-held ones under `footprint.held`.
+
+**Two state ranges now decide branches.**
+- `struct backing_dev_info.capabilities` ∈ [0, 0], validated by
+  `live precondition noop_bdi.capabilities`. `balance_dirty_pages_ratelimited`
+  then returns before the dirty-throttling counters.
+- `struct uid_gid_map.nr_extents` ∈ [0, 5], validated by both maps' live
+  `nr_extents`. The forward/reverse arrays of larger maps are then never read.
+
+Two analyzer changes were needed for these ranges:
+- **Mask intersection.** A constant mask's static bound (`x & 1` ∈ [0, 1]) used
+  to hide the operand's declared range. It is now intersected with the
+  operand-based interval.
+- **Ranges as assumptions.** Every range the value analysis uses is now a
+  `state_range_assumption`, so the replay checks it on both live states.
+  Before, only index proofs recorded their ranges.
+
+The 21 boundaries were recaptured into `build/linux-svc-state-20261103a`.
+
+| Boundary | Result | Changed fields |
+|---|---|---|
+| `pread` | 4 | `rchar`, `syscr`, `i_state` |
+| `pread-negative` | `-EINVAL` | — |
+| `pread-all` | 10 | `rchar`, `syscr`, folio flags |
+| `pwrite` | 2 | `wchar`, `syscw`, `i_version`, folio flags |
+| `pwrite-extend` | 1 | `wchar`, `syscw`, `i_size`, `i_version`, folio flags |
+| `pwrite-restore` | 4 | `wchar`, `syscw`, `i_version`, folio flags |
+
+Each row is `equivalent`: result, user bytes and every bound field (177) match
+the full VM before and after the call.
+
+### fcntl (2026-11-03)
+
+`fcntl` was blocked on six reads and writes of `close_on_exec[fd / 64]`. Linux
+indexes the bitmap with the raw descriptor in `close_on_exec`,
+`__set_close_on_exec` and `__clear_close_on_exec`. That is safe only because
+`fdget` has already found the descriptor below `max_fds`, and that fact passes
+through `__fget_light`'s tagged return and `__to_fd`'s `struct fd`.
+
+The model's `close_on_exec` already flags a descriptor at or above `max_fds`
+with `linux_assert`. The two bitmap stores now carry the same check (port
+`build/linux-fd-control-port-20261103a`). Two changes make the check usable:
+- **Analysis contract.** The new `fault_assertions` contract names
+  `linux_assert` and its condition argument. After such a call statement the
+  analysis takes the condition as false, so `fd < max_fds <= 64` bounds the
+  index.
+- **Replay check.** The replay image now exports `model_fault` after the call,
+  and a faulted run is never `equivalent`. Before, `model_fault` was reset but
+  never checked.
+
+All 10 `fcntl` boundaries replay as `equivalent` with `model_fault = 0`. They
+needed no binding additions. With `pread64` and `pwrite64`, 16 of the 21
+captured boundaries replay.
+
+`ftruncate` is still blocked. Its analysis now converges (see
+[entry-state analysis](entry-state-analysis.md#fcntl-and-ftruncate-2026-11-03)),
+but 200 accesses in the truncation path remain unproven.
+
+### writev (2026-11-04)
+
+The fd-control slice now has the `writev` root (`linux_writev`, number 66). It
+runs the original `do_writev`, `vfs_writev`, `import_iovec`, `__import_iovec`,
+`iovec_from_user` and `copy_iovec_from_user`. `do_iter_readv_writev` and
+`do_loop_readv_writev` go through the reviewed `f_op` dispatch models.
+
+Three bindings and models changed:
+- **The user iovec.** The binding's `iovec` user object (id 65536) binds up to 8
+  segments of 64 bytes each. The segments are objects from id 65537 up.
+  `svc_boundary.py` reads the live array and merges segments that overlap.
+- **User copies.** `unsafe_get_user` is a width-checked call to
+  `linux_get_user`. User copies admit only objects the call names: the
+  32-byte buffer and the iovec objects. They can't reach code or stack.
+- **Fault models.** The compat copy, `kmalloc_array` (more than `UIO_FASTIOV`
+  segments) and `iov_iter_bvec_advance` are fault models. A run that reaches
+  one is never `equivalent`.
+
+The replay image is now built with `-ftrivial-auto-var-init=pattern`. A
+summarized stack array read before its element is defined then sees `0xAA`
+bytes instead of a stale value that might match.
+
+Since 2026-11-05, a port that declares `stack_init` is built that way instead,
+for both its slices and the replay image. fd-control declares `zero`, matching
+the live kernel's `CONFIG_INIT_STACK_ALL_ZERO`, which its binding requires.
+The report claims `automatic_initialization`.
+
+On port `build/linux-fd-control-port-20261103b` and captures
+`build/linux-svc-state-20261103b`, every row below is `equivalent` with
+`model_fault = 0`:
+
+| Calls | Boundaries |
+| --- | --- |
+| `writev`: 2 segments; 1 segment (the `ubuf` path); 0 segments | 3 |
+| `write` | 1 |
+| `pread64`, `pwrite64` | 6 |
+| `fcntl` | 10 |
+
+The 10 `fcntl` boundaries and 7 file-I/O boundaries (17 in total) were replayed
+again with the new analysis and build flags. 20 of the 27 captured boundaries
+now replay. The 5 `ftruncate` boundaries remain blocked, and the two futex
+calls have no slice root yet.
+
+### Kernel data symbols (2026-11-04)
+
+A futex hash bucket is not reachable from `current`. It hangs off the static
+`__futex_data` (`queues`, `hashsize`). This kernel lists only text symbols
+(`CONFIG_KALLSYMS_ALL` is off), and a static anonymous struct has no BTF
+variable.
+
+`tools/kernel_data_symbols.py` derives the address from the pinned Image
+instead, using the review `integrations/linux_aarch64/data-symbols.json`:
+- **References.** For each symbol, the review lists ADRP + ADD/LDR/STR pairs in
+  named functions. The tool decodes each pair and rejects it if a branch, or a
+  write that could hit the base register, comes in between. All references must
+  agree on one address.
+- **Image base.** The base is checked, not trusted: 98% of global text symbols
+  (29349 of 29918) start with a function-entry encoding at that base.
+- **Placement.** The address must lie in image data after init text.
+- **Discovery.** `--list FUNCTION` prints the candidate pairs a reviewer reads
+  against the source.
+
+`__futex_data` comes out at `0xffff80008237a930` from three references:
+`futex_hash` (ADD and LDR) and `futex_init` (ADD, which then stores
+`futex_hashsize` at +8). The result is
+`build/linux-data-symbols-d196f8248abdddab.json`.
+
+`check_live` validates the reviewed layout against kernel memory in kernel
+mode:
+- `hashsize` is a power of two.
+- `queues` is a 64-byte-aligned linear-map address.
+- In every bucket with no waiters, the BTF `futex_hash_bucket` list head points
+  to itself and the lock is free.
+
+At the state checkpoint's first futex call, the check gives `queues =
+0xffff000002f68000` and `hashsize = 256`, with all 256 buckets empty and
+unlocked. The guest oracle still matches after the observation.
+
+`tests/test_kernel_data_symbols.py` covers the derivation and its rejections on
+a synthetic Image, and the live checks on synthetic memory.
+
+**Per-CPU symbols (2026-11-05).**
+- A reviewed symbol may be `percpu`. Its derived address is then the per-CPU
+  link address, and the binding reads this CPU's copy at that address plus
+  `TPIDR_EL1`.
+- With `btf_record`, the reviewed layout must match the image's BTF.
+- `rcu_data` is derived this way at `0xffff800081ec87c0`. `rcu_all_qs`, `rcu_qs`
+  and `rcu_momentary_dyntick_idle` all form that address.
+- Related members can also be per-CPU, such as the mount's `mnt_pcp->mnt_writers`
+  and the freeze-protection `read_count`.
+
+See [kernel binary replay](kernel-binary-replay.md#closing-the-gaps-2026-11-05).
+
+### futex (2026-11-05)
+
+The fd-control slice now has the `futex` root (`linux_futex`, number 98). It
+covers two non-blocking private calls:
+- `FUTEX_WAKE_PRIVATE` finding no waiter, which returns 0;
+- `FUTEX_WAIT_PRIVATE` on a changed value, which returns `-EAGAIN`.
+
+**Original code.** The slice runs v6.10's syscall entry and `do_futex`, plus:
+- `futex_wake`, `futex_wait`, `__futex_wait` and `futex_wait_setup`;
+- `get_futex_key`, `futex_hash`, `futex_q_lock`, `futex_q_unlock`,
+  `futex_get_value_locked` and `futex_setup_timer`;
+- the `futex.h` helpers, `jhash2` and `rol32`.
+
+**Model state.** `futex_q_init` is copied verbatim from `requeue.c` into
+`models.c`. `__futex_data` and a 256-bucket pool are model globals: `futex_init`
+leaves buckets with no waiters and empty, self-linked chains, and the pool starts
+the same way.
+
+**Fault models.** The calls outside these two paths fault:
+- shared keys (`get_user_pages_fast`);
+- timeouts (`get_timespec64` and the hrtimer helpers);
+- queueing and sleeping (`futex_wait_queue`, `futex_unqueue`);
+- waking a waiter: `futex_wake`'s `this->wake(...)` is rewritten to the dispatch
+  model `osrec_futex_q_wake`;
+- the requeue, wake-op and PI commands.
+
+`futex_wake_mark` and `futex_wait_restart` appear only as addresses (in
+`futex_q_init.wake` and `set_restart_fn`'s argument). They need no context,
+and the context transform now renames a function named in a const global's
+initializer.
+
+**Binding.**
+- **`task.mm`** is bound as the live pointer value, because a private key hashes
+  `{mm, page address, offset}`. The slice never dereferences it.
+- **`task.timer_slack_ns`** is bound because `futex_wait` reads it.
+- **The `globals` entry** binds `__futex_data` from the derived symbols. The
+  capture takes `--data-symbols`, the derived file, and requires it to come from
+  the checkpoint's kernel image; the observation then claims
+  `kernel_symbols_used`. The projection:
+  - runs `check_live`;
+  - requires `hashsize` to equal the pool's 256;
+  - binds each bucket's `waiters.counter` as a scalar and its lock word as free;
+  - makes `__futex_data.queues` refer to `futex_hash_buckets[0]`.
+
+**Contracts.**
+- The hash size is in [256, 256], with `queues` given a pointer extent of
+  `hashsize`. So `hash & (hashsize - 1)` selects one of the 256 bound buckets.
+- Every bucket's `waiters.counter` is 0, checked on each pre- and post-state.
+  This is why `futex_wake` returns before walking a chain.
+
+Two states fall outside the slice:
+- a waiter anywhere in the hash, which the range check rejects;
+- a wait whose value matches, which faults in `futex_wait_queue`.
+
+**Captures.** The binding changed, so all 27 boundaries were captured again
+from the state checkpoint into `build/linux-svc-state-20261105a`. The port is
+`build/linux-fd-control-port-20261105a`, built from a fresh native capture with
+233 calls; its pipeline verified the slices.
+
+**Results.** All 22 non-`ftruncate` boundaries replay as `equivalent`, with
+`model_fault = 0`:
+- 2 `futex`: wake → 0, wait → -11, each with 436 bound fields;
+- 3 `writev`, 1 `write`, 3 `pread64`, 3 `pwrite64`;
+- 10 `fcntl`.
+
+**Negative check.** Setting the captured futex word to the expected value (6)
+makes the wait take the sleep path. The replay then diverges with
+`model_fault = 1`.
+
+The binary replays of the two futex calls and the three `writev` calls are
+equivalent too (`build/kernel-boundary-20261105`). See
+[kernel binary replay](kernel-binary-replay.md#measuring-authenticity) for their
+authentic-code shares.
+
+### futex scenarios (2026-11-06)
+
+The state checkpoint (`build/linux-svc-machine-checkpoint-state-20261105g`)
+now makes 22 futex calls (`examples/linux-vm-checkpoint/init-state.c`). They
+cover every non-blocking single-thread path: none needs a second thread,
+blocking or waking.
+
+| Group | Calls | Result |
+|---|---|---|
+| Wake and wait | private wake (no waiter), wait on a changed value | 0, -EAGAIN |
+| Bitset | wait-bitset, wait-bitset with mask 0, wake-bitset | -EAGAIN, -EINVAL, 0 |
+| Timeouts | absolute (`WAIT_BITSET`) and relative (`WAIT`), not firing; an invalid `tv_nsec` | -EAGAIN, -EAGAIN, -EINVAL |
+| Errors | unknown command, unaligned word, unmapped word | -ENOSYS, -EINVAL, -EFAULT |
+| Requeue | `REQUEUE`, `CMP_REQUEUE` with a mismatch and a match, no waiters | 0, -EAGAIN, 0 |
+| Wake-op | `WAKE_OP` adding 1 to the second word | 0, word 3 → 4 |
+| PI, uncontended | `LOCK_PI` (the task's first), `TRYLOCK_PI` of an own word, `UNLOCK_PI`, `TRYLOCK_PI`, `UNLOCK_PI` | 0, -EDEADLK, 0, 0, 0 |
+| Shared | wake and wait without the private flag | 0, -EAGAIN |
+
+**All 22 replay as `equivalent` from source**, with `model_fault = 0`
+(`build/linux-svc-state-20261105g`, port `build/linux-fd-control-port-20261105g`).
+The 23 earlier boundaries stay equivalent: 45 of 45.
+
+**Original code added** to the fd-control slice:
+- `futex_requeue` (requeue.c), `futex_wake_op` and `futex_atomic_op_inuser`
+  (waitwake.c), `double_lock_hb`/`double_unlock_hb`, `wake_up_q`;
+- `futex_lock_pi`, `futex_lock_pi_atomic`, `lock_pi_update_atomic`,
+  `futex_unlock_pi`, `refill_pi_state_cache` (pi.c), `futex_top_waiter`,
+  `futex_cmpxchg_value_locked` (core.c);
+- the hrtimer setup and cancel of an on-stack sleeper (`hrtimer.c`:
+  `__hrtimer_init`, `hrtimer_init_sleeper_on_stack`, `hrtimer_try_to_cancel`,
+  `hrtimer_cancel`, `hrtimer_active`, `ktime_add_safe`), `get_timespec64`,
+  `futex_init_timeout`, `copy_from_user`;
+- `get_futex_key`'s shared branch with `folio_test_anon`;
+- the kmalloc-96 allocation of the first `pi_state`: `kzalloc_noprof`,
+  `__kmalloc_index`, `kmalloc_trace_noprof` and SLUB's fast path;
+- the original list walks (`plist_for_each_entry{,_safe}`): the analysis
+  proves each ends at its empty head (see
+  [entry-state analysis](entry-state-analysis.md#futex-scenarios-2026-11-06)).
+
+**Reviewed models** where the kernel is assembly or outside the slice:
+- arm64's `__futex_atomic_op` and `futex_atomic_cmpxchg_inatomic` (LDXR/STLXR
+  loops): one load and store of the admitted user word;
+- GUP-fast for one page: the bound page, a folio reference and
+  `folio_set_referenced`, as `gup_fast_pte_range` does;
+- `ktime_get` returns 0: the counter is not reproducible, and the value only
+  arms a timer that is cancelled unarmed;
+- faulting models for everything contended: queueing and waking a waiter,
+  the rt_mutex proxy lock, attaching a `pi_state` to another owner.
+
+**Binding additions** (`tools/live_kernel_binding.py`, `live-binding.json`):
+- **`command_pointers`**: futex's `utime` (16 bytes) and `uaddr2` (4 bytes)
+  become user objects only for the commands that read them.
+- **Unmapped objects**: a named object the user address space does not map
+  stays an object with no access, so the replay faults the same way (EFAULT).
+- **`hrtimer_bases`** (a per-CPU data symbol, calibrated through `rcu_data`'s
+  BTF per-CPU offset): each clock base's `seq` and `running`.
+- **Preconditions on derived symbols**: `current->nsproxy->time_ns` must be
+  `init_time_ns`.
+- **`empty_lists`**: every live hash bucket's chain must be self-linked.
+- **`opaque_pointers`**: `task.pi_state_cache` is carried as a value. After the
+  first `LOCK_PI` it names the kmalloc-96 object, and is exported as that
+  object's live address.
+- **`user_page`**: for a shared futex, the binding walks the task's page tables
+  (TTBR0_EL1, four levels, linear map through the derived `memstart_addr`). It
+  requires a user page that `pte_write()` admits, and binds that folio's
+  `flags`, `_refcount` and `mapping`.
+- **`extra_caches`**: kmalloc-96 is bound like kmalloc-192 (cache, per-CPU
+  state, freelist head object, slab).
+- **Pinned post-state objects**: the post-state binds the slab object at the
+  pre-state's head address, so an allocation is compared on the object it
+  returned, not on the next free one. Words holding an address inside the
+  object (the new `pi_state`'s self-linked list) are exported as live
+  addresses.
+
+The binary replays are 21 of 22 equivalent: the relative-timeout wait reads
+the arch counter, which a replay cannot reproduce (see
+[kernel binary replay](kernel-binary-replay.md#futex-scenarios-2026-11-06)).
 
 ## Limits
 

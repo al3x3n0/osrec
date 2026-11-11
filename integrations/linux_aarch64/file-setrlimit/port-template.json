@@ -320,6 +320,27 @@
         "unsigned",
         "buffer"
       ]
+    },
+    {
+      "number": 66,
+      "function": "linux_writev",
+      "arguments": [
+        "unsigned",
+        "iovec",
+        "unsigned"
+      ]
+    },
+    {
+      "number": 98,
+      "function": "linux_futex",
+      "arguments": [
+        "buffer",
+        "signed",
+        "unsigned",
+        "pointer",
+        "pointer",
+        "unsigned"
+      ]
     }
   ]
 }

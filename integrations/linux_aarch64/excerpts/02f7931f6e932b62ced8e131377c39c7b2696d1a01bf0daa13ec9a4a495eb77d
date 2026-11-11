@@ -1,0 +1,11 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Reviewed original Linux 6.10.14 kernel/bpf/bpf_lsm.c LSM_HOOK definition. */
+
+/* For every LSM hook that allows attachment of BPF programs, declare a nop
+ * function where a BPF program can be attached.
+ */
+#define LSM_HOOK(RET, DEFAULT, NAME, ...)	\
+noinline RET bpf_lsm_##NAME(__VA_ARGS__)	\
+{						\
+	return DEFAULT;				\
+}

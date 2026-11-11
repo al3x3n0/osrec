@@ -32,7 +32,7 @@ class LinuxFdControlTests(unittest.TestCase):
         port=json.loads((p/'port-template.json').read_text());port['roots']=[x for x in port['roots'] if x['number']!=25]
         with self.assertRaisesRegex(ValueError,'no reviewed route'):r.application_source('fd-control',port)
         old,_=r.source_identity(ROOT/'integrations/linux_aarch64/file-positioned');new,defs=r.source_identity(p)
-        self.assertEqual(len(defs),309)
+        self.assertEqual(len(defs),474)
         for n,h in old['definitions'].items():self.assertEqual(new['definitions'][n],h)
         # The syscall entry and do_fcntl are the original fs/fcntl.c bodies.
         self.assertTrue(defs['fcntl']['syscall']);self.assertIn(b'err = do_fcntl(fd, cmd, arg, f.file);',defs['fcntl']['body'])
@@ -77,7 +77,7 @@ class LinuxFdControlTests(unittest.TestCase):
             names={n:i for i,(n,_,_) in enumerate(r.fd_control_plan())}
             row=lambda n:c['calls'][names[n]]
             after=lambda n:states[names[n]+1]
-            self.assertTrue(m['native_linux_boot']);self.assertEqual(len(c['calls']),233)
+            self.assertTrue(m['native_linux_boot']);self.assertEqual(len(c['calls']),243)
             old_names={n for n,_,_ in r.file_positioned_plan()}
             retained=[row for (n,_,_),row in zip(r.fd_control_plan(),c['calls']) if n in old_names]
             self.assertEqual(retained,json.loads((ROOT/'tests/fixtures/linux-aarch64-file-positioned-native/capture.json').read_text())['calls'])
@@ -105,19 +105,19 @@ class LinuxFdControlTests(unittest.TestCase):
             self.assertEqual(after('duplicate_surviving_cloexec')['counts'],[3,5])
             self.assertEqual(after('last_regular_reference')['counts'],[3,0])
             result=run(SimpleNamespace(capture=native,out=stage/'pipeline',llvm_bin=LLVM,qemu=QEMU))
-            self.assertEqual((result['logical_calls'],result['qemu_matrix_executions'],result['context_bytes'],result['record_bytes']),(233,32,2544,1520))
-            self.assertEqual(len(result['syscalls']),20);self.assertFalse(result['runtime_host_interaction']);self.assertFalse(result['native_source_build_attested'])
-            self.assertEqual(result['pause_ordinals'],[24,34,43,153,184,218])
+            self.assertEqual((result['logical_calls'],result['qemu_matrix_executions'],result['context_bytes'],result['record_bytes']),(243,32,26800,19976))
+            self.assertEqual(len(result['syscalls']),22);self.assertFalse(result['runtime_host_interaction']);self.assertFalse(result['native_source_build_attested'])
+            self.assertEqual(result['pause_ordinals'],[24,34,53,163,194,228])
             self.assertEqual([s['cloexec'] for s in result['saved_state']],[0,88,200,16,40,128])
             self.assertEqual([s['file_counts'] for s in result['saved_state']],[[3,1],[3,3],[3,5],[3,2],[3,5],[3,0]])
             for s in result['saved_state']:
                 self.assertEqual(s['file_dentries'],[1,2]);self.assertEqual(s['dentry_inodes'],[1,2])
             k=json.loads((stage/'pipeline/kernel/manifest.json').read_text())
-            self.assertEqual(k['target_observations']['verified_calls'],699);self.assertEqual(k['target_observations']['isolation_checks'],466)
+            self.assertEqual(k['target_observations']['verified_calls'],729);self.assertEqual(k['target_observations']['isolation_checks'],486)
             # Linux's arm64 memset.S runs, on RAM that start_mmu.S maps as Normal memory.
             self.assertTrue(k['target']['mmu_enabled']);self.assertEqual(k['target']['mmu']['mode'],'identity')
             # Every call enters through Linux's arm64 entry.S, assembled from the pinned kernel tree.
-            tree=ROOT/'integrations/linux_aarch64/fd-control/upstream/kernel-tree'
+            tree=reviewed_adapter().upstream(ROOT/'integrations/linux_aarch64/fd-control')/'kernel-tree'
             self.assertEqual(k['source_hashes']['linux-entry.S'],digest((tree/'arch/arm64/kernel/entry.S').read_bytes()))
             dispatch=(stage/'pipeline/kernel/sources/slice_dispatch.h').read_text()
             self.assertIn('return (int64_t)osrec_linux_el0_svc(ctx, number, arguments);',dispatch);self.assertIn('osrec_kernel_dispatch_root',dispatch)
@@ -125,7 +125,7 @@ class LinuxFdControlTests(unittest.TestCase):
             address=lambda name:{l.split()[2]:l.split()[0] for l in symbols.splitlines() if len(l.split())==3 and l.split()[1] in 'TtWw'}.get(name)
             self.assertEqual(address('memset'),address('__pi_memset'))
             for name in ('vectors','el0t_64_sync','ret_to_user','el0t_64_sync_handler'):self.assertIsNotNone(address(name),name)
-            self.assertEqual(k['source_hashes']['linux-memset.S'],digest((ROOT/'integrations/linux_aarch64/fd-control/upstream/kernel-tree/arch/arm64/lib/memset.S').read_bytes()))
+            self.assertEqual(k['source_hashes']['linux-memset.S'],digest((reviewed_adapter().upstream(ROOT/'integrations/linux_aarch64/fd-control')/'kernel-tree/arch/arm64/lib/memset.S').read_bytes()))
             dependencies=k['source_identity']['modeled_dependencies']
             self.assertTrue(any(d.startswith('original fcntl syscall entry, check_fcntl_cmd and do_fcntl') for d in dependencies))
             self.assertTrue(any(d.startswith('original read/write/truncate path: fdget_pos, vfs_read/vfs_write') for d in dependencies))
@@ -136,7 +136,8 @@ class LinuxFdControlTests(unittest.TestCase):
             stage=Path(name);native=prepare_capture(stage/'native')
             changes=[('models.c','    if(end1>start1 && start1<64)memset(','    if(0)memset('),
                      # BPF's file_fcntl hook rejecting F_SETFD: security_file_fcntl's list walk returns it.
-                     ('model.h','static inline int bpf_lsm_file_fcntl(struct file *file,unsigned int cmd,unsigned long arg){(void)file;(void)cmd;(void)arg;return 0;}','static inline int bpf_lsm_file_fcntl(struct file *file,unsigned int cmd,unsigned long arg){(void)file;(void)arg;return cmd==2 ? -1 : 0;}'),
+                     # (bpf_lsm_file_fcntl is the original BPF LSM hook now; the reviewed dispatch to it is the mutant.)
+                     ('model.h','#define osrec_lsm_file_fcntl(p,...) bpf_lsm_file_fcntl(__VA_ARGS__)','#define osrec_lsm_file_fcntl(p,file,cmd,arg) ((void)(p),(cmd)==2 ? -1 : bpf_lsm_file_fcntl(file,cmd,arg))'),
                      ('models.c','    return !!(p->fdt->close_on_exec[fd/64]&(UINT64_C(1)<<(fd%64)));','    return !(p->fdt->close_on_exec[fd/64]&(UINT64_C(1)<<(fd%64)));')]
             for i,(filename,old,new) in enumerate(changes):
                 bundle=stage/('port-'+str(i));port=build_bundle(native,bundle);p=bundle/filename;s=p.read_text();self.assertEqual(s.count(old),1);p.write_text(s.replace(old,new))

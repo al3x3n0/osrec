@@ -1,0 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Reviewed original Linux v6.10 include/linux/rcu_sync.h definitions. */
+
+static inline bool rcu_sync_is_idle(struct rcu_sync *rsp)
+{
+	RCU_LOCKDEP_WARN(!rcu_read_lock_any_held(),
+			 "suspicious rcu_sync_is_idle() usage");
+	return !READ_ONCE(rsp->gp_state); /* GP_IDLE */
+}

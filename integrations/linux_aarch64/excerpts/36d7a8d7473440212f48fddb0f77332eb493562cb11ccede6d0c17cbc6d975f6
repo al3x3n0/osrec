@@ -1,0 +1,11 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Reviewed original Linux 6.10.14 include/linux/lsm_hook_defs.h entries. */
+
+LSM_HOOK(int, 0, inode_setattr, struct mnt_idmap *idmap, struct dentry *dentry,
+	 struct iattr *attr)
+LSM_HOOK(void, LSM_RET_VOID, inode_post_setattr, struct mnt_idmap *idmap,
+	 struct dentry *dentry, int ia_valid)
+LSM_HOOK(int, 0, file_permission, struct file *file, int mask)
+LSM_HOOK(int, 0, file_fcntl, struct file *file, unsigned int cmd,
+	 unsigned long arg)
+LSM_HOOK(int, 0, file_truncate, struct file *file)

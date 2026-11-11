@@ -1,0 +1,10 @@
+{
+ "files": {
+  "fs/file.c": "4a9b990af26654a99b9c8495842399420e4e85c71a87fb97460976729476d393",
+  "fs/open.c": "442fd66c45f46a7a52408c3867b66a4d0640694d9b97678dbc103cbdc27ccbba",
+  "fs/read_write.c": "60acdf5483ba3d1eb147bcf934621ba58b829bb4f404bc68f4a6e8c7528c2839",
+  "include/uapi/asm-generic/unistd.h": "57730743211680b6b2543ad4d9053597445ff39322596353196f8a23442a2af7",
+  "kernel/sys.c": "b86dcdfaaba1307126884f311f3d574be93cd2cfbc0a36b487968b72eb9bf81a"
+ },
+ "format": "osrec-kernel-excerpts-v1"
+}

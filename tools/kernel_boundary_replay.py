@@ -61,13 +61,13 @@ def stub_source(capture):
 
 def elf(segments,entry):
     """A minimal ELF64 AArch64 executable whose PT_LOAD segments are (physical address, bytes)."""
-    header_size,ph_size=64,56;offset=header_size+ph_size*len(segments);phdrs=b'';body=b''
+    header_size,ph_size=64,56;offset=header_size+ph_size*len(segments);phdrs=[];body=[];size=0
     for address,data in segments:
-        phdrs+=struct.pack('<IIQQQQQQ',1,7,offset+len(body),address,address,len(data),len(data),PAGE)
-        body+=data
+        phdrs.append(struct.pack('<IIQQQQQQ',1,7,offset+size,address,address,len(data),len(data),PAGE))
+        body.append(data);size+=len(data)
     ident=b'\x7fELF'+bytes([2,1,1,0])+bytes(8)
     header=ident+struct.pack('<HHIQQQIHHHHHH',2,183,1,entry,header_size,0,0,header_size,ph_size,len(segments),64,0,0)
-    return header+phdrs+body
+    return b''.join([header,*phdrs,*body])
 
 def build(capture,pages,stage,llvm_bin):
     used=set(pages)

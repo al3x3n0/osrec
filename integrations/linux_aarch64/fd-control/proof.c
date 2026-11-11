@@ -12,12 +12,28 @@ static void fail(uint32_t n){osrec_result[3]=n;osrec_result[2]=3;stop();}
 void replay_fault(void){fail(99);}
 static void copy(void *out,const void *in,size_t n){for(size_t i=0;i<n;++i)((unsigned char *)out)[i]=((const unsigned char *)in)[i];}
 static void same(const void *a,const void *b,size_t n){for(size_t i=0;i<n;++i)if(((const unsigned char *)a)[i]!=((const unsigned char *)b)[i])fail(10);}
-static void seed(unsigned s,unsigned ordinal){for(unsigned i=0;i<8;++i)for(unsigned j=0;j<4;++j)memory[s][4*i+j]=(unsigned char)(linux_inputs[ordinal][i]>>(8*j));}
+/* An iovec array in the call buffer holds buffer offsets in its segment bases (the recorded form); the call sees them
+ * as user addresses, like a buffer argument (adapter.c relocate_iovecs). */
+static void relocate(uint32_t words[8],const struct linux_observation *c,uint64_t base)
+{
+    for(unsigned j=0;j+1<4;++j){
+        if(osrec_argument_kind(c->number,j)!=5 || c->args[j]>=32)continue;
+        for(uint64_t k=0;k<c->args[j+1] && c->args[j]+16*k+16<=32;++k){
+            unsigned at=(unsigned)(c->args[j]+16*k)/4;uint64_t v=((uint64_t)words[at+1]<<32|words[at])+base;words[at]=(uint32_t)v;words[at+1]=(uint32_t)(v>>32);
+        }
+    }
+}
+static void seed(unsigned s,unsigned ordinal)
+{
+    uint32_t words[8];for(unsigned i=0;i<8;++i)words[i]=linux_inputs[ordinal][i];
+    if(ordinal<LINUX_CALLS)relocate(words,&linux_calls[ordinal],regions[s].user_address);
+    for(unsigned i=0;i<8;++i)for(unsigned j=0;j<4;++j)memory[s][4*i+j]=(unsigned char)(words[i]>>(8*j));
+}
 static struct osrec_slice_invocation invocation(unsigned s,unsigned i)
 {
     const struct linux_observation *c=&linux_calls[i];
     struct osrec_slice_invocation in={i,c->number,{0},{&regions[s],1}};
-    for(unsigned j=0;j<4;++j){uint64_t value=c->args[j];if(osrec_argument_kind(c->number,j)==3)value=value==UINT64_MAX ? 0 : value==UINT64_MAX-1 ? 1 : regions[s].user_address+value;in.args[j]=value;}
+    for(unsigned j=0;j<4;++j){uint64_t value=c->args[j];if(osrec_argument_kind(c->number,j)==3 || osrec_argument_kind(c->number,j)==5)value=value==UINT64_MAX ? 0 : value==UINT64_MAX-1 ? 1 : regions[s].user_address+value;in.args[j]=value;}
     return in;
 }
 static void execute(unsigned s,unsigned i)
@@ -26,7 +42,9 @@ static void execute(unsigned s,unsigned i)
     if(osrec_slice_execute(&sessions[s],&in,&out) || out.ordinal!=i || sessions[s].next!=i+1)fail(1);
     ++osrec_result[17];
     if((uint64_t)out.raw!=linux_calls[i].raw)fail(2);++osrec_result[11];
-    for(unsigned j=0;j<8;++j)for(unsigned k=0;k<4;++k)if(memory[s][4*j+k]!=(unsigned char)(linux_calls[i].words[j]>>(8*k)))fail(3);
+    uint32_t words[8];for(unsigned j=0;j<8;++j)words[j]=linux_calls[i].words[j];
+    relocate(words,&linux_calls[i],regions[s].user_address);
+    for(unsigned j=0;j<8;++j)for(unsigned k=0;k<4;++k)if(memory[s][4*j+k]!=(unsigned char)(words[j]>>(8*k)))fail(3);
     ++osrec_result[12];++osrec_result[7];++osrec_result[4];
 }
 static void finish(unsigned s)

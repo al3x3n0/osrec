@@ -1,0 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Reviewed original Linux 6.10.14 arch/arm64/include/asm/preempt.h definitions. */
+
+static inline bool should_resched(int preempt_offset)
+{
+	u64 pc = READ_ONCE(current_thread_info()->preempt_count);
+	return pc == preempt_offset;
+}

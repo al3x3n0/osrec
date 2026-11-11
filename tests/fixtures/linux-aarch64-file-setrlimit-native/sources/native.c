@@ -69,6 +69,24 @@ static void flush(void)
 }
 static void halt(void){for(;;)__asm__ volatile("wfe");}
 static void fail(void){string("OSREC_LINUX_CAPTURE_FAILED\n");flush();halt();}
+#ifdef OSREC_LINUX_FILE_IO_PROFILE
+/* Private descriptor class probe: 2 for the memory file, 1 for the console.
+ * Disk captures use F_GET_SEALS (shmem memfds carry F_SEAL_SEAL). Ramfs-rooted
+ * kernels without SHMEM back memfds with ramfs, which has no seals, so the
+ * probe reads the fstat file type instead. */
+static int file_class(unsigned fd)
+{
+#ifdef OSREC_LINUX_RAMFS_ROOT
+    unsigned char meta[128];
+    if(osrec_app_syscall(80,fd,(uintptr_t)meta,0,0,0,0))return -1;
+    uint32_t type=((uint32_t)meta[16]|(uint32_t)meta[17]<<8|(uint32_t)meta[18]<<16|(uint32_t)meta[19]<<24)&0170000;
+    return type==0100000 ? 2 : type==0020000 ? 1 : -1;
+#else
+    int64_t seals=osrec_app_syscall(25,fd,1034,0,0,0,0);
+    return seals==1 ? 2 : seals==-22 ? 1 : -1;
+#endif
+}
+#endif
 #ifdef OSREC_LINUX_FD_DUP_PROFILE
 static void record_fds(void)
 {
@@ -80,9 +98,9 @@ static void record_fds(void)
         if(flags==-9 && status==-9){scalar(0);number(0);}
         else{
 #ifdef OSREC_LINUX_FILE_IO_PROFILE
-            int64_t seals=osrec_app_syscall(25,fd,1034,0,0,0,0);
-            if(flags<0 || flags>1 || (seals!=1 && seals!=-22))fail();
-            scalar(seals==1 ? 2 : 1);number((uint64_t)flags);
+            int class=file_class(fd);
+            if(flags<0 || flags>1 || class<0)fail();
+            scalar((uint64_t)class);number((uint64_t)flags);
 #else
             if(flags<0 || flags>1 || (status!=0x20000 && status!=2))fail();
             scalar(status==2 ? 1 : 2);number((uint64_t)flags);
@@ -109,7 +127,7 @@ static void record_stat_metadata(void)
 #ifdef OSREC_LINUX_FILE_IO_PROFILE
 static void record_file(void)
 {
-    for(unsigned fd=0;fd<8;++fd)if(osrec_app_syscall(25,fd,1034,0,0,0,0)==1){
+    for(unsigned fd=0;fd<8;++fd)if(osrec_app_syscall(25,fd,1,0,0,0,0)>=0 && file_class(fd)==2){
         unsigned char bytes[64];
         int64_t size=osrec_app_syscall(67,fd,(uintptr_t)bytes,64,0,0,0);
         int64_t pos=osrec_app_syscall(62,fd,0,1,0,0,0);

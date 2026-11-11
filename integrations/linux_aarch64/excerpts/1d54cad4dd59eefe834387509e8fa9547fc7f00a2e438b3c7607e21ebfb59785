@@ -1,0 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Reviewed original Linux 6.10.14 include/linux/sched.h definitions. */
+
+static inline int _cond_resched(void)
+{
+	klp_sched_try_switch();
+	return __cond_resched();
+}

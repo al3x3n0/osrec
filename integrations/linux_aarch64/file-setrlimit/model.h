@@ -358,4 +358,55 @@ long linux_setresuid(uid_t,uid_t,uid_t);
 long linux_setuid(uid_t);
 long linux_setreuid(uid_t,uid_t);
 #include "upstream_fcntl.h"
+/* writev (fs/read_write.c: the system call and do_writev are original) over a reviewed vfs_writev on the regular
+ * file store, like vfs_write. The task keeps no I/O accounting in this model (vfs_write keeps none either), so
+ * do_writev's add_wchar and inc_syscw have nothing to count. */
+struct iovec {void __user *iov_base;size_t iov_len;};
+typedef int rwf_t;
+#define UIO_FASTIOV 8
+#define UIO_MAXIOV 1024
+#define MAX_RW_COUNT (INT32_MAX & ~4095)
+#define add_wchar(task,bytes) ((void)(task),(void)(bytes))
+#define inc_syscw(task) ((void)(task))
+ssize_t vfs_writev(struct file *,const struct iovec __user *,unsigned long,loff_t *,rwf_t);
+long linux_writev(unsigned long,const struct iovec __user *,unsigned long);
+/* futex (kernel/futex/syscalls.c: the system call, futex_cmd_has_timeout and do_futex are original, as are futex.h's
+ * futex_to_flags and should_fail_futex). Below do_futex, reviewed models cover a private FUTEX_WAKE and FUTEX_WAIT
+ * with no waiter (the slice queues none); timeouts, shared keys, requeueing and PI futexes fault. */
+#ifndef __always_inline
+#define __always_inline inline
+#endif
+typedef int64_t ktime_t;
+struct __kernel_timespec {int64_t tv_sec;long long tv_nsec;};
+#define FUTEX_WAIT		0
+#define FUTEX_WAKE		1
+#define FUTEX_FD		2
+#define FUTEX_REQUEUE		3
+#define FUTEX_CMP_REQUEUE	4
+#define FUTEX_WAKE_OP		5
+#define FUTEX_LOCK_PI		6
+#define FUTEX_UNLOCK_PI		7
+#define FUTEX_TRYLOCK_PI	8
+#define FUTEX_WAIT_BITSET	9
+#define FUTEX_WAKE_BITSET	10
+#define FUTEX_WAIT_REQUEUE_PI	11
+#define FUTEX_CMP_REQUEUE_PI	12
+#define FUTEX_LOCK_PI2		13
+#define FUTEX_PRIVATE_FLAG	128
+#define FUTEX_CLOCK_REALTIME	256
+#define FUTEX_CMD_MASK		~(FUTEX_PRIVATE_FLAG | FUTEX_CLOCK_REALTIME)
+#define FUTEX_BITSET_MATCH_ANY	0xffffffff
+#define FLAGS_SIZE_32		0x0002
+#define FLAGS_SHARED		0x0010
+#define FLAGS_CLOCKRT		0x0020
+int get_timespec64(struct timespec64 *,const struct __kernel_timespec __user *);
+int futex_init_timeout(u32,u32,struct timespec64 *,ktime_t *);
+int futex_wait(u32 __user *,unsigned int,u32,ktime_t *,u32);
+int futex_wake(u32 __user *,unsigned int,int,u32);
+int futex_requeue(u32 __user *,unsigned int,u32 __user *,unsigned int,int,int,u32 *,int);
+int futex_wake_op(u32 __user *,unsigned int,u32 __user *,int,int,int);
+int futex_lock_pi(u32 __user *,unsigned int,ktime_t *,int);
+int futex_unlock_pi(u32 __user *,unsigned int);
+int futex_wait_requeue_pi(u32 __user *,unsigned int,u32,ktime_t *,u32,u32 __user *);
+long linux_futex(u32 __user *,int,u32,const struct __kernel_timespec __user *,u32 __user *,u32);
 #endif

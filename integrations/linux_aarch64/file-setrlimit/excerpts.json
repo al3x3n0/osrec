@@ -1,0 +1,24 @@
+{
+ "files": {
+  "fs/file.c": "2ca43b502039d9cc59aa8a3f29bec2a6ad45db0732f6b4f6ce8f6de2e2d673c9",
+  "fs/open.c": "6ec6e90fac696061dc5995dda45741a10853793492b7c02ae2b5b558ab9c3d7e",
+  "fs/read_write.c": "a8a0dc5325f466c8e7cbc5dd1a5ea8169ac29fbe1e282ccfedee2ea9bb49e3ea",
+  "fs/stat.c": "dd513f2c313fc9e4022adf6d09ba83b2f3f1a230351ad9ae78e40b96a81770a8",
+  "include/linux/capability.h": "f3ecb56ab007c8dd6f500e6760a79f438fec94dbe932e5cd0b6e62910445d184",
+  "include/uapi/asm-generic/fcntl.h": "d00825b065851e8b00bc65225f1631807af63d7a1a021146cd4b854ba6112c4e",
+  "include/uapi/asm-generic/stat.h": "a72ea1ea8861f90afec442d62a36e00f9ff4e4897aa6740ff60064cd3665d8f1",
+  "include/uapi/asm-generic/unistd.h": "d2e519bb6fccf4cc90fba42d3f6750e4196cd1f7f4a7f1fcdc31a87b83aab5ad",
+  "include/uapi/linux/capability.h": "d424a94f4b53ce44c5841a0c5836377dab0bf53d6ab51da6db77188abfeae79b",
+  "include/uapi/linux/prctl.h": "435a8306038df37beba70afa7ed3c29522c4198e2d291465abe1cf2bf6b0279d",
+  "include/uapi/linux/securebits.h": "21590a54266efd535e94d51fb1ec051534df1583ebb57e05000210ee71e2d080",
+  "kernel/capability.c": "eedb22947859414eb20ea1181a777a4cce9dd8dca115a27aa6926c948dbcb8b2",
+  "kernel/cred.c": "43a683cd19520a2f50b5bba668068e57f6028350c74d058aebadcfc15b8a43c0",
+  "kernel/futex/futex.h": "4f4dac9e32269a5b68718fa4ab3ac489ff868c109ebd4326d60efdce8d193be3",
+  "kernel/futex/syscalls.c": "5d0738cc89bdfb51af680f93d7b0f08173818140df9f33edb83ba969ed38a434",
+  "kernel/groups.c": "177f28fc3d5353b69be67bfe621bb62c74d7cb7a5253e8689c86600d5d670c57",
+  "kernel/prctl-dispatch-prefix.txt": "ab479a2a34bd5f22d9c05c4f50ee1166492f53b68a82ae094179dd776d7458fa",
+  "kernel/sys.c": "c1075f7e8dc0a498eddb0b45b3e6b3cddd69c4555ab967114fff4e8604e73003",
+  "security/commoncap.c": "01ebe9308bc281abe161d998786ea1f36d7e5c88d8b60717469b4e851f6f5367"
+ },
+ "format": "osrec-kernel-excerpts-v1"
+}

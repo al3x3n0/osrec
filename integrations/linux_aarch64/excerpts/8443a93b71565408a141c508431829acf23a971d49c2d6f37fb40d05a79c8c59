@@ -1,0 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Reviewed original Linux v6.10 include/linux/page-flags.h definitions (6.10.14, the running kernel). */
+
+static __always_inline bool folio_test_anon(const struct folio *folio)
+{
+	return ((unsigned long)folio->mapping & PAGE_MAPPING_ANON) != 0;
+}

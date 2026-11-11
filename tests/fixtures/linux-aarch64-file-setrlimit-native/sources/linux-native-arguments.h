@@ -47,6 +47,12 @@ static unsigned osrec_native_buffer_object(uint64_t syscall,unsigned argument)
     case UINT64_C(164):
         if(argument==1)return 1;
         return 0;
+    case UINT64_C(66):
+        if(argument==1)return 1;
+        return 0;
+    case UINT64_C(98):
+        if(argument==0)return 1;
+        return 0;
     default:return 0;
     }
 }

@@ -1,0 +1,42 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Reviewed original Linux v6.10 arch/arm64/include/asm/futex.h definitions (6.10.14, the running kernel). */
+
+static inline int
+arch_futex_atomic_op_inuser(int op, int oparg, int *oval, u32 __user *_uaddr)
+{
+	int oldval = 0, ret, tmp;
+	u32 __user *uaddr = __uaccess_mask_ptr(_uaddr);
+
+	if (!access_ok(_uaddr, sizeof(u32)))
+		return -EFAULT;
+
+	switch (op) {
+	case FUTEX_OP_SET:
+		__futex_atomic_op("mov	%w3, %w5",
+				  ret, oldval, uaddr, tmp, oparg);
+		break;
+	case FUTEX_OP_ADD:
+		__futex_atomic_op("add	%w3, %w1, %w5",
+				  ret, oldval, uaddr, tmp, oparg);
+		break;
+	case FUTEX_OP_OR:
+		__futex_atomic_op("orr	%w3, %w1, %w5",
+				  ret, oldval, uaddr, tmp, oparg);
+		break;
+	case FUTEX_OP_ANDN:
+		__futex_atomic_op("and	%w3, %w1, %w5",
+				  ret, oldval, uaddr, tmp, ~oparg);
+		break;
+	case FUTEX_OP_XOR:
+		__futex_atomic_op("eor	%w3, %w1, %w5",
+				  ret, oldval, uaddr, tmp, oparg);
+		break;
+	default:
+		ret = -ENOSYS;
+	}
+
+	if (!ret)
+		*oval = oldval;
+
+	return ret;
+}

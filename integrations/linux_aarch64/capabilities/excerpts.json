@@ -1,0 +1,11 @@
+{
+ "files": {
+  "include/uapi/asm-generic/unistd.h": "e7241482a0edd801fe4463052a7600a411da176170a0c36cb25390585f862fb4",
+  "include/uapi/linux/capability.h": "2d5a272edd29df2bc7b29bc8b6ebf27db41e7210d0de47ea90518991f0ac557d",
+  "kernel/capability.c": "92852d067f95e8aaaed8a89c73b880b379a5ca6fe984f80d725ba5439f57328b",
+  "kernel/groups.c": "177f28fc3d5353b69be67bfe621bb62c74d7cb7a5253e8689c86600d5d670c57",
+  "kernel/sys.c": "b86dcdfaaba1307126884f311f3d574be93cd2cfbc0a36b487968b72eb9bf81a",
+  "security/commoncap.c": "c8d62d65a16c297c1a6e6698118c545c8b393bb933e543d723580727952ae0c8"
+ },
+ "format": "osrec-kernel-excerpts-v1"
+}

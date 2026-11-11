@@ -12,7 +12,7 @@ vmlinux word by word. A word the object relocates is compared outside the reloca
 type), lld's ADRP+ADD -> NOP+ADR relaxation is accepted by shape, and every other word must be identical.
 Output (stdout) is a JSON report per function.
 """
-import json,os,shlex,struct,subprocess,sys,tempfile
+import argparse,collections,concurrent.futures,json,os,shlex,struct,subprocess,sys,tempfile,time
 from pathlib import Path
 
 # AArch64 relocation types: the bits each writes in an instruction word (the rest must match).
@@ -75,6 +75,8 @@ class Elf:
 
 def compile_unit(entry,out):
     arguments=shlex.split(entry['command']) if 'command' in entry else list(entry['arguments'])
+    # Recompilation must not update the pinned build's dependency files.
+    arguments=[a for a in arguments if not a.startswith('-Wp,-MMD,')]
     arguments[arguments.index('-o')+1]=str(out);arguments.insert(1,'-ffunction-sections')
     result=subprocess.run(arguments,cwd=entry['directory'],capture_output=True,text=True)
     if result.returncode:raise ValueError('compile failed: %s\n%s'%(entry['file'],result.stderr[-2000:]))
@@ -87,6 +89,7 @@ def compare(code,relocated,live):
     with ADR_PREL_PG_HI21 directly followed by add Xd, Xd, #lo12 with ADD_ABS_LO12_NC against the same symbol
     and addend) links as `nop; adr Xd, target`: accepted when the live words have exactly that shape.
     """
+    if len(code)!=len(live):raise ValueError('function sizes differ')
     words=[int.from_bytes(code[k:k+4],'little') for k in range(0,len(code),4)]
     lives=[int.from_bytes(live[k:k+4],'little') for k in range(0,len(live),4)]
     mismatched=[];unknown=0;relaxed=0;k=0
@@ -117,7 +120,7 @@ def object_path(entry):
 class Units:
     """Compile commands by exact source path, and (lazily) the build's objects by defined symbol."""
     def __init__(self,build,image):
-        self.image=image;self.entries=json.load(open(build/'compile_commands.json'))
+        self.image=image;self.entries=json.loads((build/'compile_commands.json').read_text())
         self.by_source={}
         for entry in self.entries:self.by_source.setdefault(source_path(entry),entry)
         self.by_symbol=None
@@ -145,7 +148,77 @@ class Units:
         return None,'no_compile_command' if not found else 'ambiguous_symbol'
 
 
+def verify_all(build,workers=8):
+    """Freshly compile every TU and report persistent executable-byte coverage.
+
+    Same-named statics are checked against every matching linked extent. Coverage
+    counts only extents whose unrelocated words match and whose relocation types
+    are understood. Gaps, including assembler with no sized function symbol, stay
+    visible; compiling every TU alone is not a whole-text verification claim.
+    """
+    image=Elf(build/'vmlinux');entries=json.loads((build/'compile_commands.json').read_text())
+    executable=[s for s in image.sections if s['flags']&4 and s['addr'] and not s['name'].startswith('.init')]
+    by_name={}
+    for s in image.symbols:
+        if s['type'] in (0,2) and s['size'] and '$' not in s['name'] and any(a['addr']<=s['value'] and s['value']+s['size']<=a['addr']+a['size'] for a in executable):
+            by_name.setdefault(s['name'],[]).append(s)
+    start=time.time();coverage=[];report=[]
+    def verify(job):
+        index,entry=job;rows=[];covered=[]
+        with tempfile.TemporaryDirectory(prefix='osrec-source-verify-') as tmp:
+            obj=Path(tmp)/'fresh.o'
+            try:compile_unit(entry,obj)
+            except (ValueError,OSError) as error:return dict(source=source_path(entry),status='compile_failed',detail=str(error)),[]
+            unit=Elf(obj)
+            for name in sorted({s['name'] for s in unit.symbols if s['type'] in (0,2) and s['size'] and s['shndx'] and '$' not in s['name']} & by_name.keys()):
+                try:code,relocated=unit.function(name)
+                except ValueError as error:
+                    rows.append(dict(function=name,status='unreadable',detail=str(error)));continue
+                candidates=by_name[name];sized=[s for s in candidates if s['size']==len(code)]
+                if not sized:
+                    rows.append(dict(function=name,status='size_mismatch',object_size=len(code),linked_sizes=sorted({s['size'] for s in candidates})));continue
+                for s in sized:
+                    mismatch,unknown,relaxed=compare(code,relocated,image.read(s['value'],len(code)))
+                    status='differs' if mismatch else 'unchecked' if unknown else 'identical'
+                    rows.append(dict(function=name,address=hex(s['value']),size=s['size'],status=status,
+                                     mismatched_words=mismatch[:16],unchecked_relocations=unknown,relaxed_pairs=relaxed))
+                    if status=='identical':covered.append((s['value'],s['value']+s['size']))
+        return dict(source=source_path(entry),status='compiled',functions=rows),covered
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        for i,(row,covered) in enumerate(pool.map(verify,enumerate(entries)),1):
+            report.append(row);coverage+=covered
+            if i%100==0:print('%d/%d translation units, %.0f s'%(i,len(entries),time.time()-start),file=sys.stderr,flush=True)
+    intervals=[]
+    for lo,hi in sorted(coverage):
+        if intervals and lo<=intervals[-1][1]:intervals[-1][1]=max(intervals[-1][1],hi)
+        else:intervals.append([lo,hi])
+    gaps=[]
+    for s in executable:
+        at=s['addr'];end=at+s['size']
+        for lo,hi in intervals:
+            if hi<=at or lo>=end:continue
+            if lo>at:gaps.append(dict(section=s['name'],address=hex(at),size=lo-at))
+            at=max(at,hi)
+        if at<end:gaps.append(dict(section=s['name'],address=hex(at),size=end-at))
+    counts=collections.Counter(f['status'] for row in report for f in row.get('functions',[]))
+    return dict(format='osrec-whole-kernel-source-verification-v1',translation_units=len(entries),
+                compiled=sum(r['status']=='compiled' for r in report),functions=dict(counts),
+                executable_bytes=sum(s['size'] for s in executable),verified_bytes=sum(hi-lo for lo,hi in intervals),
+                complete=not gaps and all(r['status']=='compiled' for r in report),
+                gaps=gaps,units=report,seconds=round(time.time()-start,2))
+
+
 def main():
+    if '--all' in sys.argv:
+        parser=argparse.ArgumentParser(description='Recompile all translation units and audit executable coverage')
+        parser.add_argument('--all',action='store_true');parser.add_argument('--build',type=Path,default=Path('/kbuild'))
+        parser.add_argument('--workers',type=int,default=8);parser.add_argument('--out',type=Path,required=True)
+        a=parser.parse_args()
+        if a.workers<1:parser.error('--workers must be positive')
+        result=verify_all(a.build,a.workers);a.out.write_text(json.dumps(result,indent=1)+'\n')
+        print(json.dumps({k:v for k,v in result.items() if k not in ('units','gaps')}))
+        if not result['complete']:sys.exit(1)
+        return
     requests=json.load(open(sys.argv[1]));build=Path(sys.argv[2] if len(sys.argv)>2 else '/kbuild')
     image=Elf(build/'vmlinux');units=Units(build,image);report=[];by_entry={}
     for request in requests:

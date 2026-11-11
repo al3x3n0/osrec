@@ -1,0 +1,161 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Reviewed original Linux v6.10 kernel/time/hrtimer.c definitions (6.10.14, the running kernel). */
+
+ktime_t ktime_add_safe(const ktime_t lhs, const ktime_t rhs)
+{
+	ktime_t res = ktime_add_unsafe(lhs, rhs);
+
+	/*
+	 * We use KTIME_SEC_MAX here, the maximum timeout which we can
+	 * return to user space in a timespec:
+	 */
+	if (res < 0 || res < lhs || res < rhs)
+		res = ktime_set(KTIME_SEC_MAX, 0);
+
+	return res;
+}
+
+static inline int hrtimer_clockid_to_base(clockid_t clock_id)
+{
+	if (likely(clock_id < MAX_CLOCKS)) {
+		int base = hrtimer_clock_to_base_table[clock_id];
+
+		if (likely(base != HRTIMER_MAX_CLOCK_BASES))
+			return base;
+	}
+	WARN(1, "Invalid clockid %d. Using MONOTONIC\n", clock_id);
+	return HRTIMER_BASE_MONOTONIC;
+}
+
+static void __hrtimer_init(struct hrtimer *timer, clockid_t clock_id,
+			   enum hrtimer_mode mode)
+{
+	bool softtimer = !!(mode & HRTIMER_MODE_SOFT);
+	struct hrtimer_cpu_base *cpu_base;
+	int base;
+
+	/*
+	 * On PREEMPT_RT enabled kernels hrtimers which are not explicitly
+	 * marked for hard interrupt expiry mode are moved into soft
+	 * interrupt context for latency reasons and because the callbacks
+	 * can invoke functions which might sleep on RT, e.g. spin_lock().
+	 */
+	if (IS_ENABLED(CONFIG_PREEMPT_RT) && !(mode & HRTIMER_MODE_HARD))
+		softtimer = true;
+
+	memset(timer, 0, sizeof(struct hrtimer));
+
+	cpu_base = raw_cpu_ptr(&hrtimer_bases);
+
+	/*
+	 * POSIX magic: Relative CLOCK_REALTIME timers are not affected by
+	 * clock modifications, so they needs to become CLOCK_MONOTONIC to
+	 * ensure POSIX compliance.
+	 */
+	if (clock_id == CLOCK_REALTIME && mode & HRTIMER_MODE_REL)
+		clock_id = CLOCK_MONOTONIC;
+
+	base = softtimer ? HRTIMER_MAX_CLOCK_BASES / 2 : 0;
+	base += hrtimer_clockid_to_base(clock_id);
+	timer->is_soft = softtimer;
+	timer->is_hard = !!(mode & HRTIMER_MODE_HARD);
+	timer->base = &cpu_base->clock_base[base];
+	timerqueue_init(&timer->node);
+}
+
+int hrtimer_try_to_cancel(struct hrtimer *timer)
+{
+	struct hrtimer_clock_base *base;
+	unsigned long flags;
+	int ret = -1;
+
+	/*
+	 * Check lockless first. If the timer is not active (neither
+	 * enqueued nor running the callback, nothing to do here.  The
+	 * base lock does not serialize against a concurrent enqueue,
+	 * so we can avoid taking it.
+	 */
+	if (!hrtimer_active(timer))
+		return 0;
+
+	base = lock_hrtimer_base(timer, &flags);
+
+	if (!hrtimer_callback_running(timer))
+		ret = remove_hrtimer(timer, base, false, false);
+
+	unlock_hrtimer_base(timer, &flags);
+
+	return ret;
+
+}
+
+int hrtimer_cancel(struct hrtimer *timer)
+{
+	int ret;
+
+	do {
+		ret = hrtimer_try_to_cancel(timer);
+
+		if (ret < 0)
+			hrtimer_cancel_wait_running(timer);
+	} while (ret < 0);
+	return ret;
+}
+
+static void __hrtimer_init_sleeper(struct hrtimer_sleeper *sl,
+				   clockid_t clock_id, enum hrtimer_mode mode)
+{
+	/*
+	 * On PREEMPT_RT enabled kernels hrtimers which are not explicitly
+	 * marked for hard interrupt expiry mode are moved into soft
+	 * interrupt context either for latency reasons or because the
+	 * hrtimer callback takes regular spinlocks or invokes other
+	 * functions which are not suitable for hard interrupt context on
+	 * PREEMPT_RT.
+	 *
+	 * The hrtimer_sleeper callback is RT compatible in hard interrupt
+	 * context, but there is a latency concern: Untrusted userspace can
+	 * spawn many threads which arm timers for the same expiry time on
+	 * the same CPU. That causes a latency spike due to the wakeup of
+	 * a gazillion threads.
+	 *
+	 * OTOH, privileged real-time user space applications rely on the
+	 * low latency of hard interrupt wakeups. If the current task is in
+	 * a real-time scheduling class, mark the mode for hard interrupt
+	 * expiry.
+	 */
+	if (IS_ENABLED(CONFIG_PREEMPT_RT)) {
+		if (task_is_realtime(current) && !(mode & HRTIMER_MODE_SOFT))
+			mode |= HRTIMER_MODE_HARD;
+	}
+
+	__hrtimer_init(&sl->timer, clock_id, mode);
+	sl->timer.function = hrtimer_wakeup;
+	sl->task = current;
+}
+
+void hrtimer_init_sleeper_on_stack(struct hrtimer_sleeper *sl,
+				   clockid_t clock_id, enum hrtimer_mode mode)
+{
+	debug_object_init_on_stack(&sl->timer, &hrtimer_debug_descr);
+	__hrtimer_init_sleeper(sl, clock_id, mode);
+}
+
+bool hrtimer_active(const struct hrtimer *timer)
+{
+	struct hrtimer_clock_base *base;
+	unsigned int seq;
+
+	do {
+		base = READ_ONCE(timer->base);
+		seq = raw_read_seqcount_begin(&base->seq);
+
+		if (timer->state != HRTIMER_STATE_INACTIVE ||
+		    base->running == timer)
+			return true;
+
+	} while (read_seqcount_retry(&base->seq, seq) ||
+		 base != READ_ONCE(timer->base));
+
+	return false;
+}

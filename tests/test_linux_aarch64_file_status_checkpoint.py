@@ -18,7 +18,7 @@ class LinuxFileStatusTests(unittest.TestCase):
         self.assertEqual(new['definitions'],old['definitions']);self.assertEqual(len(defs),94);self.assertEqual(len(new['additional_sources']),10)
         self.assertNotIn('setfl',defs);self.assertIn('setfl body not retained',new['scope'])
         self.assertEqual(generate('file-status'),(p/'application.c').read_text());self.assertEqual((p/'application.c').read_bytes(),(FIXTURE/'sources/application.c').read_bytes())
-        self.assertIn('#define F_SETFL 4',(p/'upstream/include/uapi/asm-generic/fcntl.h').read_text())
+        self.assertIn('#define F_SETFL 4',(reviewed_adapter().upstream(p)/'include/uapi/asm-generic/fcntl.h').read_text())
         policy=json.loads((p/'checkpoint-policy.json').read_text());self.assertEqual(policy['fields']['file_pool']['element']['members']['f_flags'],dict(type='uint32_t',policy='persist'))
         for i,(_,_,data) in enumerate(r.file_status_plan()):
             expected=list(data) if data is not None else [0xa5a50000+j for j in range(8)];words=r.input_words('file-status',i);self.assertEqual(words,expected);words[0]^=0xffffffff;self.assertEqual(r.input_words('file-status',i),expected)

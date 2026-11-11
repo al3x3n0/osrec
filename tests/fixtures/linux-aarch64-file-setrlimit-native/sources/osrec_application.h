@@ -42,5 +42,7 @@ static inline int64_t osrec_app_linux_setuid(uint64_t a0){return osrec_app_sysca
 static inline int64_t osrec_app_linux_setreuid(uint64_t a0,uint64_t a1){return osrec_app_syscall(UINT64_C(145),a0,a1,0,0,0,0);}
 static inline int64_t osrec_app_linux_getrlimit(uint64_t a0,uint64_t a1){return osrec_app_syscall(UINT64_C(163),a0,a1,0,0,0,0);}
 static inline int64_t osrec_app_linux_setrlimit(uint64_t a0,uint64_t a1){return osrec_app_syscall(UINT64_C(164),a0,a1,0,0,0,0);}
+static inline int64_t osrec_app_linux_writev(uint64_t a0,uint64_t a1,uint64_t a2){return osrec_app_syscall(UINT64_C(66),a0,a1,a2,0,0,0);}
+static inline int64_t osrec_app_linux_futex(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5){return osrec_app_syscall(UINT64_C(98),a0,a1,a2,a3,a4,a5);}
 int64_t osrec_app_syscall_prefix(uint64_t,uint64_t,uint64_t,uint64_t,uint64_t,uint64_t,uint64_t);
 #endif

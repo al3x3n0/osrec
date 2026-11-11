@@ -3,3 +3,14 @@ __pycache__/
 *.pyc
 .DS_Store
 .pytest_cache/
+
+# Rendered slide intermediates; retain authoring scripts, input images and output/.
+docs/slides/.build/**/*.pptx
+docs/slides/.build/**/*.inspect.ndjson
+docs/slides/.build/**/slide-*.png
+docs/slides/.build/**/validation*.json
+docs/slides/.build/superseded-limitations.png
+
+# Kernel source excerpts: materialized from integrations/linux_aarch64/excerpts by prepare.upstream()
+integrations/linux_aarch64/**/upstream/
+tests/fixtures/linux-aarch64-*/upstream/

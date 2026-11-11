@@ -6,7 +6,7 @@ from kernel_btf import BTF,locate,resolve
 from live_kernel_binding import check_config,validate as validate_binding
 from svc_boundary import FORMAT as OBSERVATION,validate_contract,user_objects
 from draft_live_binding import draft
-from reduced_boundary_replay import bound_fields,expected,mismatches,normalize,replay,state_source
+from reduced_boundary_replay import bound_fields,check_ranges,covered,expected,generate,held_fields,mismatches,node,normalize,replay,state_source
 
 CONTRACT=ROOT/'integrations/linux_aarch64/svc-boundary.json'
 BINDING=ROOT/'integrations/linux_aarch64/file-io/live-binding.json'
@@ -67,6 +67,77 @@ class UserObjectTests(unittest.TestCase):
         found=user_objects(self.BINDING,{148:['buffer','buffer','buffer']},{'number':148,'x0':100,'x1':200,'x2':300},self.CONTRACT)
         self.assertEqual([(o['address'],o['size'],o['arguments']) for o in found],[(100,32,[0]),(200,32,[1]),(300,32,[2])])
 
+    def test_a_pointer_argument_binds_no_object(self):
+        # futex(uaddr, op, val, utime, uaddr2, val3): a null timeout and an unused uaddr2.
+        found=user_objects(self.BINDING,{98:['buffer','signed','unsigned','pointer','pointer','unsigned']},{'number':98,'x0':100,'x1':129,'x2':1,'x3':0,'x4':0,'x5':0},
+            {'argument_registers':['x0','x1','x2','x3','x4','x5']})
+        self.assertEqual([(o['address'],o['size'],o['arguments']) for o in found],[(100,32,[0])])
+
+class GlobalBindingTests(unittest.TestCase):
+    """Kernel data the task does not reach, bound from a derived data symbol (the futex hash)."""
+    def setUp(self):
+        names=['int','long','atomic','counter','list_head','next','prev','plist','node_list','bucket','waiters','lock','chain']
+        types=[(1,'int',4,None,0),(1,'long',8,None,0),(4,'atomic',4,[('counter',1,0)],0),(4,'list_head',16,[('next',2,0),('prev',2,64)],0),
+            (4,'plist',16,[('node_list',4,0)],0),(4,'bucket',64,[('waiters',3,0),('lock',1,32),('chain',5,64)],0)]
+        self.btf=BTF(btf_blob(types,names));self.symbols={'symbols':{'__futex_data':dict(address='0x1000',
+            layout=dict(size=16,align=16,fields=dict(queues=dict(offset=0,size=8),hashsize=dict(offset=8,size=8))),
+            live_checks=[dict(check='power_of_two',field='hashsize'),dict(check='linear_map',field='queues',align=64),
+                dict(check='empty_lists',array='queues',count='hashsize',record='bucket',stride=64,counter='waiters.counter',list='chain.node_list',lock='lock')])}}
+        self.binding={'globals':[dict(symbol='__futex_data',page_offset=0x10000,scalars={'__futex_data.hashsize':'hashsize'},
+            array=dict(pointer='queues',count='hashsize',field='__futex_data.queues',pool='futex_hash_buckets',capacity=4,record='bucket',
+                members={'waiters.counter':{'path':'.waiters.counter'}},transient={'lock':0}))]}
+        self.cells={};place(self.cells,0x1000,0x20000);place(self.cells,0x1008,4)
+        for i in range(8):place(self.cells,0x20000+64*i+8,0x20000+64*i+8);place(self.cells,0x20000+64*i+16,0x20000+64*i+8)
+    def project(self,symbols=True):
+        from live_kernel_binding import project_globals
+        state=dict(scalars={},transient={},evidence={});project_globals(self.binding,self.btf,Memory(self.cells),self.symbols if symbols else None,state);return state
+    def test_buckets_bind_into_the_pool(self):
+        place(self.cells,0x20000+64*2,3,4);place(self.cells,0x20000+64*2+8,0x30000)   # a bucket with waiters may have a chain
+        state=self.project()
+        self.assertEqual(state['scalars'],{'__futex_data.hashsize':4,**{'futex_hash_buckets[%d].waiters.counter'%i:3 if i==2 else 0 for i in range(4)}})
+        self.assertEqual(state['transient'],{'futex_hash_buckets[%d].lock'%i:0 for i in range(4)})
+        self.assertEqual(state['references'],{'__futex_data.queues':'futex_hash_buckets[0]'})
+        self.assertEqual(state['evidence']['global __futex_data']['empty_bucket'],3)
+    def test_size_layout_and_symbol_failures_reject(self):
+        for change,message in (((0x1008,8),'differs from the slice pool'),((0x20000+64+4,1,4),'lock is held'),((0x1000,0x20008),'linear-map')):
+            with self.subTest(message=message):
+                saved=dict(self.cells);place(self.cells,*change)
+                with self.assertRaisesRegex(ValueError,message):self.project()
+                self.cells=saved
+        with self.assertRaisesRegex(ValueError,'derived data symbol'):self.project(symbols=False)
+        bad=copy.deepcopy(self.binding);bad['globals'][0]['array']['capacity']=300
+        with self.assertRaises(ValueError):validate_binding(dict(json.loads((FD_CONTROL/'live-binding.json').read_text()),globals=bad['globals']))
+        validate_binding(json.loads((FD_CONTROL/'live-binding.json').read_text()))
+
+class PerCpuBindingTests(unittest.TestCase):
+    """Per-CPU state: this CPU's copy is at a per-CPU address plus the CPU's offset (arm64 TPIDR_EL1)."""
+    OFFSET=0xffff7fff9e017000
+    class CpuMemory(Memory):
+        def __init__(self,cells,offset):super().__init__(cells);self.offset=offset;self.reads=0
+        def register(self,name):
+            if name!='TPIDR_EL1':raise KeyError(name)
+            self.reads+=1;return self.offset
+    def test_a_per_cpu_symbol_is_bound_at_this_cpus_copy(self):
+        from live_kernel_binding import project_globals
+        link=0xffff800081ec87c0;copy=(link+self.OFFSET)&(1<<64)-1;cells={}
+        place(cells,copy+277,1,1);place(cells,copy+276,0,1)
+        symbols={'symbols':{'rcu_data':dict(address='%#x'%link,percpu=True,layout=dict(size=960,align=64,fields=dict(rcu_need_heavy_qs=dict(offset=276,size=1),rcu_urgent_qs=dict(offset=277,size=1))),live_checks=[])}}
+        binding={'percpu':{'offset_register':'TPIDR_EL1'},'globals':[dict(symbol='rcu_data',page_offset=0,scalars={'rcu_data.rcu_urgent_qs':'rcu_urgent_qs','rcu_data.rcu_need_heavy_qs':'rcu_need_heavy_qs'})]}
+        memory=self.CpuMemory(cells,self.OFFSET);state=dict(scalars={},transient={},evidence={})
+        project_globals(binding,None,memory,symbols,state)
+        self.assertEqual(state['scalars'],{'rcu_data.rcu_urgent_qs':1,'rcu_data.rcu_need_heavy_qs':0})
+        self.assertEqual((state['evidence']['global rcu_data']['address'],state['evidence']['percpu_offset']),('%#x'%copy,self.OFFSET))
+        # Without the offset the per-CPU link address is read, which holds no copy.
+        project_globals(binding,None,self.CpuMemory(cells,0),symbols,state:=dict(scalars={},transient={},evidence={}))
+        self.assertEqual(state['scalars']['rcu_data.rcu_urgent_qs'],0)
+    def test_per_cpu_members_need_the_offset_register(self):
+        base=json.loads((FD_CONTROL/'live-binding.json').read_text());validate_binding(copy.deepcopy(base))
+        self.assertIn('percpu',base['descriptors']['related']['members']['mount_pcp.mnt_writers'])
+        for mutate in (lambda b:b.pop('percpu'),lambda b:b['descriptors']['related']['members']['mount_pcp.mnt_writers']['percpu'].update(width=4),
+                       lambda b:b['descriptors']['related']['members']['sb_read_count[0]']['percpu'].update(width=3),lambda b:b.update(percpu={'offset_register':'TPIDR EL1'})):
+            b=copy.deepcopy(base);mutate(b)
+            with self.subTest(),self.assertRaises(ValueError):validate_binding(b)
+
 class BtfTests(unittest.TestCase):
     def test_typed_paths_follow_members_pointers_arrays_and_anonymous_records(self):
         blob=b'pad'+sample_btf()+b'tail';self.assertEqual(locate(blob),3);btf=BTF(blob)
@@ -85,6 +156,18 @@ class BtfTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'null pointer'):get('.p->b')
         with self.assertRaisesRegex(ValueError,'not unique'):btf.struct('dup')
         with self.assertRaisesRegex(ValueError,'bitfield'):btf.member(btf.struct('bits'),'x')
+    def test_cast_step_names_the_record_behind_an_untyped_pointer(self):
+        # holder{void *p; int *q;} and obj{int a; int b;}: `->(obj)` reads through p, never through q.
+        names=['int','holder','obj','p','q','a','b']
+        types=[(1,'int',4,None,0),(2,'',0,None,0),(2,'',1,None,0),(4,'holder',16,[('p',2,0),('q',3,64)],0),(4,'obj',8,[('a',1,0),('b',1,32)],0)]
+        btf=BTF(btf_blob(types,names));cells={};place(cells,0x100,0x200);place(cells,0x200,5,4);place(cells,0x204,6,4)
+        m=Memory(cells)
+        def get(path):a,t=resolve(btf,m.u,0x100,'holder',path);return m.u(a,btf.scalar(t))
+        self.assertEqual([get('.p->(obj).a'),get('.p->(obj).b')],[5,6])
+        for path in ('.q->(obj).a','.p->(missing).a'):
+            with self.subTest(path=path),self.assertRaises((ValueError,KeyError)):get(path)
+        place(cells,0x100,0)
+        with self.assertRaisesRegex(ValueError,'null pointer'):get('.p->(obj).a')
     def test_missing_or_ambiguous_blob_rejected(self):
         with self.assertRaises(ValueError):locate(b'no type data')
         with self.assertRaises(ValueError):locate(sample_btf()+sample_btf())
@@ -128,12 +211,14 @@ class BindingTests(unittest.TestCase):
         self.assertLessEqual({'inode_pool[].i_mode','inode_pool[].append','file_pool[].f_path.dentry','dentry_pool[].d_inode','inode_pool[].i_sb'},bound_fields(state,b))
         policy=json.loads((FD_CONTROL/'checkpoint-policy.json').read_text())
         self.assertEqual(normalize('argument:ctx->file_pool[1].f_path.dentry->d_inode->i_mode',policy),'inode_pool[].i_mode')
-        self.assertEqual(normalize('argument:ctx->file_pool[1].f_path.dentry->d_inode->i_sb->write_depth',policy),'superblock.write_depth')
+        self.assertEqual(normalize('argument:ctx->file_pool[1].f_path.dentry->d_inode->i_sb->s_writers.rw_sem[0].read_count',policy),'superblock.s_writers.rw_sem[].read_count')
         # A class released by the call leaves its inode unobservable afterwards.
         released=copy.deepcopy(state);released['pool'][1]=None
         for k in ('inode_pool[1].i_mode','inode_pool[1].append'):del released['scalars'][k]
         self.assertIsNone(dict(zip(exported,expected(released,exported,b)))['inode_pool[1].i_mode'])
-        self.assertEqual([c['path'] for c in b['preconditions']],['.signal->rlim[7].rlim_cur','.signal->rlim[1].rlim_cur'])
+        self.assertEqual([c['path'] for c in b['preconditions']],['.signal->rlim[7].rlim_cur','.signal->rlim[1].rlim_cur','.nsproxy->time_ns'])
+        # A precondition may name a derived data symbol instead of a value (the task's time namespace is init_time_ns).
+        self.assertEqual(b['preconditions'][2]['equals_symbol'],'init_time_ns')
         for change in (lambda d:d['preconditions'][0].pop('reason'),lambda d:d['preconditions'][0].update(equals='8'),lambda d:d['preconditions'].append({'path':1,'equals':8,'reason':'r'})):
             d=copy.deepcopy(b);change(d)
             with self.assertRaisesRegex(ValueError,'precondition'):validate_binding(d)
@@ -147,6 +232,46 @@ class BindingTests(unittest.TestCase):
                        lambda r:r['preconditions'][0].pop('reason'),
                        lambda r:r['preconditions'][0].update(equals='0')):
             d=copy.deepcopy(b);change(d['descriptors']['related'])
+            with self.assertRaises(ValueError):validate_binding(d)
+    def test_held_fields_model_state_and_range_forms(self):
+        b=json.loads((FD_CONTROL/'live-binding.json').read_text());validate_binding(copy.deepcopy(b))
+        policy=json.loads((FD_CONTROL/'checkpoint-policy.json').read_text())
+        # Indexed member arrays, references to one pool's embedded member, and reads below transient leaves.
+        for path,field in (('argument:ctx->current->cred->user_ns->uid_map->extent[2].count','user_ns.uid_map.extent[].count'),
+                           ('argument:ctx->file_pool[1].f_path.dentry->d_inode->i_mapping->a_ops','inode_pool[].i_data.a_ops'),
+                           ('argument:ctx->folio_pool[0].mapping->host->i_size','inode_pool[].i_size'),
+                           ('argument:ctx->inode_pool[1].i_data.i_pages.xa_head->flags','folio_pool[].flags'),
+                           ('*(argument:ctx->inode_wb.list_lock)','inode_wb.list_lock'),
+                           ('argument:ctx->superblock.s_fsnotify_info->watched_objects[0]->counter','superblock.s_fsnotify_info.watched_objects[].counter')):
+            with self.subTest(path=path):self.assertEqual(normalize(path,policy),field)
+        sources=[('live',{'inode_pool[].i_uid.val','superblock.s_fsnotify_info'}),('held',{'superblock.s_flags'}),('model',{'tk_core','fop_pool[]'})]
+        cover=lambda f:covered(f,node(policy,f),policy,sources)
+        self.assertEqual([cover(f) for f in ('inode_pool[].i_uid','superblock.s_fsnotify_info.watched_objects[].counter','superblock.s_flags',
+                                             'tk_core.timekeeper.xtime_sec','fop_pool[].read','superblock.s_user_ns','inode_pool[].i_gid','superblock.s_time_gran')],
+                         ['live','live','held','model','model','live',None,None])
+        # Held fields are exported per live class and expected at the precondition value under its mask.
+        o=json.loads((ROOT/'build/linux-svc-state-20261103a/observe-pread/boundary.json').read_text()) if (ROOT/'build/linux-svc-state-20261103a/observe-pread/boundary.json').exists() else None
+        if o is None:self.skipTest('fd-control observation required')
+        state=o['kernel_pre'];held={f:(m,v) for f,m,v in held_fields(state,b)}
+        self.assertEqual(held['vfs_mount.mnt.mnt_flags'],(632,0));self.assertEqual(held['superblock.s_time_min'],((1<<64)-1,1<<63))
+        source,_,exported=generate(state,b,o,o['pre']['user_objects'])
+        self.assertIn('(uint64_t)(uintptr_t)ctx->inode_pool[1].i_hash.pprev&UINT64_C(%d);'%((1<<64)-1),source)
+        released=copy.deepcopy(state);released['pool'][1]=None
+        want=dict(zip(exported,expected(state,exported,b)));gone=dict(zip(exported,expected(released,exported,b)))
+        self.assertEqual((want['superblock.s_fsnotify_info'],gone['superblock.s_fsnotify_info']),(0,None))
+        self.assertIn('    ctx->folio_pool[0].mapping=&ctx->inode_pool[1].i_data;',source);self.assertNotIn('ctx->folio_pool[1]',source)
+        # Range forms: listed fields, every pool entry, and an unmasked held precondition.
+        def ranges(validated_by,low=0,high=64):return check_ranges([dict(record='r',field='f',min=low,max=high,validated_by=validated_by)],[('pre',state)],b)
+        self.assertEqual(len(ranges('live state fields user_ns.uid_map.nr_extents, user_ns.gid_map.nr_extents')),2)
+        self.assertEqual({c['live'] for c in ranges('live state field inode_pool[].i_size, checked against each captured state')},{'inode_pool[0].i_size','inode_pool[1].i_size'})
+        self.assertEqual([c['live'] for c in ranges('live precondition noop_bdi.capabilities',0,0)],['noop_bdi.capabilities'])
+        for bad in ('live precondition mount.mnt_flags','live state field files.missing','the reviewer'):
+            with self.subTest(bad=bad),self.assertRaises(ValueError):ranges(bad)
+        for change in (lambda d:d['descriptors']['related']['links'].append(dict(field='folio_pool[0].index',target='inode_pool[1]')),
+                       lambda d:d['descriptors']['related']['links'].append(dict(field='inode_pool[].i_op',target='iop_pool[]',object='.f_inode->i_op')),
+                       lambda d:d['descriptors']['related']['preconditions'].append(dict(path='.f_inode->i_flctx',equals=0,reason='r',field='superblock.s_flags')),
+                       lambda d:d['model_state'].update({'tk_core':''})):
+            d=copy.deepcopy(b);change(d)
             with self.assertRaises(ValueError):validate_binding(d)
     def test_analyzer_paths_normalize_through_policy_references(self):
         policy=json.loads(POLICY.read_text())

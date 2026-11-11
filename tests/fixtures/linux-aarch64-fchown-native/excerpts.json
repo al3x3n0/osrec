@@ -1,0 +1,12 @@
+{
+ "files": {
+  "fs/file.c": "2ca43b502039d9cc59aa8a3f29bec2a6ad45db0732f6b4f6ce8f6de2e2d673c9",
+  "fs/open.c": "6ec6e90fac696061dc5995dda45741a10853793492b7c02ae2b5b558ab9c3d7e",
+  "fs/read_write.c": "4ed51c1f62d1063fe7485c4683049c6959907a67f7eef2b9e1899d1782edbea7",
+  "fs/stat.c": "dd513f2c313fc9e4022adf6d09ba83b2f3f1a230351ad9ae78e40b96a81770a8",
+  "include/uapi/asm-generic/stat.h": "a72ea1ea8861f90afec442d62a36e00f9ff4e4897aa6740ff60064cd3665d8f1",
+  "include/uapi/asm-generic/unistd.h": "0816df6a2640b98c0b54f8f0308e202cd8780875d2165a74389b89eab23aa228",
+  "kernel/sys.c": "b86dcdfaaba1307126884f311f3d574be93cd2cfbc0a36b487968b72eb9bf81a"
+ },
+ "format": "osrec-kernel-excerpts-v1"
+}

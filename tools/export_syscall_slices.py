@@ -11,7 +11,9 @@ from freestanding_elf import prepare_target,add_target_arguments,target_metadata
 from run_freestanding_armv7 import observe,require_success
 from slice_port_bundle import validate_bundle,snapshot,publish_inputs
 
-KINDS={'signed':1,'unsigned':2,'buffer':3,'path':4}
+# iovec: a user array of struct iovec whose length is the next argument (readv/writev).
+# pointer: a user address the call passes on without a bound object (a null timeout, futex's uaddr2).
+KINDS={'signed':1,'unsigned':2,'buffer':3,'path':4,'iovec':5,'pointer':6}
 def validate_port(port):
     if port.get('format')!='osrec-kernel-slice-port-v1' or port.get('target_isa')!='aarch64' or port.get('argument_width') not in (32,64):raise ValueError('unsupported kernel port ABI')
     if not re.fullmatch(r'[A-Za-z_][A-Za-z_0-9-]*',port.get('name','')) or not port.get('kernel_abi'):raise ValueError('kernel port module/ABI missing')
@@ -27,6 +29,8 @@ def validate_port(port):
     if not seen:raise ValueError('kernel port has no roots')
     if 'application_abi' in port:validate_application_abi(port['application_abi'])
     if port.get('target_mmu','identity')!='identity':raise ValueError('unsupported target MMU mode')
+    # The kernel's automatic-variable initialization (CONFIG_INIT_STACK_ALL_ZERO / _PATTERN), applied to C slices.
+    if port.get('stack_init','none') not in ('none','zero','pattern'):raise ValueError('unsupported stack initialization')
     if 'entry' in port and (not isinstance(port['entry'],dict) or not {'function'}<=set(port['entry'])<={'function','assembly'} or not re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]*',port['entry']['function'] or '') or port['entry'].get('assembly',False) not in (True,False)):raise ValueError('invalid system call entry recipe')
 
 def validate_application_abi(abi):
@@ -56,7 +60,7 @@ def dispatch_header(port,plan):
     def direct(name):
         body='static inline int64_t '+name+'(struct osrec_kernel_context *ctx,uint64_t number,const uintptr_t *arguments)\n{(void)ctx;(void)arguments;switch(number){\n'
         for root in port['roots']:
-            casts={'signed':'int'+str(port['argument_width'])+'_t','unsigned':'uint'+str(port['argument_width'])+'_t','buffer':'void *','path':'const char *'}
+            casts={'signed':'int'+str(port['argument_width'])+'_t','unsigned':'uint'+str(port['argument_width'])+'_t','buffer':'void *','path':'const char *','iovec':'void *','pointer':'void *'}
             arguments=', '.join('('+casts[k]+')arguments['+str(i)+']' for i,k in enumerate(root['arguments']))
             body+='case UINT64_C('+str(root['number'])+'): return (int64_t)'+plan['symbols'][root['function']]+'('+(', '.join(['ctx',arguments] if arguments else ['ctx']) if root['function'] in plan['context_functions'] else arguments)+');\n'
         return body+'default:return 0;}}\n'
@@ -153,6 +157,7 @@ def export(args):
         elf=stage/'slices.elf';binary=stage/'slices.bin'
         compiled=owned_paths(sources,(*package['sources'],*package.get('assembly_sources',()),package['adapter_source'],package['data_source'],'slice_runtime.c','slice_bytes.c','slice_guard.S',*codec_sources,*bridge_sources,*proof_sources,'slice_driver.c'))
         compiler=[args.llvm_bin/'clang',*flags,'-std=c11','-O1','-ffreestanding','-fno-builtin','-fno-stack-protector','-fno-unwind-tables','-fno-asynchronous-unwind-tables','-Wall','-Wextra','-Werror','-I'+str(sources)]
+        stack_init=['-ftrivial-auto-var-init='+port['stack_init']] if port.get('stack_init','none')!='none' else []
         objects=stage/'objects';objects.mkdir();library_objects=[]
         # Preserve existing flat archive names, but never reuse an object or
         # archive member when two prepared paths have the same stem.
@@ -171,7 +176,7 @@ def export(args):
             return ['-nostdinc',*('-D'+d for d in o.get('defines',[])),*(x for f in o.get('preincludes',[]) for x in ('-include',str(sources/f))),*('-I'+str(sources/d) for d in o.get('include_dirs',[]))]
         for source in compiled:
             # Only the explicit CPU-state assembly may move FP/SIMD registers.
-            compile_flags=[*(f for f in compiler if f!='-mgeneral-regs-only'),*assembly_flags(source.relative_to(sources).as_posix())] if source.suffix=='.S' else compiler
+            compile_flags=[*(f for f in compiler if f!='-mgeneral-regs-only'),*assembly_flags(source.relative_to(sources).as_posix())] if source.suffix=='.S' else [*compiler,*stack_init]
             obj=object_paths[source];run([*compile_flags,'-c',source,'-o',obj])
             if source not in proof_paths:library_objects.append(obj)
         archive=stage/'slices.a';run([args.llvm_bin/'llvm-ar','rcs',archive,*library_objects])

@@ -287,6 +287,17 @@ def transform(directory,sources,headers,clang,context='osrec_kernel_context',inc
             key=function_key(path,ref)
             if node['kind']=='DeclRefExpr' and key in symbols:
                 p,start,size=point(node['range']['begin'],path);edit(p,start,start+size,symbols[key])
+    # A file-scope readonly initializer may name a function that takes no context (a callback the slice
+    # stores but never calls through); it is renamed like a call. One that needs the context cannot escape.
+    for path,ast in asts.items():
+        for declaration in ast.get('inner',[]):
+            if declaration['kind']!='VarDecl' or not declaration.get('init') or not re.match(r'const\b',declaration['type']['qualType']):continue
+            for node in walk(declaration['inner'][-1]):
+                key=function_key(path,node.get('referencedDecl',{}))
+                if node['kind']!='DeclRefExpr' or key is None:continue
+                if key in needs:raise ValueError('context function address escapes through a readonly initializer')
+                p,start,size=point(node['range']['begin'],path)
+                if p==path:edit(p,start,start+size,symbols[key])
     direct_refs=set()
     for path,node,callee,caller in calls:
         if callee in needs:

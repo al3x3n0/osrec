@@ -1,0 +1,7 @@
+{
+ "files": {
+  "include/uapi/asm-generic/unistd.h": "8e317c3380d74f4e6b867f8d904258b9498b5fc8408687f6e2bd0c9840e0e9c2",
+  "kernel/sys.c": "b86dcdfaaba1307126884f311f3d574be93cd2cfbc0a36b487968b72eb9bf81a"
+ },
+ "format": "osrec-kernel-excerpts-v1"
+}

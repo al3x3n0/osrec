@@ -1,0 +1,106 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Reviewed original Linux v6.10 include/linux/slab.h definitions (6.10.14, the running kernel). */
+
+static __always_inline enum kmalloc_cache_type kmalloc_type(gfp_t flags, unsigned long caller)
+{
+	/*
+	 * The most common case is KMALLOC_NORMAL, so test for it
+	 * with a single branch for all the relevant flags.
+	 */
+	if (likely((flags & KMALLOC_NOT_NORMAL_BITS) == 0))
+#ifdef CONFIG_RANDOM_KMALLOC_CACHES
+		/* RANDOM_KMALLOC_CACHES_NR (=15) copies + the KMALLOC_NORMAL */
+		return KMALLOC_RANDOM_START + hash_64(caller ^ random_kmalloc_seed,
+						      ilog2(RANDOM_KMALLOC_CACHES_NR + 1));
+#else
+		return KMALLOC_NORMAL;
+#endif
+
+	/*
+	 * At least one of the flags has to be set. Their priorities in
+	 * decreasing order are:
+	 *  1) __GFP_DMA
+	 *  2) __GFP_RECLAIMABLE
+	 *  3) __GFP_ACCOUNT
+	 */
+	if (IS_ENABLED(CONFIG_ZONE_DMA) && (flags & __GFP_DMA))
+		return KMALLOC_DMA;
+	if (!IS_ENABLED(CONFIG_MEMCG_KMEM) || (flags & __GFP_RECLAIMABLE))
+		return KMALLOC_RECLAIM;
+	else
+		return KMALLOC_CGROUP;
+}
+
+static __always_inline __alloc_size(1) void *kmalloc_noprof(size_t size, gfp_t flags)
+{
+	if (__builtin_constant_p(size) && size) {
+		unsigned int index;
+
+		if (size > KMALLOC_MAX_CACHE_SIZE)
+			return kmalloc_large_noprof(size, flags);
+
+		index = kmalloc_index(size);
+		return kmalloc_trace_noprof(
+				kmalloc_caches[kmalloc_type(flags, _RET_IP_)][index],
+				flags, size);
+	}
+	return __kmalloc_noprof(size, flags);
+}
+
+static inline __alloc_size(1, 2) void *kmalloc_array_noprof(size_t n, size_t size, gfp_t flags)
+{
+	size_t bytes;
+
+	if (unlikely(check_mul_overflow(n, size, &bytes)))
+		return NULL;
+	if (__builtin_constant_p(n) && __builtin_constant_p(size))
+		return kmalloc_noprof(bytes, flags);
+	return kmalloc_noprof(bytes, flags);
+}
+
+static __always_inline unsigned int __kmalloc_index(size_t size,
+						    bool size_is_constant)
+{
+	if (!size)
+		return 0;
+
+	if (size <= KMALLOC_MIN_SIZE)
+		return KMALLOC_SHIFT_LOW;
+
+	if (KMALLOC_MIN_SIZE <= 32 && size > 64 && size <= 96)
+		return 1;
+	if (KMALLOC_MIN_SIZE <= 64 && size > 128 && size <= 192)
+		return 2;
+	if (size <=          8) return 3;
+	if (size <=         16) return 4;
+	if (size <=         32) return 5;
+	if (size <=         64) return 6;
+	if (size <=        128) return 7;
+	if (size <=        256) return 8;
+	if (size <=        512) return 9;
+	if (size <=       1024) return 10;
+	if (size <=   2 * 1024) return 11;
+	if (size <=   4 * 1024) return 12;
+	if (size <=   8 * 1024) return 13;
+	if (size <=  16 * 1024) return 14;
+	if (size <=  32 * 1024) return 15;
+	if (size <=  64 * 1024) return 16;
+	if (size <= 128 * 1024) return 17;
+	if (size <= 256 * 1024) return 18;
+	if (size <= 512 * 1024) return 19;
+	if (size <= 1024 * 1024) return 20;
+	if (size <=  2 * 1024 * 1024) return 21;
+
+	if (!IS_ENABLED(CONFIG_PROFILE_ALL_BRANCHES) && size_is_constant)
+		BUILD_BUG_ON_MSG(1, "unexpected size in kmalloc_index()");
+	else
+		BUG();
+
+	/* Will never be reached. Needed because the compiler may complain */
+	return -1;
+}
+
+static inline __alloc_size(1) void *kzalloc_noprof(size_t size, gfp_t flags)
+{
+	return kmalloc_noprof(size, flags | __GFP_ZERO);
+}

@@ -1,0 +1,2 @@
+# Preserve raw QEMU serial output, whose line endings are CRLF.
+tests/fixtures/**/qemu.log whitespace=cr-at-eol

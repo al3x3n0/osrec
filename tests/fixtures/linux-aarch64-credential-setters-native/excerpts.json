@@ -1,0 +1,16 @@
+{
+ "files": {
+  "include/linux/capability.h": "f3ecb56ab007c8dd6f500e6760a79f438fec94dbe932e5cd0b6e62910445d184",
+  "include/uapi/asm-generic/unistd.h": "c53d5d7d46100b31f91a3d030792751939e92a58c63766349e4187b624ead6d9",
+  "include/uapi/linux/capability.h": "d424a94f4b53ce44c5841a0c5836377dab0bf53d6ab51da6db77188abfeae79b",
+  "include/uapi/linux/prctl.h": "435a8306038df37beba70afa7ed3c29522c4198e2d291465abe1cf2bf6b0279d",
+  "include/uapi/linux/securebits.h": "21590a54266efd535e94d51fb1ec051534df1583ebb57e05000210ee71e2d080",
+  "kernel/capability.c": "eedb22947859414eb20ea1181a777a4cce9dd8dca115a27aa6926c948dbcb8b2",
+  "kernel/cred.c": "43a683cd19520a2f50b5bba668068e57f6028350c74d058aebadcfc15b8a43c0",
+  "kernel/groups.c": "177f28fc3d5353b69be67bfe621bb62c74d7cb7a5253e8689c86600d5d670c57",
+  "kernel/prctl-dispatch-prefix.txt": "ab479a2a34bd5f22d9c05c4f50ee1166492f53b68a82ae094179dd776d7458fa",
+  "kernel/sys.c": "281b642286c2840b4c143c7c4bb78a6b777df1ba14a1d0c59e72c677037ecd1b",
+  "security/commoncap.c": "b555ac357bf26df4bf597724688b4862a9458ede44bad9813fc0802f96211bb1"
+ },
+ "format": "osrec-kernel-excerpts-v1"
+}

@@ -1,0 +1,22 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Reviewed original Linux v6.10 include/linux/pgtable.h definitions (6.10.14, the running kernel). */
+
+static inline pte_t *pte_offset_kernel(pmd_t *pmd, unsigned long address)
+{
+	return (pte_t *)pmd_page_vaddr(*pmd) + pte_index(address);
+}
+
+static inline pmd_t *pmd_offset(pud_t *pud, unsigned long address)
+{
+	return pud_pgtable(*pud) + pmd_index(address);
+}
+
+static inline pte_t *__pte_map(pmd_t *pmd, unsigned long address)
+{
+	return pte_offset_kernel(pmd, address);
+}
+
+static inline void pte_unmap(pte_t *pte)
+{
+	rcu_read_unlock();
+}

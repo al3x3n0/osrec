@@ -38,7 +38,7 @@ class LinuxPreflightTests(unittest.TestCase):
         result = check.preflight()
         self.assertEqual(result['status'], 'inputs_validated')
         self.assertEqual(result['coverage']['validated_profiles'], 35)
-        self.assertEqual(len(result['coverage']['distinct_routes']), 39)
+        self.assertEqual(len(result['coverage']['distinct_routes']), 41)
         self.assertEqual(result['coverage']['profiles_covering_union'], ['file-setrlimit'])
         self.assertEqual({p['profile'] for p in result['profiles']}, set(capture.PROFILES))
         self.assertFalse(result['native_behavior_verified'])
@@ -57,7 +57,7 @@ class LinuxPreflightTests(unittest.TestCase):
                           all_limits['original_definition_count']), (924, 38, 109))
         setters = next(p for p in result['profiles'] if p['profile'] == 'file-setrlimit')
         self.assertEqual((setters['logical_calls'], setters['route_count'],
-                          setters['original_definition_count']), (973, 39, 111))
+                          setters['original_definition_count']), (983, 41, 118))
         self.assertEqual([r['function'] for r in combined['routes']
                           if r['implementation'] == 'reviewed_model'], ['linux_fcntl'])
         on_disk = {'minimal' if p == capture.INTEGRATION else p.name

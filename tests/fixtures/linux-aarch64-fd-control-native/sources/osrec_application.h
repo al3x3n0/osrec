@@ -23,5 +23,7 @@ static inline int64_t osrec_app_linux_ftruncate(uint64_t a0,uint64_t a1){return 
 static inline int64_t osrec_app_linux_pread64(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3){return osrec_app_syscall(UINT64_C(67),a0,a1,a2,a3,0,0);}
 static inline int64_t osrec_app_linux_pwrite64(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3){return osrec_app_syscall(UINT64_C(68),a0,a1,a2,a3,0,0);}
 static inline int64_t osrec_app_linux_fcntl(uint64_t a0,uint64_t a1,uint64_t a2){return osrec_app_syscall(UINT64_C(25),a0,a1,a2,0,0,0);}
+static inline int64_t osrec_app_linux_writev(uint64_t a0,uint64_t a1,uint64_t a2){return osrec_app_syscall(UINT64_C(66),a0,a1,a2,0,0,0);}
+static inline int64_t osrec_app_linux_futex(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5){return osrec_app_syscall(UINT64_C(98),a0,a1,a2,a3,a4,a5);}
 int64_t osrec_app_syscall_prefix(uint64_t,uint64_t,uint64_t,uint64_t,uint64_t,uint64_t,uint64_t);
 #endif

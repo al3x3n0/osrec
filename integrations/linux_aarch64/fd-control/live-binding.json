@@ -11,7 +11,18 @@
   "CONFIG_ARM64_VA_BITS": "48",
   "CONFIG_PAGE_SHIFT": "12",
   "CONFIG_DEBUG_INFO_BTF": "y",
-  "CONFIG_RANDOMIZE_BASE": null
+  "CONFIG_RANDOMIZE_BASE": null,
+  "CONFIG_INIT_STACK_ALL_ZERO": "y",
+  "CONFIG_SLUB": "y",
+  "CONFIG_SLUB_TINY": null,
+  "CONFIG_SLAB_FREELIST_HARDENED": null,
+  "CONFIG_RANDOM_KMALLOC_CACHES": null,
+  "CONFIG_KFENCE": null,
+  "CONFIG_KASAN": null,
+  "CONFIG_NUMA": null,
+  "CONFIG_PREEMPTION": null,
+  "CONFIG_SLUB_STATS": null,
+  "CONFIG_MEM_ALLOC_PROFILING": null
  },
  "scalars": {
   "task.pid": {
@@ -184,6 +195,19 @@
   },
   "task.ioac.syscw": {
    "path": ".ioac.syscw"
+  },
+  "task.thread_info.flags": {
+   "path": ".thread_info.flags",
+   "mask": 71303168
+  },
+  "task.mm": {
+   "path": ".mm"
+  },
+  "task.timer_slack_ns": {
+   "path": ".timer_slack_ns"
+  },
+  "task.thread_info.preempt_count": {
+   "path": ".thread_info.preempt_count"
   }
  },
  "embedded": [
@@ -265,6 +289,56 @@
     "inode_pool[].osrec_shmem.fallocend": {
      "class": 2,
      "path": ".f_inode-><shmem_inode_info.vfs_inode>.fallocend"
+    },
+    "inode_pool[].i_uid.val": {
+     "path": ".f_inode->i_uid.val"
+    },
+    "inode_pool[].i_gid.val": {
+     "path": ".f_inode->i_gid.val"
+    },
+    "inode_pool[].i_state": {
+     "path": ".f_inode->i_state"
+    },
+    "inode_pool[].i_version.counter": {
+     "path": ".f_inode->i_version.counter"
+    },
+    "inode_pool[].i_data.gfp_mask": {
+     "path": ".f_inode->i_data.gfp_mask"
+    },
+    "dentry_pool[].d_flags": {
+     "path": ".f_path.dentry->d_flags",
+     "mask": 16384
+    },
+    "folio_pool[0].flags": {
+     "class": 2,
+     "path": ".f_inode->i_mapping->i_pages.xa_head->(folio).flags",
+     "mask": 432345564235956223
+    },
+    "folio_pool[0].index": {
+     "class": 2,
+     "path": ".f_inode->i_mapping->i_pages.xa_head->(folio).index"
+    },
+    "folio_pool[0]._refcount.counter": {
+     "class": 2,
+     "path": ".f_inode->i_mapping->i_pages.xa_head->(folio)._refcount.counter"
+    },
+    "inode_pool[].i_rwsem.count.counter": {
+     "path": ".f_inode->i_rwsem.count.counter"
+    },
+    "mount_pcp.mnt_writers": {
+     "class": 2,
+     "path": ".f_path.mnt-><mount.mnt>.mnt_pcp",
+     "percpu": {
+      "record": "mnt_pcp",
+      "path": ".mnt_writers"
+     }
+    },
+    "sb_read_count[0]": {
+     "class": 2,
+     "path": ".f_inode->i_sb->s_writers.rw_sem[0].read_count",
+     "percpu": {
+      "width": 4
+     }
     }
    },
    "links": [
@@ -282,6 +356,63 @@
     {
      "field": "inode_pool[].i_sb",
      "target": "superblock"
+    },
+    {
+     "field": "file_pool[].f_op",
+     "target": "fop_pool[]",
+     "path": ".f_op"
+    },
+    {
+     "field": "file_pool[].f_mapping",
+     "target": "inode_pool[].i_data",
+     "path": ".f_mapping",
+     "object": ".f_inode->i_data"
+    },
+    {
+     "field": "inode_pool[].i_op",
+     "target": "iop_pool[]",
+     "path": ".f_inode->i_op"
+    },
+    {
+     "field": "inode_pool[].i_mapping",
+     "target": "inode_pool[].i_data",
+     "path": ".f_inode->i_mapping",
+     "object": ".f_inode->i_data"
+    },
+    {
+     "field": "inode_pool[].i_data.host",
+     "target": "inode_pool[]",
+     "path": ".f_inode->i_data.host",
+     "same_as": ".f_inode"
+    },
+    {
+     "field": "inode_pool[].i_data.a_ops",
+     "target": "aops_pool[]",
+     "path": ".f_inode->i_data.a_ops"
+    },
+    {
+     "class": 2,
+     "field": "inode_pool[1].i_data.i_pages.xa_head",
+     "target": "folio_pool[0]",
+     "path": ".f_inode->i_data.i_pages.xa_head"
+    },
+    {
+     "class": 2,
+     "field": "folio_pool[0].mapping",
+     "target": "inode_pool[1].i_data",
+     "path": ".f_inode->i_mapping->i_pages.xa_head->(folio).mapping",
+     "object": ".f_inode->i_data"
+    },
+    {
+     "field": "file_pool[].f_path.mnt",
+     "target": "vfs_mount.mnt",
+     "path": ".f_path.mnt"
+    },
+    {
+     "class": 2,
+     "field": "superblock.s_writers.rw_sem[0].read_count",
+     "target": "sb_read_count[0]",
+     "path": ".f_inode->i_sb->s_writers.rw_sem[0].read_count"
     }
    ],
    "preconditions": [
@@ -290,64 +421,114 @@
      "path": ".f_inode->i_sb->s_flags",
      "mask": 310381569,
      "equals": 276824064,
-     "reason": "shm superblock configuration, held by the model superblock: SB_NOSEC and SB_I_VERSION set; SB_RDONLY, SB_NOATIME, SB_NODIRATIME and SB_LAZYTIME clear"
+     "reason": "shm superblock configuration, held by the model superblock: SB_NOSEC and SB_I_VERSION set; SB_RDONLY, SB_NOATIME, SB_NODIRATIME and SB_LAZYTIME clear",
+     "field": "superblock.s_flags"
     },
     {
      "class": 2,
      "path": ".f_inode->i_sb->s_maxbytes",
      "equals": 9223372036854775807,
-     "reason": "shmem sets s_maxbytes to MAX_LFS_FILESIZE, the model superblock value"
+     "reason": "shmem sets s_maxbytes to MAX_LFS_FILESIZE, the model superblock value",
+     "field": "superblock.s_maxbytes"
     },
     {
      "class": 2,
      "path": ".f_path.mnt->mnt_flags",
-     "mask": 120,
+     "mask": 632,
      "equals": 0,
-     "reason": "the internal shm mount has no MNT_NOATIME, MNT_NODIRATIME, MNT_RELATIME or MNT_READONLY, as in the model mount"
+     "reason": "the internal shm mount has no MNT_NOATIME, MNT_NODIRATIME, MNT_RELATIME, MNT_READONLY or MNT_WRITE_HOLD, as in the model mount",
+     "field": "vfs_mount.mnt.mnt_flags"
     },
     {
      "class": 2,
      "path": ".f_inode->i_sb->s_bdi->capabilities",
-     "mask": 1,
      "equals": 0,
-     "reason": "tmpfs uses noop_backing_dev_info, without BDI_CAP_WRITEBACK, as in the model"
+     "reason": "tmpfs uses noop_backing_dev_info, whose capabilities are 0 (no BDI_CAP_WRITEBACK), as in the model",
+     "field": "noop_bdi.capabilities"
     },
     {
      "class": 2,
      "path": ".f_inode->i_sb->s_fsnotify_info",
      "equals": 0,
-     "reason": "no fsnotify mark was ever added on the shm superblock; the model holds s_fsnotify_info NULL"
+     "reason": "no fsnotify mark was ever added on the shm superblock; the model holds s_fsnotify_info NULL",
+     "field": "superblock.s_fsnotify_info"
     },
     {
      "class": 2,
      "path": ".f_inode->i_mapping->nrpages",
      "equals": 1,
-     "reason": "the model caches exactly one order-0 folio for the regular file"
+     "reason": "the model caches exactly one order-0 folio for the regular file",
+     "field": "inode_pool[1].i_data.nrpages"
     },
     {
      "class": 2,
      "path": ".f_inode->i_mapping->i_mmap_writable.counter",
      "equals": 0,
-     "reason": "the file is not mmapped writable (no D-cache alias flush)"
+     "reason": "the file is not mmapped writable (no D-cache alias flush)",
+     "field": "inode_pool[1].i_data.i_mmap_writable.counter"
     },
     {
      "class": 2,
      "path": ".f_inode->i_flctx",
      "equals": 0,
-     "reason": "no lock or lease context on the inode (try_break_deleg is a no-op)"
+     "reason": "no lock or lease context on the inode (try_break_deleg is a no-op)",
+     "field": "inode_pool[1].i_flctx"
     },
     {
      "class": 2,
      "path": ".f_inode->i_hash.pprev",
      "equals": 0,
-     "reason": "shmem inodes are unhashed: __mark_inode_dirty leaves before any writeback list"
+     "reason": "shmem inodes are unhashed: __mark_inode_dirty leaves before any writeback list",
+     "field": "inode_pool[1].i_hash.pprev"
     },
     {
      "class": 2,
      "path": ".f_inode-><shmem_inode_info.vfs_inode>.flags",
      "mask": 2097152,
      "equals": 2097152,
-     "reason": "memfd inodes are VM_NORESERVE: shmem_reacct_size does no accounting"
+     "reason": "memfd inodes are VM_NORESERVE: shmem_reacct_size does no accounting",
+     "field": "inode_pool[1].osrec_shmem.flags"
+    },
+    {
+     "class": 2,
+     "path": ".f_inode->i_sb->s_time_gran",
+     "equals": 1,
+     "field": "superblock.s_time_gran",
+     "reason": "tmpfs keeps 1 ns timestamps, the model superblock granularity"
+    },
+    {
+     "class": 2,
+     "path": ".f_inode->i_sb->s_time_min",
+     "equals": 9223372036854775808,
+     "field": "superblock.s_time_min",
+     "reason": "the superblock time range is the full time64 range (TIME64_MIN), as in the model"
+    },
+    {
+     "class": 2,
+     "path": ".f_inode->i_sb->s_time_max",
+     "equals": 9223372036854775807,
+     "field": "superblock.s_time_max",
+     "reason": "the superblock time range is the full time64 range (TIME64_MAX), as in the model"
+    },
+    {
+     "class": 2,
+     "path": ".f_inode->i_sb->s_user_ns->level",
+     "equals": 0,
+     "reason": "the shm superblock belongs to the initial user namespace, the one model namespace the credentials also use"
+    },
+    {
+     "class": 2,
+     "path": ".f_inode->i_sb->s_readonly_remount",
+     "equals": 0,
+     "reason": "no read-only remount is in progress, the model superblock value",
+     "field": "superblock.s_readonly_remount"
+    },
+    {
+     "class": 2,
+     "path": ".f_inode->i_sb->s_writers.rw_sem[0].rss.gp_state",
+     "equals": 0,
+     "reason": "the superblock is not being frozen: SB_FREEZE_WRITE's rcu_sync is idle (GP_IDLE), so writers take the per-CPU fast path",
+     "field": "superblock.s_writers.rw_sem[0].rss.gp_state"
     }
    ]
   }
@@ -370,14 +551,62 @@
   "files.file_lock": 0,
   "file_pool[0].f_lock": 0,
   "file_pool[1].f_lock": 0,
-  "superblock.write_depth": 0
+  "inode_pool[0].i_lock": 0,
+  "inode_pool[1].i_lock": 0,
+  "file_pool[0].f_pos_lock": 0,
+  "file_pool[1].f_pos_lock": 0,
+  "task.pi_lock": 0
  },
  "user_objects": {
   "buffer": {
    "bytes": 32,
    "object_id": 1,
    "permissions": 3
-  }
+  },
+  "iovec": {
+   "object_id": 65536,
+   "permissions": 1,
+   "max_segments": 12,
+   "segment_bytes": 64,
+   "segment_object_id": 65537,
+   "segment_permissions": 1
+  },
+  "command_pointers": [
+   {
+    "number": 98,
+    "argument": 3,
+    "command_argument": 1,
+    "command_mask": 127,
+    "commands": [
+     0,
+     6,
+     9,
+     11,
+     13
+    ],
+    "bytes": 16,
+    "object_id": 196608,
+    "permissions": 1,
+    "review": "futex utime: a struct __kernel_timespec for FUTEX_WAIT, WAIT_BITSET, LOCK_PI, LOCK_PI2 and WAIT_REQUEUE_PI (futex_cmd_has_timeout); an integer (val2) for the others"
+   },
+   {
+    "number": 98,
+    "argument": 4,
+    "command_argument": 1,
+    "command_mask": 127,
+    "commands": [
+     3,
+     4,
+     5,
+     11,
+     12
+    ],
+    "bytes": 4,
+    "object_id": 196609,
+    "permissions": 3,
+    "review": "futex uaddr2: the second futex word of REQUEUE, CMP_REQUEUE, WAKE_OP, WAIT_REQUEUE_PI and CMP_REQUEUE_PI"
+   }
+  ]
  },
  "external": {
   "descriptor_argument": 0,
@@ -391,7 +620,7 @@
   ],
   "rule": "Calls without a slice root, or descriptor calls on an excluded object class (console I/O), are not executed by the slice. They are admitted in a chain only if every observable bound field is identical before and after the live call."
  },
- "review": "Field correspondence is reviewed; offsets come from the kernel's BTF. f_mode keeps only bits the retained code consumes (READ, WRITE, LSEEK, PREAD, PWRITE, UNSIGNED_OFFSET, PATH, STREAM, BACKING). f_owner.signum is the signal number F_GETSIG reads and F_SETSIG writes. Object class 1 is a character device (console), class 2 a regular shmem file. Page-cache bytes use the arm64 VA_BITS=48/4K vmemmap-to-linear-map relation and require one non-internal xarray head entry. Each live file's dentry and inode bind to the dentry_pool and inode_pool entries at the file's class index, as in the model's initial layout; the file's f_path.dentry->d_inode must be its f_inode. i_mode keeps only the file-type bits (the retained code tests S_ISREG); append is i_flags & S_APPEND (1 << 2). Every inode's i_sb is the one model superblock, whose only field is the transient freeze-protection depth (sb_start_write/sb_end_write balance within a call). files.count.counter is the number of tasks sharing the descriptor table; __fget_light borrows the file without a reference when it is 1. The original read/write entries consume FMODE_ATOMIC_POS, CAN_READ, CAN_WRITE, WRITER and NONOTIFY too, and f_iocb_flags (IOCB_APPEND and friends); task.ioac holds the CONFIG_TASK_XACCT read/write counters they update. The file size is inode_pool[1].i_size (i_size of the class-2 inode). i_flags keeps S_NOATIME, S_IMMUTABLE, S_NOCMTIME, S_SWAPFILE, S_PRIVATE and S_NOSEC (S_APPEND stays the append member). The shmem_inode_info fields are read through container_of from the inode (seals, alloced, swapped, fallocend); the superblock flags and s_maxbytes, its bdi capabilities and the mount flags are configuration the model superblock and mount hold, checked as class-2 preconditions rather than bound, so state discovery does not treat mount options as per-call unknowns. task.flags keeps only PF_KTHREAD, the bit access_ok reads. The credential identifiers are kuid_t/kgid_t values (creds.uid.val and so on). The user namespace's uid_map and gid_map are bound from the live namespace (the initial one: user_ns.initial is level == 0); the model holds up to UID_GID_MAP_MAX_BASE_EXTENTS extents and the checkpoint check rejects more. Timestamps, i_version, i_state, folio flags and the coarse clock are model state the binding does not observe.",
+ "review": "Field correspondence is reviewed; offsets come from the kernel's BTF. f_mode keeps only bits the retained code consumes (READ, WRITE, LSEEK, PREAD, PWRITE, UNSIGNED_OFFSET, PATH, STREAM, BACKING). f_owner.signum is the signal number F_GETSIG reads and F_SETSIG writes. Object class 1 is a character device (console), class 2 a regular shmem file. Page-cache bytes use the arm64 VA_BITS=48/4K vmemmap-to-linear-map relation and require one non-internal xarray head entry. Each live file's dentry and inode bind to the dentry_pool and inode_pool entries at the file's class index, as in the model's initial layout; the file's f_path.dentry->d_inode must be its f_inode. i_mode keeps only the file-type bits (the retained code tests S_ISREG); append is i_flags & S_APPEND (1 << 2). Every inode's i_sb is the one model superblock, whose only field is the transient freeze-protection depth (sb_start_write/sb_end_write balance within a call). files.count.counter is the number of tasks sharing the descriptor table; __fget_light borrows the file without a reference when it is 1. The original read/write entries consume FMODE_ATOMIC_POS, CAN_READ, CAN_WRITE, WRITER and NONOTIFY too, and f_iocb_flags (IOCB_APPEND and friends); task.ioac holds the CONFIG_TASK_XACCT read/write counters they update. The file size is inode_pool[1].i_size (i_size of the class-2 inode). i_flags keeps S_NOATIME, S_IMMUTABLE, S_NOCMTIME, S_SWAPFILE, S_PRIVATE and S_NOSEC (S_APPEND stays the append member). The shmem_inode_info fields are read through container_of from the inode (seals, alloced, swapped, fallocend); the superblock flags and s_maxbytes, its bdi capabilities and the mount flags are configuration the model superblock and mount hold, checked as class-2 preconditions rather than bound, so state discovery does not treat mount options as per-call unknowns. task.flags keeps only PF_KTHREAD, the bit access_ok reads. The credential identifiers are kuid_t/kgid_t values (creds.uid.val and so on). The user namespace's uid_map and gid_map are bound from the live namespace (the initial one: user_ns.initial is level == 0); the model holds up to UID_GID_MAP_MAX_BASE_EXTENTS extents and the checkpoint check rejects more. Each inode also binds its owner (i_uid, i_gid), i_state, i_version and mapping gfp_mask, and each dentry DCACHE_FSNOTIFY_PARENT_WATCHED; task.thread_info.flags keeps TIF_TAGGED_ADDR, the bit access_ok reads, and TIF_32BIT, which in_compat_syscall reads (writev's iovec import). The regular file's one page-cache folio is the xarray head entry (a direct entry, as file_data checks), read as a struct folio through the `->(folio)` cast step: its flags (the enum pageflags bits and the MGLRU reference count, LRU_REFS_MASK at bit 57, which folio_mark_accessed advances once PG_workingset is set), index and reference count are bound. Links tie f_op, i_op, a_ops, f_mapping, i_mapping (both the inode's own i_data), i_data.host (the inode itself), the xarray head (the model folio) and the folio's mapping to the model objects of the class. Preconditions that name a `field` hold that model field: the replay image checks the model value under the precondition mask. Besides the mount configuration above they hold the superblock time range (1 ns, full time64 range), the null s_fsnotify_info, the bdi capabilities (0, unmasked, so the analysis may rely on it), one cached page, no writable mapping, no lock context, the unhashed inode and VM_NORESERVE. Inode locks, the files' f_pos locks (fdget_pos) and the mount writer count are free at entry (transient). `model_state` lists what the binding cannot observe: the coarse clock (tk_core is not reachable from the task and the kernel has no data symbols), the timestamps compared with it, the reviewed operation tables of each class and the writeback association of a clean inode. A writev iovec argument admits its struct iovec array (object 0x10000, read-only, up to UIO_FASTIOV entries) and each non-empty segment as read-only objects 0x10001..; the model's user copies reach object 1 and objects from 0x10000 only, read from user memory at entry; overlapping segments merge. Futexes: task.mm is the mm pointer's value, which private futex keys hash (the slice never dereferences it); __futex_data is derived from the pinned image (kernel_data_symbols.py, reviewed in data-symbols.json), its layout live-checked (power-of-two hash size, 64-byte-aligned linear-map bucket array, every empty bucket unlocked with a self-linked chain), and each of its hashsize buckets binds its waiter count into futex_hash_buckets; the lock word is free in every admitted state.",
  "preconditions": [
   {
    "path": ".signal->rlim[7].rlim_cur",
@@ -402,6 +631,199 @@
    "path": ".signal->rlim[1].rlim_cur",
    "equals": 18446744073709551615,
    "reason": "the reviewed model returns rlimit(RLIMIT_FSIZE) as RLIM_INFINITY"
+  },
+  {
+   "path": ".nsproxy->time_ns",
+   "equals_symbol": "init_time_ns",
+   "reason": "the task is in the initial time namespace, whose offsets are zero: timens_ktime_to_host returns an absolute futex timeout unchanged"
   }
- ]
+ ],
+ "model_state": {
+  "tk_core": "the coarse real-time clock: tk_core is not reachable from the task and is not yet bound through a derived data symbol (kernel_data_symbols.py), so the model clock is not live",
+  "inode_pool[].__i_atime": "timestamps are compared with and set from the model clock, so they stay model state with it",
+  "inode_pool[].__i_mtime": "timestamps are compared with and set from the model clock, so they stay model state with it",
+  "inode_pool[].__i_ctime": "timestamps are compared with and set from the model clock, so they stay model state with it",
+  "fop_pool[]": "the file operations of each object class (tty_fops, shmem_file_operations) as reviewed dispatch tables; f_op itself is live-checked per class",
+  "iop_pool[]": "the inode operations of each object class (shmem_inode_operations) as reviewed dispatch tables",
+  "aops_pool[]": "the address-space operations of each object class (shmem_aops) as reviewed dispatch tables",
+  "super_ops": "shmem_ops as a reviewed dispatch table (no dirty_inode)",
+  "inode_wb": "the writeback association a clean inode joins in __mark_inode_dirty; its list lock is free at entry, and the hashed-inode lists it would feed are never reached (the regular inode is unhashed)",
+  "futex_hash_buckets[].chain": "empty hash chains: the slice initializer self-links each head and queues no waiter; the binding requires every live chain empty (globals __futex_data empty_lists)"
+ },
+ "globals": [
+  {
+   "symbol": "__futex_data",
+   "page_offset": 18446462598732840960,
+   "scalars": {
+    "__futex_data.hashsize": "hashsize"
+   },
+   "array": {
+    "pointer": "queues",
+    "count": "hashsize",
+    "field": "__futex_data.queues",
+    "pool": "futex_hash_buckets",
+    "capacity": 256,
+    "record": "futex_hash_bucket",
+    "members": {
+     "waiters.counter": {
+      "path": ".waiters.counter"
+     }
+    },
+    "transient": {
+     "lock": 0
+    },
+    "empty_lists": {
+     "chain.node_list": {
+      "path": ".chain.node_list",
+      "reason": "no futex waiter is queued at a boundary the slice replays: its chains are never linked (no plist_add) and start empty"
+     }
+    }
+   }
+  },
+  {
+   "symbol": "rcu_data",
+   "page_offset": 18446462598732840960,
+   "scalars": {
+    "rcu_data.rcu_need_heavy_qs": "rcu_need_heavy_qs",
+    "rcu_data.rcu_urgent_qs": "rcu_urgent_qs"
+   }
+  },
+  {
+   "symbol": "hrtimer_bases",
+   "page_offset": 18446462598732840960,
+   "scalars": {
+    "hrtimer_bases.clock_base[0].seq.sequence": "clock_base[0].seq.seqcount.sequence",
+    "hrtimer_bases.clock_base[0].running": "clock_base[0].running",
+    "hrtimer_bases.clock_base[1].seq.sequence": "clock_base[1].seq.seqcount.sequence",
+    "hrtimer_bases.clock_base[1].running": "clock_base[1].running",
+    "hrtimer_bases.clock_base[2].seq.sequence": "clock_base[2].seq.seqcount.sequence",
+    "hrtimer_bases.clock_base[2].running": "clock_base[2].running",
+    "hrtimer_bases.clock_base[3].seq.sequence": "clock_base[3].seq.seqcount.sequence",
+    "hrtimer_bases.clock_base[3].running": "clock_base[3].running",
+    "hrtimer_bases.clock_base[4].seq.sequence": "clock_base[4].seq.seqcount.sequence",
+    "hrtimer_bases.clock_base[4].running": "clock_base[4].running",
+    "hrtimer_bases.clock_base[5].seq.sequence": "clock_base[5].seq.seqcount.sequence",
+    "hrtimer_bases.clock_base[5].running": "clock_base[5].running",
+    "hrtimer_bases.clock_base[6].seq.sequence": "clock_base[6].seq.seqcount.sequence",
+    "hrtimer_bases.clock_base[6].running": "clock_base[6].running",
+    "hrtimer_bases.clock_base[7].seq.sequence": "clock_base[7].seq.seqcount.sequence",
+    "hrtimer_bases.clock_base[7].running": "clock_base[7].running"
+   }
+  }
+ ],
+ "percpu": {
+  "offset_register": "TPIDR_EL1"
+ },
+ "kmalloc": {
+  "review": "writev with more than UIO_FASTIOV segments kmallocs its iovec array (iovec_from_user) and kfrees it (vfs_writev). The slice holds the KMALLOC_NORMAL kmalloc-192 cache (kmalloc_caches[0][2], 129..192 bytes: 9 to 12 segments) with this CPU's kmem_cache_cpu, the object at the head of its freelist and that object's slab, so kmalloc and kfree run SLUB's lockless fast paths. The size index table and the cache table are __ro_after_init data symbols derived from the image. The cache's other entries are bound as their live values: no slice object stands behind them, so another size class faults. The head object lies in the per-CPU slab (its linear-map page, or that page's compound head, is the slab), the slab has the slab page type and belongs to the cache, and the free pointer lies inside the 192-byte object, whose 24 words are bound; the next free pointer it holds is carried as a value and never dereferenced. ctor is null, as for every kmalloc cache. freelist_tid is the 128-bit word the lockless fast paths compare and exchange; it overlays freelist and tid, which are bound. A task's first PI lock (refill_pi_state_cache) kzallocs its 88-byte pi_state from kmalloc-96 (kmalloc_caches[0][1]): that cache is bound the same way, with its own per-CPU state, freelist head object (12 words) and slab.",
+  "caches": "kmalloc_caches",
+  "size_index": "kmalloc_size_index",
+  "type_row": "normal",
+  "index": 2,
+  "cache": {
+   "record": "kmem_cache",
+   "cpu": ".cpu_slab",
+   "members": {
+    "kmalloc_cache.flags": ".flags",
+    "kmalloc_cache.size": ".size",
+    "kmalloc_cache.object_size": ".object_size",
+    "kmalloc_cache.offset": ".offset",
+    "kmalloc_cache.red_left_pad": ".red_left_pad"
+   },
+   "require": {
+    ".ctor": 0
+   },
+   "transient": {
+    "kmalloc_cache.ctor": 0
+   }
+  },
+  "cpu": {
+   "record": "kmem_cache_cpu",
+   "freelist": ".freelist",
+   "slab": ".slab",
+   "members": {
+    "kmalloc_cpu.tid": ".tid"
+   }
+  },
+  "object": {
+   "field": "kmalloc_object.words",
+   "words": 24
+  },
+  "slab": {
+   "record": "slab",
+   "cache": ".slab_cache",
+   "members": {}
+  },
+  "page_offset": 18446462598732840960,
+  "vmemmap_start": 18446741873612554240,
+  "page_shift": 12,
+  "page_record": "page",
+  "overlays": {
+   "kmalloc_cpu.freelist_tid": [
+    "kmalloc_cpu.freelist",
+    "kmalloc_cpu.tid"
+   ]
+  },
+  "extra_caches": [
+   {
+    "index": 1,
+    "names": {
+     "cache": "kmalloc96_cache",
+     "cpu": "kmalloc96_cpu",
+     "object": "kmalloc96_object",
+     "slab": "kmalloc96_object_slab"
+    },
+    "words": 12
+   }
+  ]
+ },
+ "opaque_pointers": {
+  "task.pi_state_cache": {
+   "path": ".pi_state_cache",
+   "review": "the task's preallocated pi_state: null until its first PI lock kzallocs one from kmalloc-96 (the bound freelist head object), then a live object the slice only tests; the paths that use it (attaching a pi_state to a contended word) fault",
+   "object": "kmalloc96_object"
+  }
+ },
+ "user_page": {
+  "review": "a shared futex (FUTEX_PRIVATE_FLAG clear) keys its word by the page: get_futex_key pins the page with GUP-fast and reads the folio (mapping null, anonymous or file-backed). The binding walks the task page tables (TTBR0_EL1, 4 KiB granule, four levels, the linear map at PAGE_OFFSET + pa - memstart_addr), requires a valid user page that pte_write() admits, and binds that page's folio: its reference count (taken and dropped by the call) and its mapping as a value. Other calls bind address 0.",
+  "number": 98,
+  "argument": 0,
+  "command_argument": 1,
+  "command_mask": 128,
+  "command_value": 0,
+  "translation_register": "TTBR0_EL1",
+  "memstart": "memstart_addr",
+  "page_offset": 18446462598732840960,
+  "vmemmap_start": 18446741873612554240,
+  "page_shift": 12,
+  "page_record": "page",
+  "folio_record": "folio",
+  "address_field": "user_page_address",
+  "members": {
+   "user_folio._refcount.counter": "._refcount.counter",
+   "user_folio.flags": ".flags"
+  },
+  "pointers": {
+   "user_folio.mapping": ".mapping"
+  },
+  "tables": {
+   "review": "The setup pins the task's translation tables, so GUP-fast's walk cannot fault: the binding dumps the four pages the word's walk visits (512 descriptors each; the top level is mm->pgd, checked equal to TTBR0_EL1's table), the next-level table physical addresses the slice's __va admits, the mm pointer value pgd_offset is checked against, and the frame number pte_page admits. Other calls bind zeros: any walk faults.",
+   "mm": "task.mm",
+   "mm_record": "mm_struct",
+   "pgd_path": ".pgd",
+   "entries": [
+    "osrec_pgd_table.entries[].pgd",
+    "osrec_pud_table.entries[].pud",
+    "osrec_pmd_table.entries[].pmd",
+    "osrec_pte_table.entries[].pte"
+   ],
+   "addresses": [
+    "osrec_pud_table_pa",
+    "osrec_pmd_table_pa",
+    "osrec_pte_table_pa"
+   ],
+   "mm_field": "osrec_mm_value",
+   "pfn_field": "osrec_user_pfn"
+  }
+ }
 }

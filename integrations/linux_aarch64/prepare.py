@@ -605,7 +605,8 @@ def application_source(profile,port):
     for c in calls:
         if c['number'] not in roots:raise ValueError('Linux witness syscall has no reviewed route')
     text+='static const uint64_t values['+str(count)+']['+str(width)+']={\n'+',\n'.join(rows([integer(v) for v in c['args']]) for c in calls)+'\n};\n'
-    text+='static const uint8_t buffers['+str(count)+']['+str(width)+']={\n'+',\n'.join(rows([str(int(j<len(roots[c['number']]['arguments']) and roots[c['number']]['arguments'][j]=='buffer')) for j in range(width)]) for c in calls)+'\n};\n'
+    kind=lambda c,j:{'buffer':1,'iovec':2}.get(roots[c['number']]['arguments'][j],0) if j<len(roots[c['number']]['arguments']) else 0
+    text+='static const uint8_t buffers['+str(count)+']['+str(width)+']={\n'+',\n'.join(rows([str(kind(c,j)) for j in range(width)]) for c in calls)+'\n};\n'
     text+='static const uint32_t inputs['+str(count)+'][8]={\n'+',\n'.join(rows([str(v)+'u' for v in input_words(profile,i)]) for i in range(count))+'\n};\n'
     text+='''/* The witness ends at a page boundary; native setup protects the next page. */
 _Alignas(4096) uint32_t app_guard_storage[2048];
@@ -636,7 +637,12 @@ void osrec_application_main(void)
         uint32_t before[8];for(unsigned j=0;j<8;++j)before[j]=app_words[j];
 #endif
 #endif
+        /* An iovec's segment bases are app_words offsets: addresses for the call, offsets again after it. */
+        unsigned relocated=0,iovec_at=0;
+        for(unsigned j=0;j+1<sizeof buffers[0];++j)if(buffers[i][j]==2 && values[i][j]<32){iovec_at=(unsigned)values[i][j];
+            for(uint64_t k=0;k<values[i][j+1] && iovec_at+16*k+16<=32;++k){uint64_t *entry=(uint64_t *)((unsigned char *)app_words+iovec_at+16*k);*entry+=(uintptr_t)app_words;++relocated;}}
         app_returns[i]=(uint64_t)(i<8 ? osrec_app_syscall_prefix(numbers[i],args[0],args[1],args[2],args[3],args[4],args[5]) : osrec_app_syscall(numbers[i],args[0],args[1],args[2],args[3],args[4],args[5]));
+        for(unsigned k=0;k<relocated;++k){uint64_t *entry=(uint64_t *)((unsigned char *)app_words+iovec_at+16*k);*entry-=(uintptr_t)app_words;}
         ++app_count;
 #ifdef OSREC_NATIVE_CAPTURE
 #ifdef OSREC_LINUX_SETGROUPS_PROFILE
@@ -648,6 +654,14 @@ void osrec_application_main(void)
     }
 }
 '''
+    if not any(kind(c,j)==2 for c in calls for j in range(width)):
+        # Without an iovec argument the witness has nothing to relocate (and keeps its prior text).
+        text=text.replace('''        /* An iovec's segment bases are app_words offsets: addresses for the call, offsets again after it. */
+        unsigned relocated=0,iovec_at=0;
+        for(unsigned j=0;j+1<sizeof buffers[0];++j)if(buffers[i][j]==2 && values[i][j]<32){iovec_at=(unsigned)values[i][j];
+            for(uint64_t k=0;k<values[i][j+1] && iovec_at+16*k+16<=32;++k){uint64_t *entry=(uint64_t *)((unsigned char *)app_words+iovec_at+16*k);*entry+=(uintptr_t)app_words;++relocated;}}
+''','').replace('''        for(unsigned k=0;k<relocated;++k){uint64_t *entry=(uint64_t *)((unsigned char *)app_words+iovec_at+16*k);*entry-=(uintptr_t)app_words;}
+''','')
     if profile in ('fstat','fchmod','fchown','fchown-capable','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit'):
         text=text.replace('uint64_t app_returns[', 'uint64_t stat_digest;\n_Alignas(4096) uint32_t stat_guard_storage[2048];\nextern uint32_t stat_words[32];\n__asm__(".global stat_words\\n.type stat_words,%object\\n.set stat_words,stat_guard_storage+3968\\n.size stat_words,128\\n");\nuint64_t app_returns[',1)
         text=text.replace('        uint64_t args[6]={0};','        for(unsigned j=0;j<32;++j)stat_words[j]=0x5a5a0000u+j;\n        uint64_t args[6]={0};')
@@ -1149,6 +1163,40 @@ def file_positioned_plan():
     return out
 
 def fd_control_plan():
+    """The fcntl workload plus writev and futex calls at a point where fd 3 is the regular file at position 0.
+
+    The writev that succeeds writes back the file's own first eight bytes and is rewound, so every later call
+    sees the file it saw before; the futex calls change no state (a private wake with no waiter, a wait on a
+    changed value, an unaligned word, an unknown command)."""
+    out=[]
+    for row in fd_control_base_plan():
+        out.append(row)
+        if row[0]=='rewind_after_fcntl_alias':out+=vector_futex_calls()
+    return out
+
+# Input words: an iovec at offset 0 (one segment: base offset 16, length 8) and the segment's bytes at offset 16, the
+# file's first eight bytes ('abcdefgh'); a negative segment length; and the futex word 7 at offset 0. iovec bases are
+# app_words offsets the witness relocates to addresses for the call (application_source).
+_IOV_ONE=(16,0,8,0,0x64636261,0x68676665,0xa5a50006,0xa5a50007)
+_IOV_NEGATIVE=(16,0,8,0x80000000,0x64636261,0x68676665,0xa5a50006,0xa5a50007)
+_FUTEX_WORD=(7,0xa5a50001,0xa5a50002,0xa5a50003,0xa5a50004,0xa5a50005,0xa5a50006,0xa5a50007)
+def vector_futex_calls():
+    """Fresh rows (and input lists) per plan: callers may change what they receive."""
+    return [(n,dict(number=c['number'],args=list(c['args'])),None if d is None else list(d)) for n,c,d in FD_CONTROL_VECTOR_FUTEX_CALLS]
+FD_CONTROL_VECTOR_FUTEX_CALLS=[
+    ('writev_rewrites_seed_bytes',dict(number=66,args=[3,0,1,0]),_IOV_ONE),
+    ('rewind_after_writev',dict(number=62,args=[3,0,0,0]),None),
+    ('writev_no_segments',dict(number=66,args=[3,0,0,0]),_IOV_ONE),
+    ('writev_bad_fd',dict(number=66,args=[8,0,1,0]),_IOV_ONE),
+    ('writev_too_many_segments',dict(number=66,args=[3,0,1025,0]),_IOV_ONE),
+    ('writev_negative_length',dict(number=66,args=[3,0,1,0]),_IOV_NEGATIVE),
+    ('futex_wake_private_no_waiter',dict(number=98,args=[0,129,1,0,0,0]),_FUTEX_WORD),
+    ('futex_wait_changed_value',dict(number=98,args=[0,128,6,0,0,0]),_FUTEX_WORD),
+    ('futex_wake_unaligned',dict(number=98,args=[1,129,1,0,0,0]),_FUTEX_WORD),
+    ('futex_unknown_command',dict(number=98,args=[0,142,0,0,0,0]),_FUTEX_WORD),
+]
+
+def fd_control_base_plan():
     """Five-command fcntl workload, preserving the prior 171-call order."""
     out=[]
     def add(name,n,*args):out.append((name,dict(number=n,args=list(args)+[0]*(4-len(args))),None))
@@ -1224,7 +1272,7 @@ def close_range_plan():
     """Ranges alter the same table consumed by later inherited syscalls."""
     out=[]
     def add(name,n,*args):out.append((name,dict(number=n,args=list(args)+[0]*(4-len(args))),None))
-    for name,call,data in fd_control_plan():
+    for name,call,data in fd_control_base_plan():
         if name=='close_alias_3':
             add('bulk_close_aliases',436,3,6,0)
             add('last_range_alias_reads_position',62,7,0,1)
@@ -1897,7 +1945,8 @@ def file_limits_plan():
     return out
 
 def file_setrlimit_plan():
-    """Mutable NOFILE admission and non-timer limits among the inherited session."""
+    """Mutable NOFILE admission and non-timer limits among the inherited session, plus fd-control's writev and futex
+    calls at the same point of the inherited fcntl workload (fd 3 the regular file at position 0)."""
     out=[]
     def call(name,number,args,data=None):
         out.append(('file_setrlimit_'+name,dict(number=number,args=(args+[0]*5)[:5]),data))
@@ -1909,6 +1958,9 @@ def file_setrlimit_plan():
     def query(name,resource,offset=0):call(name,163,[resource,offset])
     for name,entry,data in file_limits_plan():
         out.append((name,entry,data))
+        if name=='rewind_after_fcntl_alias':
+            # Five recorded arguments; a futex call names all six (uaddr2 and val3 zero).
+            out+=[(n,dict(number=c['number'],args=(c['args']+[0]*5)[:max(5,len(c['args']))]),d) for n,c,d in vector_futex_calls()]
         if name=='file_limits_entry_15':
             put('lower_nofile',7,4,8);query('read_lower_nofile',7)
             call('dup_denied',23,[0]);call('dup3_denied',24,[0,6,0]);call('fcntl_min_denied',25,[0,0,4])
@@ -2307,8 +2359,47 @@ def fd_dup_projection(capture):
                                 memory[offset:offset+copied]=bytes(data[at:at+copied]);words=[int.from_bytes(memory[j:j+4],'little') for j in range(0,32,4)]
                             if n in (63,64):pos=at+copied
                             raw=copied
+            elif n==66:
+                # do_writev: fdget_pos (EBADF), vfs_writev (FMODE_WRITE, then import_iovec: more than UIO_MAXIOV
+                # segments or a negative length is EINVAL), then the gathered bytes at the file position.
+                fd=a[0];iov=call['args'][1];vlen=call['args'][2]
+                if fd>=8 or not slots[fd]:raw=-9
+                elif slots[fd]!=2:raise ValueError('console I/O is outside the admitted recipe')
+                elif vlen>1024:raw=-22
+                elif not vlen:raw=0
+                else:
+                    memory=bytearray().join(v.to_bytes(4,'little') for v in words);segments=[]
+                    for k in range(vlen):
+                        at_entry=iov+16*k
+                        if at_entry+16>32:raise ValueError('iovec outside the admitted buffer')
+                        segments.append((int.from_bytes(memory[at_entry:at_entry+8],'little'),int.from_bytes(memory[at_entry+8:at_entry+16],'little')))
+                    if any(length>=1<<63 for _,length in segments):raw=-22
+                    else:
+                        if any(b+l>32 for b,l in segments):raise ValueError('iovec segment outside the admitted buffer')
+                        gathered=b''.join(bytes(memory[b:b+l]) for b,l in segments);at=pos
+                        if file_status is not None and file_status[1]&0x400:at=size
+                        if at+len(gathered)>64:raise ValueError('file capacity exceeded by recipe')
+                        data[at:at+len(gathered)]=gathered;size=max(size,at+len(gathered));blocks=8
+                        pos=at+len(gathered);raw=len(gathered)
+            elif n==98:
+                # do_futex: an unknown command is ENOSYS; FUTEX_WAKE and FUTEX_WAIT key the word (unaligned: EINVAL).
+                # A private wake finds no waiter (0); a wait on a changed value returns EAGAIN. A wait on the word's own
+                # value would block, which the recipe never asks.
+                offset=call['args'][0];op=a[1];value=a[2];cmd=op&~(128|256)
+                if cmd not in (0,1):raw=-38
+                elif offset%4:raw=-22
+                elif offset not in range(0,32,4):raise ValueError('futex word outside the admitted buffer')
+                elif cmd==1:raw=0
+                elif words[offset//4]==value:raise ValueError('a blocking futex wait is outside the admitted recipe')
+                else:raw=-11
             else:raise ValueError('unsupported fd recipe operation')
             row=dict(**call,raw_bits=raw&UNCHANGED,words=words,umask_after=base[-1]['umask_after'])
+            # The native record keeps CAPTURE_ARGUMENTS arguments (five for the prctl-capable file profiles, else four); a
+            # futex recipe's trailing uaddr2 and val3 are zero, which the slice adapter requires of every call.
+            width=5 if profile in ('file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else 4
+            if len(row['args'])>width:
+                if any(row['args'][width:]):raise ValueError('a recorded call has a nonzero argument beyond the capture width')
+                row['args']=row['args'][:width]
         if io:row.update(input_words=input_words(profile,ordinal),file_after=file() if 2 in slots else None)
         if metadata:
             row['stat_words']=statwords if n==80 else stat_input_words()
@@ -2333,6 +2424,55 @@ IO_HELPERS=[('unsigned_offsets','static inline bool'),('vfs_setpos','loff_t'),('
 
 def digest(data):return hashlib.sha256(data).hexdigest()
 
+# Kernel source excerpts live once, in a content-addressed store (excerpts/<sha256>). A root (a profile, a native
+# capture, a bundle's native/) lists its excerpts in excerpts.json (path -> sha256); upstream(root) is the directory
+# readers use: root/upstream, materialized from the store and verified file by file, rebuilt when the manifest
+# changes (a stamp records which manifest it was built from). A root without a manifest keeps its own upstream/.
+# Files edited in a materialized directory return to the store with ingest(root).
+EXCERPT_STORE=Path(__file__).resolve().parent/'excerpts'
+EXCERPT_MANIFEST='excerpts.json'
+EXCERPT_STAMP='.excerpts'
+def _excerpt_digest(data):return hashlib.sha256(data).hexdigest()
+def excerpt_manifest(root):
+    path=Path(root)/EXCERPT_MANIFEST
+    if not path.exists():return None
+    manifest=json.loads(path.read_text())
+    if manifest.get('format')!='osrec-kernel-excerpts-v1' or not isinstance(manifest.get('files'),dict):raise ValueError('invalid kernel excerpt manifest '+str(path))
+    for name,sha in manifest['files'].items():
+        if not re.fullmatch(r'[0-9a-f]{64}',sha) or name.startswith('/') or '..' in Path(name).parts:raise ValueError('invalid kernel excerpt entry '+name)
+    return manifest
+def upstream(root):
+    """The directory of a root's kernel source excerpts (materialized from the store when the root has a manifest)."""
+    root=Path(root);directory=root/'upstream';manifest=excerpt_manifest(root)
+    if manifest is None:return directory
+    stamp=_excerpt_digest(json.dumps(manifest['files'],sort_keys=True).encode())
+    if (directory/EXCERPT_STAMP).exists() and (directory/EXCERPT_STAMP).read_text()==stamp:return directory
+    staging=root/('.upstream-%d'%__import__('os').getpid())
+    shutil.rmtree(staging,ignore_errors=True)
+    for name,sha in sorted(manifest['files'].items()):
+        data=(EXCERPT_STORE/sha).read_bytes()
+        if _excerpt_digest(data)!=sha:raise ValueError('kernel excerpt store entry is corrupt: '+sha)
+        (staging/name).parent.mkdir(parents=True,exist_ok=True);(staging/name).write_bytes(data)
+    staging.mkdir(exist_ok=True);(staging/EXCERPT_STAMP).write_text(stamp)
+    shutil.rmtree(directory,ignore_errors=True);staging.rename(directory)
+    return directory
+def ingest(root):
+    """Store every file of root/upstream and write root's manifest (a materialized directory may have been edited)."""
+    root=Path(root);directory=root/'upstream';files={}
+    for path in sorted(p for p in directory.rglob('*') if p.is_file() and p.name!=EXCERPT_STAMP):
+        data=path.read_bytes();sha=_excerpt_digest(data);target=EXCERPT_STORE/sha
+        if not target.exists():EXCERPT_STORE.mkdir(parents=True,exist_ok=True);target.write_bytes(data)
+        files[path.relative_to(directory).as_posix()]=sha
+    manifest=dict(format='osrec-kernel-excerpts-v1',files=files)
+    (root/EXCERPT_MANIFEST).write_text(json.dumps(manifest,indent=1,sort_keys=True)+'\n')
+    (directory/EXCERPT_STAMP).write_text(_excerpt_digest(json.dumps(files,sort_keys=True).encode()))
+    return manifest
+def copy_excerpts(source,target):
+    """Give `target` the same excerpts as `source`: its manifest when it has one, else a copy of its upstream/."""
+    source,target=Path(source),Path(target)
+    if excerpt_manifest(source) is not None:shutil.copyfile(source/EXCERPT_MANIFEST,target/EXCERPT_MANIFEST)
+    else:shutil.copytree(source/'upstream',target/'upstream')
+
 # fd-control sources below the descriptor and read/write entries, and the
 # original helpers each contributes, with their exact v6.10 declarations. A
 # static callee of a reviewed dispatch model is extracted without `static`.
@@ -2340,13 +2480,20 @@ FD_CONTROL_SOURCES=[
     ('include/linux/file.h',[('fdput','static inline void'),('__to_fd','static inline struct fd'),('fdget','static inline struct fd'),('fdget_raw','static inline struct fd'),('fdget_pos','static inline struct fd'),('fdput_pos','static inline void')]),
     ('include/linux/fdtable.h',[('files_lookup_fd_raw','static inline struct file *')]),
     ('include/linux/dcache.h',[('d_inode','static inline struct inode *'),('d_backing_inode','static inline struct inode *')]),
-    ('include/linux/fs.h',[('init_sync_kiocb','static inline void'),('file_start_write','static inline void'),('file_end_write','static inline void'),('i_size_read','static inline loff_t'),('file_accessed','static inline void'),('mapping_writably_mapped','static inline int'),('inode_get_atime','static inline struct timespec64'),('inode_get_mtime','static inline struct timespec64'),('inode_get_ctime','static inline struct timespec64'),('inode_set_atime_to_ts','static inline struct timespec64'),('inode_set_mtime_to_ts','static inline struct timespec64'),('inode_set_ctime_to_ts','static inline struct timespec64'),('i_user_ns','static inline struct user_namespace *'),('i_uid_into_vfsuid','static inline vfsuid_t'),('i_gid_into_vfsgid','static inline vfsgid_t'),('HAS_UNMAPPED_ID','static inline bool'),('inode_unhashed','static inline int'),('i_size_write','static inline void'),('file_dentry','static inline struct dentry *'),('inode_lock','static inline void'),('inode_unlock','static inline void'),('file_mnt_idmap','static inline struct mnt_idmap *'),('i_uid_needs_update','static inline bool'),('i_gid_needs_update','static inline bool'),('i_uid_update','static inline void'),('i_gid_update','static inline void'),('inode_is_locked','static inline int')]),
+    ('include/linux/fs.h',[('init_sync_kiocb', 'static inline void'), ('file_start_write', 'static inline void'), ('file_end_write', 'static inline void'), ('i_size_read', 'static inline loff_t'), ('file_accessed', 'static inline void'), ('mapping_writably_mapped', 'static inline int'), ('inode_get_atime', 'static inline struct timespec64'), ('inode_get_mtime', 'static inline struct timespec64'), ('inode_get_ctime', 'static inline struct timespec64'), ('inode_set_atime_to_ts', 'static inline struct timespec64'), ('inode_set_mtime_to_ts', 'static inline struct timespec64'), ('inode_set_ctime_to_ts', 'static inline struct timespec64'), ('i_user_ns', 'static inline struct user_namespace *'), ('i_uid_into_vfsuid', 'static inline vfsuid_t'), ('i_gid_into_vfsgid', 'static inline vfsgid_t'), ('HAS_UNMAPPED_ID', 'static inline bool'), ('inode_unhashed', 'static inline int'), ('i_size_write', 'static inline void'), ('file_dentry', 'static inline struct dentry *'), ('inode_lock', 'static inline void'), ('inode_unlock', 'static inline void'), ('file_mnt_idmap', 'static inline struct mnt_idmap *'), ('i_uid_needs_update', 'static inline bool'), ('i_gid_needs_update', 'static inline bool'), ('i_uid_update', 'static inline void'), ('i_gid_update', 'static inline void'), ('inode_is_locked', 'static inline int'), ('kiocb_set_rw_flags', 'static inline int'), ('__sb_end_write', 'static inline void'), ('__sb_start_write', 'static inline void'), ('__sb_start_write_trylock', 'static inline bool'), ('sb_end_write', 'static inline void'), ('sb_start_write', 'static inline void'), ('sb_start_write_trylock', 'static inline bool')]),
     ('include/linux/uio.h',[('iov_iter_ubuf','static inline void'),('iov_iter_type','static inline enum iter_type'),('iter_is_ubuf','static inline bool'),('iter_is_iovec','static inline bool'),('user_backed_iter','static inline bool'),('iov_iter_count','static inline size_t'),('iov_iter_truncate','static inline void'),('iov_iter_is_discard','static inline bool'),('iov_iter_is_xarray','static inline bool'),('iov_iter_is_bvec','static inline bool'),('iter_iov','static inline const struct iovec *'),('iov_iter_is_kvec','static inline bool')]),
     ('include/linux/fsnotify_backend.h',[('fsnotify_sb_info','static inline struct fsnotify_sb_info *')]),
     ('include/linux/fsnotify.h',[('fsnotify_sb_has_priority_watchers','static inline bool'),('fsnotify_sb_has_watchers','static inline bool'),('fsnotify_parent','static inline int'),('fsnotify_file','static inline int'),('fsnotify_access','static inline void'),('fsnotify_modify','static inline void'),('fsnotify_dentry','static inline void'),('fsnotify_change','static inline void')]),
     ('include/linux/sched/xacct.h',[('add_rchar','static inline void'),('add_wchar','static inline void'),('inc_syscr','static inline void'),('inc_syscw','static inline void')]),
     ('include/linux/list.h',[('hlist_unhashed','static inline int'),('list_empty','static inline int')]),
-    ('include/linux/time64.h',[('timespec64_equal','static inline int'),('timespec64_compare','static inline int')]),
+    ('include/linux/time64.h',[('timespec64_equal','static inline int'),('timespec64_compare','static inline int'),('timespec64_valid','static inline bool')]),
+    ('include/linux/ktime.h',[('ktime_set','static inline ktime_t'),('timespec64_to_ktime','static inline ktime_t')]),
+    ('include/linux/hrtimer.h',[('hrtimer_set_expires_range_ns','static inline void'),('destroy_hrtimer_on_stack','static inline void')]),
+    ('include/linux/time_namespace.h',[('timens_ktime_to_host','static inline ktime_t')]),
+    ('kernel/time/hrtimer.c',[('ktime_add_safe','ktime_t'),('hrtimer_clockid_to_base','static inline int'),('__hrtimer_init','static void'),('hrtimer_try_to_cancel','int'),('hrtimer_cancel','int'),('__hrtimer_init_sleeper','static void'),('hrtimer_init_sleeper_on_stack','void'),('hrtimer_active','bool')]),
+    ('include/linux/thread_info.h',[('check_copy_size','static __always_inline __must_check bool')]),
+    ('include/linux/uaccess.h',[('_copy_from_user','static inline __must_check unsigned long'),('copy_from_user','static __always_inline unsigned long __must_check')]),
+    ('kernel/time/time.c',[('get_timespec64','int')]),
     ('include/linux/iversion.h',[('inode_peek_iversion_raw','static inline u64'),('inode_iversion_need_inc','static inline bool'),('inode_inc_iversion','static inline void')]),
     ('include/linux/quotaops.h',[('is_quota_modification','static inline bool')]),
     ('include/linux/filelock.h',[('break_deleg','static inline int'),('try_break_deleg','static inline int'),('locks_inode_context','static inline struct file_lock_context *')]),
@@ -2358,16 +2505,39 @@ FD_CONTROL_SOURCES=[
     ('include/linux/pagemap.h',[('mapping_gfp_mask','static inline gfp_t'),('folio_file_page','static inline struct page *'),('folio_trylock','static inline bool'),('folio_lock','static inline void'),('folio_index','static inline pgoff_t'),('folio_contains','static inline bool'),('folio_next_index','static inline pgoff_t')]),
     ('include/linux/mm.h',[('folio_put','static inline void')]),
     ('lib/xarray.c',[('set_bounds','static void *'),('get_offset','static unsigned int'),('xas_descend','static __always_inline void *'),('xas_start','static void *'),('xas_load','void *'),('xas_move_index','static void'),('xas_next_offset','static void'),('xas_find','void *')]),
-    ('lib/iov_iter.c',[('page_copy_sane','static inline bool'),('copy_page_to_iter','size_t'),('fault_in_iov_iter_readable','size_t'),('copy_page_from_iter_atomic','size_t'),('iov_iter_revert','void'),('copy_to_user_iter','static __always_inline size_t'),('copy_from_user_iter','static __always_inline size_t'),('memcpy_to_iter','static __always_inline size_t'),('memcpy_from_iter','static __always_inline size_t'),('_copy_to_iter','size_t'),('__copy_from_iter','static __always_inline size_t')]),
+    ('lib/iov_iter.c',[('page_copy_sane','static inline bool'),('copy_page_to_iter','size_t'),('fault_in_iov_iter_readable','size_t'),('copy_page_from_iter_atomic','size_t'),('iov_iter_revert','void'),('copy_to_user_iter','static __always_inline size_t'),('copy_from_user_iter','static __always_inline size_t'),('memcpy_to_iter','static __always_inline size_t'),('memcpy_from_iter','static __always_inline size_t'),('_copy_to_iter','size_t'),('__copy_from_iter','static __always_inline size_t'),('iov_iter_init','void'),('copy_iovec_from_user','static __noclone int'),('iovec_from_user','struct iovec *'),('__import_iovec_ubuf','static ssize_t'),('__import_iovec','ssize_t'),('import_iovec','ssize_t'),('import_ubuf','int'),('iov_iter_iovec_advance','static void'),('iov_iter_advance','void')]),
     ('include/linux/iov_iter.h',[('iterate_ubuf','static __always_inline size_t'),('iterate_iovec','static __always_inline size_t'),('iterate_and_advance2','static __always_inline size_t'),('iterate_and_advance','static __always_inline size_t')]),
     ('include/linux/fault-inject-usercopy.h',[('should_fail_usercopy','static inline bool')]),
-    ('include/linux/bitops.h',[('sign_extend64','static __always_inline __s64')]),
+    ('include/linux/bitops.h',[('sign_extend64','static __always_inline __s64'),('rol32','static inline __u32'),('sign_extend32','static __always_inline __s32')]),
+    ('include/linux/jhash.h',[('jhash2','static inline u32')]),
+    ('kernel/futex/futex.h',[('futex_to_flags','static inline unsigned int'),('should_fail_futex','static inline bool'),('futex_match','static inline int'),('futex_hb_waiters_inc','static inline void'),('futex_hb_waiters_dec','static inline void'),('futex_hb_waiters_pending','static inline int'),('double_lock_hb','static inline void'),('double_unlock_hb','static inline void')]),
+    ('kernel/futex/core.c',[('futex_hash','struct futex_hash_bucket *'),('futex_setup_timer','struct hrtimer_sleeper *'),('get_futex_key','int'),('futex_get_value_locked','int'),('futex_q_lock','struct futex_hash_bucket *'),('futex_q_unlock','void'),('futex_top_waiter','struct futex_q *'),('futex_cmpxchg_value_locked','int')]),
+    ('include/linux/page-flags.h',[('folio_test_anon','static __always_inline bool')]),
+    ('kernel/futex/pi.c',[('refill_pi_state_cache','int'),('lock_pi_update_atomic','static int'),('futex_lock_pi_atomic','int'),('futex_lock_pi','int'),('futex_unlock_pi','int')]),
+    ('kernel/futex/waitwake.c',[('futex_wake','int'),('futex_wait_setup','int'),('__futex_wait','int'),('futex_wait','int'),('futex_atomic_op_inuser','static int'),('futex_wake_op','int')]),
+    ('kernel/futex/requeue.c',[('futex_requeue','int')]),
+    ('arch/arm64/include/asm/futex.h',[('arch_futex_atomic_op_inuser','static inline int')]),
+    ('kernel/sched/core.c',[('wake_up_q','void')]),
     ('include/asm-generic/access_ok.h',[('__access_ok','static inline int')]),
     ('arch/arm64/include/asm/uaccess.h',[('access_ok','static inline int'),('uaccess_ttbr0_disable','static inline bool'),('uaccess_ttbr0_enable','static inline bool')]),
-    ('mm/gup.c',[('fault_in_readable','size_t')]),
+    ('mm/gup.c',[('fault_in_readable','size_t'),('gup_fast_permitted','static bool'),('try_get_folio','static inline struct folio *'),('gup_put_folio','static void'),('try_grab_folio_fast','static struct folio *'),('gup_fast_folio_allowed','static bool'),('gup_fast_pte_range','static int'),('gup_fast_pmd_range','static int'),('gup_fast_pud_range','static int'),('gup_fast_p4d_range','static int'),('gup_fast_pgd_range','static void'),('gup_fast','static unsigned long'),('gup_fast_fallback','static int'),('is_valid_gup_args','static bool'),('get_user_pages_fast','int')]),
+    ('mm/pgtable-generic.c',[('__pte_offset_map','pte_t *')]),
+    ('arch/arm64/include/asm/pgtable.h',[('pud_pgtable','static inline pmd_t *'),('p4d_to_folded_pud','static inline pud_t *'),('pud_offset_lockless','static inline pud_t *'),('ptep_get','static inline pte_t'),('ptep_get_lockless','static inline pte_t')]),
+    ('include/linux/pgtable.h',[('pte_offset_kernel','static inline pte_t *'),('pmd_offset','static inline pmd_t *'),('__pte_map','static inline pte_t *'),('pte_unmap','static inline void')]),
     ('mm/filemap.c',[('filemap_get_entry','void *'),('folio_unlock','void'),('generic_perform_write','ssize_t'),('find_get_entry','static inline struct folio *'),('find_lock_entries','unsigned'),('find_get_entries','unsigned')]),
     ('mm/truncate.c',[('truncate_cleanup_folio','static void'),('truncate_inode_folio','int'),('truncate_inode_partial_folio','bool')]),
     ('mm/util.c',[('folio_mapping','struct address_space *')]),
+    ('include/linux/percpu-rwsem.h',[('percpu_down_read', 'static inline void'), ('percpu_down_read_trylock', 'static inline bool'), ('percpu_up_read', 'static inline void')]),
+    ('include/linux/rcu_sync.h',[('rcu_sync_is_idle', 'static inline bool')]),
+    ('kernel/sched/core.c',[('__cond_resched', 'int __sched')]),
+    ('kernel/rcu/tree_plugin.h',[('rcu_all_qs', 'void')]),
+    ('arch/arm64/include/asm/preempt.h',[('should_resched', 'static inline bool')]),
+    ('include/linux/sched.h',[('_cond_resched', 'static inline int')]),
+    ('include/linux/slab.h',[('kmalloc_type','static __always_inline enum kmalloc_cache_type'),('kmalloc_noprof','static __always_inline __alloc_size(1) void *'),('kmalloc_array_noprof','static inline __alloc_size(1, 2) void *'),('__kmalloc_index','static __always_inline unsigned int'),('kzalloc_noprof','static inline __alloc_size(1) void *')]),
+    ('mm/slab.h',[('size_index_elem','static inline unsigned int'),('kmalloc_slab','static inline struct kmem_cache *'),('__slub_debug_enabled','static inline bool'),('kmem_cache_debug_flags','static inline bool'),('slab_want_init_on_alloc','static inline bool'),('slab_want_init_on_free','static inline bool')]),
+    ('mm/slub.c',[('kmalloc_trace_noprof','void *'),('stat','static inline void'),('stat_add','static inline void'),('freelist_ptr_encode','static inline freeptr_t'),('freelist_ptr_decode','static inline void *'),('get_freepointer','static inline void *'),('prefetch_freepointer','static void'),('get_freepointer_safe','static inline void *'),('set_freepointer','static inline void'),('memcg_slab_post_alloc_hook','static __fastpath_inline bool'),('memcg_slab_free_hook','static __fastpath_inline void'),('slab_free_hook','static __always_inline bool'),('next_tid','static inline unsigned long'),('node_match','static inline int'),('__update_cpu_freelist_fast','static inline bool'),('__slab_alloc_node','static __always_inline void *'),('maybe_wipe_obj_freeptr','static __always_inline void'),('should_failslab','noinline int'),('slab_pre_alloc_hook','static __fastpath_inline struct kmem_cache *'),('slab_post_alloc_hook','static __fastpath_inline bool'),('slab_alloc_node','static __fastpath_inline void *'),('__do_kmalloc_node','static __always_inline void *'),('__kmalloc_noprof','void *'),('do_slab_free','static __always_inline void'),('slab_free','static __fastpath_inline void'),('kfree','void')]),
+    ('kernel/locking/rwsem.c',[('down_write', 'void __sched'), ('up_write', 'void'), ('__down_write_common', 'static inline int'), ('__down_write', 'static inline void'), ('rwsem_write_trylock', 'static inline bool'), ('rwsem_set_owner', 'static inline void'), ('rwsem_clear_owner', 'static inline void'), ('__up_write', 'static inline void')]),
+    ('include/linux/rwsem.h',[('rwsem_is_locked','static inline int')]),
     ('mm/backing-dev.c',[('inode_to_bdi','struct backing_dev_info *')]),
     ('mm/page-writeback.c',[('balance_dirty_pages_ratelimited_flags','int'),('balance_dirty_pages_ratelimited','void'),('noop_dirty_folio','bool'),('folio_mark_dirty','bool'),('folio_wait_writeback','void')]),
     ('arch/arm64/mm/flush.c',[('flush_dcache_folio','void'),('flush_dcache_page','void')]),
@@ -2379,7 +2549,7 @@ FD_CONTROL_SOURCES=[
     ('fs/libfs.c',[('inode_maybe_inc_iversion','bool')]),
     ('fs/inode.c',[('timestamp_truncate','struct timespec64'),('current_time','struct timespec64'),('inode_set_ctime_current','struct timespec64'),('inode_update_timestamps','int'),('generic_update_time','int'),('inode_update_time','int'),('relatime_need_update','static bool'),('atime_needs_update','bool'),('touch_atime','void'),('inode_needs_update_time','static int'),('__file_update_time','static int'),('file_update_time','int'),('file_remove_privs_flags','int'),('file_remove_privs','int'),('dentry_needs_remove_privs','int')]),
     ('fs/attr.c',[('may_setattr','int'),('inode_newsize_ok','int'),('setattr_prepare','int'),('setattr_copy','void'),('notify_change','int')]),
-    ('fs/namespace.c',[('__mnt_is_readonly','bool'),('mnt_get_write_access_file','int'),('mnt_put_write_access_file','void')]),
+    ('fs/namespace.c',[('__mnt_is_readonly', 'bool'), ('mnt_get_write_access_file', 'int'), ('mnt_put_write_access_file', 'void'), ('mnt_inc_writers', 'static inline void'), ('mnt_dec_writers', 'static inline void'), ('mnt_is_readonly', 'static int'), ('mnt_get_write_access', 'int'), ('mnt_put_write_access', 'void')]),
     ('fs/fs-writeback.c',[('__mark_inode_dirty','void')]),
     ('fs/locks.c',[('locks_remove_posix','void')]),
     ('security/security.c',[('security_file_permission','int'),('security_file_fcntl','int'),('security_inode_setattr','int'),('security_inode_post_setattr','void'),('security_file_truncate','int')]),
@@ -2493,7 +2663,7 @@ def kernel_headers(root,sources,config):
     """The kernel include tree for the assembly, with the headers a kernel build generates."""
     tree=sources/'linux-kernel'
     for name in FD_CONTROL_KERNEL_TREE:
-        (tree/name).parent.mkdir(parents=True,exist_ok=True);(tree/name).write_bytes((root/'native/upstream/kernel-tree'/name).read_bytes())
+        (tree/name).parent.mkdir(parents=True,exist_ok=True);(tree/name).write_bytes((upstream(root/'native')/'kernel-tree'/name).read_bytes())
     gen=tree/'gen';(gen/'asm').mkdir(parents=True);(gen/'generated').mkdir()
     for header,script,data in (('cpucaps.h','gen-cpucaps.awk','cpucaps'),('sysreg-defs.h','gen-sysreg.awk','sysreg')):
         out=subprocess.run(['awk','-f',str(tree/'arch/arm64/tools'/script),str(tree/'arch/arm64/tools'/data)],capture_output=True,text=True,check=True).stdout
@@ -2512,15 +2682,34 @@ def kernel_headers(root,sources,config):
 # reviewed dispatch model that selects the callee by the table's object class.
 # Each listed call text occurs exactly once in its original body; nothing else changes.
 FD_CONTROL_REWRITES={
+    # arm64 __va (the linear map) at each level of GUP-fast's walk: the model for that level's pinned table page,
+    # which returns that level's descriptor pointer (so the void * cast of __va's result goes too). pte_offset_kernel
+    # reads pmd_page_vaddr(pmd), __va(pmd_page_paddr(pmd)) as an integer, back as a pointer: the model directly.
+    'pud_offset_lockless':[('(pud_t *)__va(','osrec_pud_va(')],
+    'pud_pgtable':[('(pmd_t *)__va(','osrec_pmd_va(')],
+    'pte_offset_kernel':[('(pte_t *)pmd_page_vaddr(*pmd)','osrec_pte_va(pmd_page_paddr(*pmd))')],
+    # The walk's store of each pinned page: its index (*nr) is bounded only by the trip count (end - start is one
+    # page for get_futex_key's single page), which interval analysis cannot relate. The model asserts index 0.
+    'gup_fast_pte_range':[('pages[*nr] = page;','osrec_gup_store(pages, *nr, page);')],
     'vfs_read':[('file->f_op->read(file, buf, count, pos)','osrec_f_op_read(file->f_op, file, buf, count, pos)')],
     'new_sync_read':[('filp->f_op->read_iter(&kiocb, &iter)','osrec_f_op_read_iter(filp->f_op, &kiocb, &iter)')],
     'vfs_write':[('file->f_op->write(file, buf, count, pos)','osrec_f_op_write(file->f_op, file, buf, count, pos)')],
     'new_sync_write':[('filp->f_op->write_iter(&kiocb, &iter)','osrec_f_op_write_iter(filp->f_op, &kiocb, &iter)')],
+    'do_iter_readv_writev':[('filp->f_op->read_iter(&kiocb, iter)','osrec_f_op_read_iter(filp->f_op, &kiocb, iter)'),('filp->f_op->write_iter(&kiocb, iter)','osrec_f_op_write_iter(filp->f_op, &kiocb, iter)')],
+    'do_loop_readv_writev':[('filp->f_op->read(filp,','osrec_f_op_read(filp->f_op, filp,'),('filp->f_op->write(filp,','osrec_f_op_write(filp->f_op, filp,')],
     'inode_update_time':[('inode->i_op->update_time(inode, flags)','osrec_i_op_update_time(inode->i_op, inode, flags)')],
     '__mark_inode_dirty':[('sb->s_op->dirty_inode(inode,','osrec_s_op_dirty_inode(sb->s_op, inode,')],
     'generic_perform_write':[('a_ops->write_begin(file,','osrec_a_ops_write_begin(a_ops, file,'),('a_ops->write_end(file,','osrec_a_ops_write_end(a_ops, file,')],
     'folio_mark_dirty':[('mapping->a_ops->dirty_folio(mapping, folio)','osrec_a_ops_dirty_folio(mapping->a_ops, mapping, folio)')],
     'notify_change':[('inode->i_op->setattr(idmap, dentry, attr)','osrec_i_op_setattr(inode->i_op, idmap, dentry, attr)')],
+    # LOCK_CONTENDED(lock, try, op) is op(lock) without CONFIG_LOCK_STAT: expanded in place, since the
+    # context transform cannot pass the context through a callee named as a macro argument.
+    'down_write':[('LOCK_CONTENDED(sem, __down_write_trylock, __down_write);','__down_write(sem);')],
+    # A queued waiter's wake callback (futex_wake_mark for every wait the slice admits).
+    'futex_wake':[('this->wake(&wake_q, this)','osrec_futex_q_wake(this->wake, &wake_q, this)')],
+    'futex_requeue':[('this->wake(&wake_q, this)','osrec_futex_q_wake(this->wake, &wake_q, this)')],
+    'futex_wake_op':[('this->wake(&wake_q, this);\n\t\t\tif (++ret','osrec_futex_q_wake(this->wake, &wake_q, this);\n\t\t\tif (++ret'),
+                     ('this->wake(&wake_q, this);\n\t\t\t\tif (++op_ret','osrec_futex_q_wake(this->wake, &wake_q, this);\n\t\t\t\tif (++op_ret')],
     # The always-inline iterators take their step as a constant: the two user-address
     # steps are named by an enumeration (model.h) and called directly where the
     # iterator calls its step.
@@ -2542,6 +2731,26 @@ def rewrite_calls(found,rewrites):
             if body.count(old.encode())!=1:raise ValueError('reviewed call rewrite does not match '+name)
             body=body.replace(old.encode(),new.encode())
         found[name]=dict(found[name],body=body,rewritten_calls=[old for old,_ in edits])
+    return found
+
+# The BPF LSM's default hooks: kernel/bpf/bpf_lsm.c defines one nop function per hook by expanding its
+# LSM_HOOK macro over include/linux/lsm_hook_defs.h. The slice keeps the five hooks its LSM walks call.
+BPF_LSM_HOOKS=('file_permission','file_fcntl','file_truncate','inode_setattr','inode_post_setattr')
+
+def lsm_hook_definitions(macro,hooks,names):
+    """Expand bpf_lsm.c's LSM_HOOK over the named lsm_hook_defs.h entries, as the preprocessor does.
+
+    RET, DEFAULT and NAME take their arguments and __VA_ARGS__ the rest (whitespace collapsed); the
+    result is `noinline RET bpf_lsm_NAME(ARGS) { return DEFAULT; }`.
+    """
+    if not re.search(rb'#define LSM_HOOK\(RET, DEFAULT, NAME, \.\.\.\)\t\\\nnoinline RET bpf_lsm_##NAME\(__VA_ARGS__\)\t\\\n\{\t*\\\n\treturn DEFAULT;\t*\\\n\}\n',macro):raise ValueError('reviewed LSM_HOOK definition differs')
+    found={}
+    for name in names:
+        hits=list(re.finditer(rb'^LSM_HOOK\(([^,]+), ([^,]+), '+name.encode()+rb', ([^)]*)\)$',hooks,re.M))
+        if len(hits)!=1:raise ValueError('missing/ambiguous LSM hook '+name)
+        ret,default,args=(' '.join(g.decode().split()) for g in hits[0].groups())
+        found['bpf_lsm_'+name]=dict(sha256=digest(hits[0].group(0)),signature=args,original=hits[0].group(0),body=('{\n\treturn %s;\n}'%default).encode(),syscall=False,
+            declaration='noinline %s bpf_lsm_%s(%s)'%(ret,name,args),macro_expansion='kernel/bpf/bpf_lsm.c LSM_HOOK')
     return found
 
 def definitions(source,profile='minimal',selected_roots=None,selected_helpers=None):
@@ -2585,7 +2794,7 @@ def definitions(source,profile='minimal',selected_roots=None,selected_helpers=No
     helpers=[(n,'long') for n in helpers] if selected_helpers is None else selected_helpers
     if profile in ('setresuid','uid-setters','credential-setters') and selected_helpers is None:helpers += [('set_user','static int'),('flag_nproc_exceeded','static void')]
     for name,returns in helpers:
-        if returns not in ('long','static long','static unsigned long','unsigned long','static inline struct fd','static void','static int','int','void','bool','static inline int','static inline unsigned','static kernel_cap_t','static inline void','static inline kernel_cap_t','static unsigned int','static struct file *','static inline struct file *','struct file *','static inline bool','loff_t','static off_t','static inline loff_t *','ssize_t','static ssize_t','static inline struct fsnotify_sb_info *','static inline struct inode *','static inline loff_t','static inline struct timespec64','static inline struct user_namespace *','static inline vfsuid_t','static inline vfsgid_t','static inline enum iter_type','static inline size_t','static inline u64','static inline struct mnt_idmap *','static inline uid_t','static inline gid_t','static inline void *','static inline unsigned long','static inline struct xa_node *','static inline gfp_t','static inline struct page *','static void *','static __always_inline void *','void *','size_t','static bool','struct timespec64','vfsuid_t','vfsgid_t','static inline struct dentry *','static inline const struct iovec *','struct address_space *','struct backing_dev_info *','static inline unsigned int','static inline unsigned','static inline pgoff_t','static inline struct folio *','unsigned','static struct folio *','static __always_inline void','static __always_inline unsigned long','static void noinstr','asmlinkage void noinstr','static struct uid_gid_extent *','u32','uid_t','gid_t','static inline struct file_lock_context *','static __always_inline size_t','static __always_inline __s64'):raise ValueError('unsupported reviewed helper declaration')
+        if returns not in ('static __always_inline __must_check bool','static inline __must_check unsigned long','static __always_inline unsigned long __must_check','static inline ktime_t','ktime_t','static __always_inline int','static inline freeptr_t','static inline void *','static void','static __fastpath_inline bool','static __fastpath_inline void','static __always_inline bool','static inline unsigned long','static __always_inline void *','static __always_inline void','noinline int','static __fastpath_inline struct kmem_cache *','static __fastpath_inline void *','void *','static __always_inline enum kmalloc_cache_type','static __always_inline __alloc_size(1) void *','static inline __alloc_size(1, 2) void *','static inline __alloc_size(1) void *','static inline unsigned int','static inline struct kmem_cache *','long','static long','static unsigned long','unsigned long','static inline struct fd','static void','static int','int','void','bool','static inline int','static inline unsigned','static kernel_cap_t','static inline void','static inline kernel_cap_t','static unsigned int','static struct file *','static inline struct file *','struct file *','static inline bool','loff_t','static off_t','static inline loff_t *','ssize_t','static ssize_t','static inline struct fsnotify_sb_info *','static inline struct inode *','static inline loff_t','static inline struct timespec64','static inline struct user_namespace *','static inline vfsuid_t','static inline vfsgid_t','static inline enum iter_type','static inline size_t','static inline u64','static inline struct mnt_idmap *','static inline uid_t','static inline gid_t','static inline void *','static inline unsigned long','static inline struct xa_node *','static inline gfp_t','static inline struct page *','static void *','static __always_inline void *','void *','size_t','static bool','struct timespec64','vfsuid_t','vfsgid_t','static inline struct dentry *','static inline const struct iovec *','struct address_space *','struct backing_dev_info *','static inline unsigned int','static inline unsigned','static inline pgoff_t','static inline struct folio *','unsigned','static struct folio *','static __always_inline void','static __always_inline unsigned long','static void noinstr','asmlinkage void noinstr','static struct uid_gid_extent *','u32','uid_t','gid_t','static inline struct file_lock_context *','static __always_inline size_t','static __always_inline __s64','static __always_inline __s32','static __always_inline unsigned int','pte_t *','static __noclone int','struct iovec *','static __always_inline bool','struct futex_hash_bucket *','struct futex_q *','struct hrtimer_sleeper *','static inline u32','static inline __u32','void __sched','static inline struct mount *','int __sched','static inline bool __must_check','static inline int','static inline pud_t *','static inline pmd_t *','static inline pte_t *','static inline pte_t'):raise ValueError('unsupported reviewed helper declaration')
         separator=rb'\s*' if returns.endswith('*') else rb'\s+'
         matches=list(re.finditer(rb'\b'+rb'\s+'.join(re.escape(t) for t in returns.encode().split())+separator+name.encode()+rb'\(([^)]*)\)((?:\s*__(?:releases|acquires)\([^)]*\))*)\s*(?=\{)',source))
         if len(matches)!=1:raise ValueError('missing/ambiguous Linux helper '+name)
@@ -2602,12 +2811,12 @@ def definitions(source,profile='minimal',selected_roots=None,selected_helpers=No
 
 def source_identity(root):
     root=Path(root);review=json.loads((root/'source-identity.json').read_text())
-    profile=review.get('profile','minimal');source=(root/'upstream/kernel/sys.c').read_bytes();found=definitions(source,selected_roots={**ROOTS,**({'setrlimit':2} if profile=='file-setrlimit' else {}),**({'getrlimit':2} if profile in ('file-rlimit','file-limits','file-setrlimit') else {}),**({'setuid':1,'setreuid':2,'setresuid':3} if profile in ('file-credentials','file-rlimit','file-limits','file-setrlimit') else {}),'setfsgid':1,**({'setgid':1,'setregid':2,'setresgid':3} if profile in ('file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else {}),**({'setfsuid':1} if profile in ('file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else {})},selected_helpers=([('do_prlimit','static int')] if profile=='file-setrlimit' else [])+([('__sys_setuid','long'),('__sys_setreuid','long'),('__sys_setresuid','long'),('set_user','static int'),('flag_nproc_exceeded','static void')] if profile in ('file-credentials','file-rlimit','file-limits','file-setrlimit') else [])+[('__sys_setfsgid','long')]+([(n,'long') for n in ('__sys_setgid','__sys_setregid','__sys_setresgid')] if profile in ('file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else [])+([('__sys_setfsuid','long')] if profile in ('file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else [])) if profile in ('file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else definitions(source,profile)
+    profile=review.get('profile','minimal');source=(upstream(root)/'kernel/sys.c').read_bytes();found=definitions(source,selected_roots={**ROOTS,**({'setrlimit':2} if profile=='file-setrlimit' else {}),**({'getrlimit':2} if profile in ('file-rlimit','file-limits','file-setrlimit') else {}),**({'setuid':1,'setreuid':2,'setresuid':3} if profile in ('file-credentials','file-rlimit','file-limits','file-setrlimit') else {}),'setfsgid':1,**({'setgid':1,'setregid':2,'setresgid':3} if profile in ('file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else {}),**({'setfsuid':1} if profile in ('file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else {})},selected_helpers=([('do_prlimit','static int')] if profile=='file-setrlimit' else [])+([('__sys_setuid','long'),('__sys_setreuid','long'),('__sys_setresuid','long'),('set_user','static int'),('flag_nproc_exceeded','static void')] if profile in ('file-credentials','file-rlimit','file-limits','file-setrlimit') else [])+[('__sys_setfsgid','long')]+([(n,'long') for n in ('__sys_setgid','__sys_setregid','__sys_setresgid')] if profile in ('file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else [])+([('__sys_setfsuid','long')] if profile in ('file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else [])) if profile in ('file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else definitions(source,profile)
     extra=review.get('additional_sources',{})
     if profile in ('getgroups','setgroups','setgroups-denied','capabilities','capget','prctl','fsuid','setresuid','uid-setters','credential-setters'):
         expected_extra=({'kernel/cred.c'} if profile in ('setresuid','uid-setters','credential-setters') else set()) | ({'kernel/groups.c','kernel/capability.c','security/commoncap.c','include/linux/capability.h'} if profile in ('fsuid','setresuid','uid-setters','credential-setters') else {'kernel/groups.c','kernel/capability.c','security/commoncap.c'} if profile in ('capabilities','capget','prctl','fsuid','setresuid','uid-setters','credential-setters') else {'kernel/groups.c'})
         if set(extra)!=expected_extra:raise ValueError('Linux supplementary-group source list differs')
-        data=(root/'upstream/kernel/groups.c').read_bytes()
+        data=(upstream(root)/'kernel/groups.c').read_bytes()
         if digest(data)!=extra['kernel/groups.c']:raise ValueError('Linux supplementary-group source identity mismatch')
         roots={'getgroups':2};helpers=[('groups_to_user','static int')]
         if profile in ('setgroups','setgroups-denied','capabilities','capget','prctl','fsuid','setresuid','uid-setters','credential-setters'):roots['setgroups']=2;helpers += [('groups_from_user','static int'),('set_groups','void'),('set_current_groups','int'),('may_setgroups','bool')]
@@ -2617,58 +2826,72 @@ def source_identity(root):
             if profile in ('capget','prctl','fsuid','setresuid','uid-setters','credential-setters'):cap_roots['capget']=2;cap_helpers.append(('cap_get_target_pid','static inline int'));security_helpers.append(('cap_capget','int'))
             if profile in ('prctl','fsuid','setresuid','uid-setters','credential-setters'):security_helpers += [('cap_prctl_drop','static int'),('cap_task_prctl','int')]
             if profile in ('fsuid','setresuid','uid-setters','credential-setters'):
-                data=(root/'upstream/include/linux/capability.h').read_bytes()
+                data=(upstream(root)/'include/linux/capability.h').read_bytes()
                 if digest(data)!=extra['include/linux/capability.h']:raise ValueError('Linux filesystem-capability source identity mismatch')
                 found.update(definitions(data,profile,selected_roots={},selected_helpers=[('cap_drop','static inline kernel_cap_t'),('cap_drop_fs_set','static inline kernel_cap_t'),('cap_raise_fs_set','static inline kernel_cap_t')]))
                 security_helpers += [('cap_emulate_setxuid','static inline void'),('cap_task_fix_setuid','int')]
             for filename,roots,helpers in [('kernel/capability.c',cap_roots,cap_helpers),('security/commoncap.c',{},security_helpers)]:
-                data=(root/'upstream'/filename).read_bytes()
+                data=(upstream(root)/filename).read_bytes()
                 if digest(data)!=extra[filename]:raise ValueError('Linux capability source identity mismatch')
                 found.update(definitions(data,profile,selected_roots=roots,selected_helpers=helpers))
     elif profile in ('fd-dup','file-io','file-positioned','fd-control','close-range','fstat','fchmod','fchown','fchown-capable','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit'):
-        if set(extra)!=({'kernel/cred.c'} if profile in ('file-credentials','file-rlimit','file-limits','file-setrlimit') else set()) | ({'include/uapi/asm-generic/fcntl.h'} if profile in ('file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else set()) | ({'kernel/groups.c'} if profile in ('file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else set()) | ({'include/linux/capability.h'} if profile in ('file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else set()) | ({'kernel/capability.c','security/commoncap.c'} if profile in ('file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else set()) | ({'fs/stat.c','include/uapi/asm-generic/stat.h'} if profile in ('fstat','fchmod','fchown','fchown-capable','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else set()) | ({'fs/file.c','fs/open.c','fs/read_write.c'} if profile in ('file-io','file-positioned','fd-control','close-range','fstat','fchmod','fchown','fchown-capable','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else {'fs/file.c','fs/open.c'}) | ({'fs/fcntl.c',*(f for f,_ in FD_CONTROL_SOURCES)} if profile=='fd-control' else set()):raise ValueError('Linux descriptor source list differs')
+        if set(extra)!=({'kernel/cred.c'} if profile in ('file-credentials','file-rlimit','file-limits','file-setrlimit') else set()) | ({'include/uapi/asm-generic/fcntl.h'} if profile in ('file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else set()) | ({'kernel/groups.c'} if profile in ('file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else set()) | ({'include/linux/capability.h'} if profile in ('file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else set()) | ({'kernel/capability.c','security/commoncap.c'} if profile in ('file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else set()) | ({'fs/stat.c','include/uapi/asm-generic/stat.h'} if profile in ('fstat','fchmod','fchown','fchown-capable','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else set()) | ({'fs/file.c','fs/open.c','fs/read_write.c'} if profile in ('file-io','file-positioned','fd-control','close-range','fstat','fchmod','fchown','fchown-capable','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else {'fs/file.c','fs/open.c'}) | ({'fs/fcntl.c','kernel/futex/syscalls.c','kernel/bpf/bpf_lsm.c','include/linux/lsm_hook_defs.h',*(f for f,_ in FD_CONTROL_SOURCES)} if profile=='fd-control' else set()) | ({'kernel/futex/syscalls.c','kernel/futex/futex.h'} if profile=='file-setrlimit' else set()):raise ValueError('Linux descriptor source list differs')
         for filename,roots,helpers in [('fs/file.c',{'dup':1,'dup3':3},FD_HELPERS+([('__fget_light','static unsigned long'),('__fdget','unsigned long'),('__fdget_raw','unsigned long'),('file_needs_f_pos_lock','static inline bool'),('__fdget_pos','unsigned long'),('__f_unlock_pos','void'),('expand_files','static int')] if profile=='fd-control' else [])+([('f_dupfd','int'),('set_close_on_exec','void'),('get_close_on_exec','bool')] if profile in ('fd-control','close-range','fstat','fchmod','fchown','fchown-capable','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else [])+([('last_fd','static inline unsigned'),('__range_cloexec','static inline void'),('__range_close','static inline void'),('__close_range','int')] if profile in ('close-range','fstat','fchmod','fchown','fchown-capable','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else [])),('fs/open.c',{'close':1,**({'fchown':3} if profile in ('fchown','fchown-capable','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else {}),**({'fchmod':2} if profile in ('fchmod','fchown','fchown-capable','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else {}),**({'close_range':3} if profile in ('close-range','fstat','fchmod','fchown','fchown-capable','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else {}),**({'ftruncate':2} if profile in ('file-positioned','fd-control','close-range','fstat','fchmod','fchown','fchown-capable','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else {})},[('filp_close','int')]+([('filp_flush','static int'),('do_truncate','int')] if profile=='fd-control' else [])+([('setattr_vfsuid','static inline bool'),('setattr_vfsgid','static inline bool'),('chown_common','int'),('vfs_fchown','int'),('ksys_fchown','int')] if profile in ('fchown','fchown-capable','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else [])+([('vfs_fchmod','int'),('chmod_common','int')] if profile in ('fchmod','fchown','fchown-capable','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else [])+([('do_ftruncate','long'),('do_sys_ftruncate','long')] if profile in ('file-positioned','fd-control','close-range','fstat','fchmod','fchown','fchown-capable','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else []))]:
-            data=(root/'upstream'/filename).read_bytes()
+            data=(upstream(root)/filename).read_bytes()
             if digest(data)!=extra[filename]:raise ValueError('Linux descriptor source identity mismatch')
             found.update(definitions(data,profile,selected_roots=roots,selected_helpers=helpers))
         if profile in ('file-io','file-positioned','fd-control','close-range','fstat','fchmod','fchown','fchown-capable','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit'):
-            data=(root/'upstream/fs/read_write.c').read_bytes()
+            data=(upstream(root)/'fs/read_write.c').read_bytes()
             if digest(data)!=extra['fs/read_write.c']:raise ValueError('Linux file-I/O source identity mismatch')
-            found.update(definitions(data,selected_roots={'read':3,'write':3,'lseek':3,**({'pread64':4,'pwrite64':4} if profile in ('file-positioned','fd-control','close-range','fstat','fchmod','fchown','fchown-capable','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else {})},selected_helpers=IO_HELPERS+([('new_sync_read','static ssize_t'),('vfs_read','ssize_t'),('new_sync_write','static ssize_t'),('vfs_write','ssize_t'),('generic_write_check_limits','int'),('generic_write_checks_count','int'),('generic_write_checks','ssize_t')] if profile=='fd-control' else [])+([('ksys_pread64','ssize_t'),('ksys_pwrite64','ssize_t')] if profile in ('file-positioned','fd-control','close-range','fstat','fchmod','fchown','fchown-capable','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else [])))
+            found.update(definitions(data,selected_roots={'read':3,'write':3,'lseek':3,**({'writev':3} if profile in ('fd-control','file-setrlimit') else {}),**({'pread64':4,'pwrite64':4} if profile in ('file-positioned','fd-control','close-range','fstat','fchmod','fchown','fchown-capable','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else {})},selected_helpers=IO_HELPERS+([('new_sync_read','static ssize_t'),('vfs_read','ssize_t'),('new_sync_write','static ssize_t'),('vfs_write','ssize_t'),('generic_write_check_limits','int'),('generic_write_checks_count','int'),('generic_write_checks','ssize_t'),('do_iter_readv_writev','static ssize_t'),('do_loop_readv_writev','static ssize_t'),('vfs_writev','static ssize_t'),('do_writev','static ssize_t')] if profile=='fd-control' else [('do_writev','static ssize_t')] if profile=='file-setrlimit' else [])+([('ksys_pread64','ssize_t'),('ksys_pwrite64','ssize_t')] if profile in ('file-positioned','fd-control','close-range','fstat','fchmod','fchown','fchown-capable','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else [])))
+        if profile=='file-setrlimit':
+            # The futex system call and do_futex are original; the wait/wake bodies below them are reviewed models.
+            data=(upstream(root)/'kernel/futex/syscalls.c').read_bytes()
+            if digest(data)!=extra['kernel/futex/syscalls.c']:raise ValueError('Linux futex source identity mismatch')
+            found.update(definitions(data,selected_roots={'futex':6},selected_helpers=[('futex_cmd_has_timeout','static __always_inline bool'),('do_futex','long')]))
+            data=(upstream(root)/'kernel/futex/futex.h').read_bytes()
+            if digest(data)!=extra['kernel/futex/futex.h']:raise ValueError('Linux futex source identity mismatch')
+            found.update(definitions(data,selected_roots={},selected_helpers=[('futex_to_flags','static inline unsigned int'),('should_fail_futex','static inline bool')]))
         if profile=='fd-control':
-            data=(root/'upstream/fs/fcntl.c').read_bytes()
+            data=(upstream(root)/'fs/fcntl.c').read_bytes()
             if digest(data)!=extra['fs/fcntl.c']:raise ValueError('Linux fcntl source identity mismatch')
             found.update(definitions(data,selected_roots={'fcntl':3},selected_helpers=[('do_fcntl','static long'),('check_fcntl_cmd','static int')]))
+            macro=(upstream(root)/'kernel/bpf/bpf_lsm.c').read_bytes();hooks=(upstream(root)/'include/linux/lsm_hook_defs.h').read_bytes()
+            if digest(macro)!=extra['kernel/bpf/bpf_lsm.c'] or digest(hooks)!=extra['include/linux/lsm_hook_defs.h']:raise ValueError('Linux BPF LSM hook source identity mismatch')
+            found.update(lsm_hook_definitions(macro,hooks,BPF_LSM_HOOKS))
+            data=(upstream(root)/'kernel/futex/syscalls.c').read_bytes()
+            if digest(data)!=extra['kernel/futex/syscalls.c']:raise ValueError('Linux futex source identity mismatch')
+            found.update(definitions(data,selected_roots={'futex':6},selected_helpers=[('futex_cmd_has_timeout','static __always_inline bool'),('futex_init_timeout','static __always_inline int'),('do_futex','long')]))
             for filename,helpers in FD_CONTROL_SOURCES:
-                data=(root/'upstream'/filename).read_bytes()
+                data=(upstream(root)/filename).read_bytes()
                 if digest(data)!=extra[filename]:raise ValueError('Linux descriptor lookup source identity mismatch')
                 found.update(definitions(data,selected_roots={},selected_helpers=helpers))
             rewrite_calls(found,FD_CONTROL_REWRITES)
         if profile in ('fstat','fchmod','fchown','fchown-capable','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit'):
             for filename in ('fs/stat.c','include/uapi/asm-generic/stat.h'):
-                if digest((root/'upstream'/filename).read_bytes())!=extra[filename]:raise ValueError('Linux stat source/ABI identity mismatch')
-            found.update(definitions((root/'upstream/fs/stat.c').read_bytes(),selected_roots={'newfstat':2},selected_helpers=[('vfs_fstat','int'),('vfs_getattr','int'),('cp_new_stat','static int')]))
+                if digest((upstream(root)/filename).read_bytes())!=extra[filename]:raise ValueError('Linux stat source/ABI identity mismatch')
+            found.update(definitions((upstream(root)/'fs/stat.c').read_bytes(),selected_roots={'newfstat':2},selected_helpers=[('vfs_fstat','int'),('vfs_getattr','int'),('cp_new_stat','static int')]))
     elif extra:raise ValueError('unexpected Linux additional source')
     if profile in ('file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit'):
         for filename,roots,helpers in [('kernel/capability.c',{'capset':2,**({'capget':2} if profile in ('file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else {})},[('cap_validate_magic','static int'),('mk_kernel_cap','static kernel_cap_t')]+([('cap_get_target_pid','static inline int')] if profile in ('file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else [])),('security/commoncap.c',{},[('cap_inh_is_capped','static inline int'),('cap_capset','int')]+([('cap_capget','int')] if profile in ('file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else [])+([('cap_prctl_drop','static int'),('cap_task_prctl','int')] if profile in ('file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else [])+([('cap_emulate_setxuid','static inline void'),('cap_task_fix_setuid','int')] if profile in ('file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else []))]:
-            data=(root/'upstream'/filename).read_bytes()
+            data=(upstream(root)/filename).read_bytes()
             if digest(data)!=extra[filename]:raise ValueError('Linux file capability source identity mismatch')
             found.update(definitions(data,selected_roots=roots,selected_helpers=helpers))
 
     if profile in ('file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit'):
-        data=(root/'upstream/include/linux/capability.h').read_bytes()
+        data=(upstream(root)/'include/linux/capability.h').read_bytes()
         if digest(data)!=extra['include/linux/capability.h']:raise ValueError('Linux file FSUID capability source identity mismatch')
         found.update(definitions(data,selected_roots={},selected_helpers=[('cap_drop','static inline kernel_cap_t'),('cap_drop_fs_set','static inline kernel_cap_t'),('cap_raise_fs_set','static inline kernel_cap_t')]))
     if profile in ('file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit'):
-        data=(root/'upstream/kernel/groups.c').read_bytes()
+        data=(upstream(root)/'kernel/groups.c').read_bytes()
         if digest(data)!=extra['kernel/groups.c']:raise ValueError('Linux file supplementary-group source identity mismatch')
         found.update(definitions(data,selected_roots={'getgroups':2,'setgroups':2},selected_helpers=[('groups_to_user','static int'),('groups_from_user','static int'),('set_groups','void'),('set_current_groups','int'),('may_setgroups','bool')]))
     if profile in ('setresuid','uid-setters','credential-setters','file-credentials','file-rlimit','file-limits','file-setrlimit'):
-        data=(root/'upstream/kernel/cred.c').read_bytes()
+        data=(upstream(root)/'kernel/cred.c').read_bytes()
         if digest(data)!=extra['kernel/cred.c']:raise ValueError('Linux user-accounting source identity mismatch')
         found.update(definitions(data,profile,selected_roots={},selected_helpers=[('set_cred_ucounts','int')]))
     if digest(source)!=review['excerpt_sha256'] or {n:v['sha256'] for n,v in found.items()}!=review['definitions']:raise ValueError('Linux reviewed source identity mismatch')
-    abi=(root/'upstream/include/uapi/asm-generic/unistd.h').read_bytes()
+    abi=(upstream(root)/'include/uapi/asm-generic/unistd.h').read_bytes()
     if digest(abi)!=review['syscall_abi_sha256']:raise ValueError('Linux syscall ABI source identity mismatch')
     numbers={n.decode():int(v) for n,v in re.findall(rb'^#define __NR_(\w+) (\d+)$',abi,re.M)}
     if {n:numbers[n] for n in ROOTS}!={'getpid':172,'gettid':178,'getppid':173,'getuid':174,'geteuid':175,'getgid':176,'getegid':177,'getresuid':148,'getresgid':150,'umask':166}:raise ValueError('Linux syscall ABI numbers differ')
@@ -2676,13 +2899,13 @@ def source_identity(root):
     if profile in ('group-setters','getgroups') and (numbers.get('setgid')!=144 or numbers.get('setregid')!=143):raise ValueError('Linux group setter ABI differs')
     if profile in ('getgroups','setgroups','setgroups-denied','capabilities','capget','prctl','fsuid','setresuid','uid-setters','credential-setters') and {n:numbers.get(n) for n in ('getgroups','setgroups','mprotect')}!={'getgroups':158,'setgroups':159,'mprotect':226}:raise ValueError('Linux supplementary-group syscall ABI differs')
     if profile in ('setgroups-denied','capabilities','capget','prctl','fsuid','setresuid','uid-setters','credential-setters'):
-        capability=(root/'upstream/include/uapi/linux/capability.h').read_bytes()
+        capability=(upstream(root)/'include/uapi/linux/capability.h').read_bytes()
         if digest(capability)!=review['capability_abi_sha256'] or numbers.get('capget')!=90:raise ValueError('Linux capability observation ABI differs')
     if profile in ('capabilities','capget','prctl','fsuid','setresuid','uid-setters','credential-setters') and (numbers.get('capset')!=91 or numbers.get('prctl')!=167):raise ValueError('Linux capability mutation ABI differs')
     if profile in ('prctl','fsuid','setresuid','uid-setters','credential-setters'):
         for name in ('prctl','securebits'):
-            if digest((root/('upstream/include/uapi/linux/'+name+'.h')).read_bytes())!=review[name+'_abi_sha256']:raise ValueError('Linux prctl ABI identity differs')
-        if digest((root/'upstream/kernel/prctl-dispatch-prefix.txt').read_bytes())!=review['prctl_dispatch_prefix_sha256']:raise ValueError('Linux prctl dispatch evidence differs')
+            if digest((upstream(root)/('include/uapi/linux/'+name+'.h')).read_bytes())!=review[name+'_abi_sha256']:raise ValueError('Linux prctl ABI identity differs')
+        if digest((upstream(root)/'kernel/prctl-dispatch-prefix.txt').read_bytes())!=review['prctl_dispatch_prefix_sha256']:raise ValueError('Linux prctl dispatch evidence differs')
     if profile in ('fsuid','setresuid','uid-setters','credential-setters') and numbers.get('setfsuid')!=151:raise ValueError('Linux filesystem-user syscall ABI differs')
     if profile in ('setresuid','uid-setters','credential-setters') and {n:numbers.get(n) for n in ('setresuid','getrlimit','prlimit64')}!={'setresuid':147,'getrlimit':163,'prlimit64':261}:raise ValueError('Linux saved-user/accounting syscall ABI differs')
     if profile in ('uid-setters','credential-setters') and {n:numbers.get(n) for n in ('setuid','setreuid')}!={'setuid':146,'setreuid':145}:raise ValueError('Linux user-setter syscall ABI differs')
@@ -2697,15 +2920,15 @@ def source_identity(root):
     if profile in ('fchmod','fchown','fchown-capable','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') and {n:numbers.get(n) for n in ('fchmod','fchown')}!={'fchmod':52,'fchown':55}:raise ValueError('Linux fchmod syscall ABI differs')
     if profile in ('fchown','fchown-capable','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') and {n:numbers.get(n) for n in ('capget','getgroups','setgroups')}!={'capget':90,'getgroups':158,'setgroups':159}:raise ValueError('Linux ownership observation ABI differs')
     if profile in ('fchown-capable','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') and numbers.get('capset')!=91:raise ValueError('Linux privileged ownership constructor ABI differs')
-    if profile in ('file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') and (numbers.get('prctl')!=167 or digest((root/'upstream/include/uapi/linux/capability.h').read_bytes())!=review['capability_abi_sha256']):raise ValueError('Linux file capability ABI differs')
+    if profile in ('file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') and (numbers.get('prctl')!=167 or digest((upstream(root)/'include/uapi/linux/capability.h').read_bytes())!=review['capability_abi_sha256']):raise ValueError('Linux file capability ABI differs')
     if profile in ('file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') and numbers.get('setfsgid')!=152:raise ValueError('Linux file fsgid ABI differs')
-    if profile in ('file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') and (numbers.get('setfsuid')!=151 or digest((root/'upstream/include/uapi/linux/securebits.h').read_bytes())!=review['securebits_abi_sha256']):raise ValueError('Linux file FSUID ABI differs')
+    if profile in ('file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') and (numbers.get('setfsuid')!=151 or digest((upstream(root)/'include/uapi/linux/securebits.h').read_bytes())!=review['securebits_abi_sha256']):raise ValueError('Linux file FSUID ABI differs')
     if profile in ('file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') and {n:numbers.get(n) for n in ('setgid','setregid','setresgid')}!={'setgid':144,'setregid':143,'setresgid':149}:raise ValueError('Linux combined scalar GID ABI differs')
     if profile in ('file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit'):
-        flags=(root/'upstream/include/uapi/asm-generic/fcntl.h').read_bytes()
+        flags=(upstream(root)/'include/uapi/asm-generic/fcntl.h').read_bytes()
         if digest(flags)!=extra['include/uapi/asm-generic/fcntl.h'] or re.findall(rb'^#define F_SETFL (\d+)$',flags,re.M)!=[b'4']:raise ValueError('Linux file-status ABI identity differs')
     if profile in ('file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit'):
-        if digest((root/'upstream/include/uapi/linux/prctl.h').read_bytes())!=review['prctl_abi_sha256'] or digest((root/'upstream/kernel/prctl-dispatch-prefix.txt').read_bytes())!=review['prctl_dispatch_prefix_sha256']:raise ValueError('Linux file prctl ABI/dispatch identity differs')
+        if digest((upstream(root)/'include/uapi/linux/prctl.h').read_bytes())!=review['prctl_abi_sha256'] or digest((upstream(root)/'kernel/prctl-dispatch-prefix.txt').read_bytes())!=review['prctl_dispatch_prefix_sha256']:raise ValueError('Linux file prctl ABI/dispatch identity differs')
     if profile in ('file-credentials','file-rlimit','file-limits','file-setrlimit') and {n:numbers.get(n) for n in ('setuid','setreuid','setresuid','getrlimit','prlimit64')}!={'setuid':146,'setreuid':145,'setresuid':147,'getrlimit':163,'prlimit64':261}:raise ValueError('Linux combined UID/accounting syscall ABI differs')
     if profile in ('file-rlimit','file-limits','file-setrlimit') and numbers.get('getrlimit')!=163:raise ValueError('Linux limit-query syscall ABI differs')
     if profile=='file-setrlimit' and numbers.get('setrlimit')!=164:raise ValueError('Linux limit-update syscall ABI differs')
@@ -2884,20 +3107,20 @@ def prepare(args,sources):
     root=Path(__file__).parent;capture,manifest=validate_capture(root/'native')
     if (args.capture/'capture.manifest.json').read_bytes()!=(root/'native/capture.manifest.json').read_bytes() or (args.capture/'capture.json').read_bytes()!=(root/'native/capture.json').read_bytes():raise ValueError('Linux capture input differs from pinned bundle')
     review,found=source_identity(root/'native')
-    if profile_for(capture) in ('fstat','fchmod','fchown','fchown-capable','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit'):shutil.copyfile(root/'native/upstream/include/uapi/asm-generic/stat.h',sources/'upstream_stat.h')
-    if profile_for(capture) in ('file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit'):shutil.copyfile(root/'native/upstream/include/uapi/linux/capability.h',sources/'upstream_capability.h')
+    if profile_for(capture) in ('fstat','fchmod','fchown','fchown-capable','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit'):shutil.copyfile(upstream(root/'native')/'include/uapi/asm-generic/stat.h',sources/'upstream_stat.h')
+    if profile_for(capture) in ('file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit'):shutil.copyfile(upstream(root/'native')/'include/uapi/linux/capability.h',sources/'upstream_capability.h')
     if profile_for(capture) in ('file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit'):
-        shutil.copyfile(root/'native/upstream/include/uapi/linux/securebits.h',sources/'upstream_securebits.h')
-        filesystem=(root/'native/upstream/include/linux/capability.h').read_bytes()
+        shutil.copyfile(upstream(root/'native')/'include/uapi/linux/securebits.h',sources/'upstream_securebits.h')
+        filesystem=(upstream(root/'native')/'include/linux/capability.h').read_bytes()
         (sources/'upstream_fs_capability.h').write_bytes(filesystem[:filesystem.index(b'static inline kernel_cap_t cap_drop(')])
-    if profile_for(capture) in ('file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit'):shutil.copyfile(root/'native/upstream/include/uapi/asm-generic/fcntl.h',sources/'upstream_fcntl.h')
-    if profile_for(capture) in ('file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit'):shutil.copyfile(root/'native/upstream/include/uapi/linux/prctl.h',sources/'upstream_prctl.h')
+    if profile_for(capture) in ('file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit'):shutil.copyfile(upstream(root/'native')/'include/uapi/asm-generic/fcntl.h',sources/'upstream_fcntl.h')
+    if profile_for(capture) in ('file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit'):shutil.copyfile(upstream(root/'native')/'include/uapi/linux/prctl.h',sources/'upstream_prctl.h')
     for name in ('model.h','models.c','adapter.c','checkpoint-policy.json'):shutil.copyfile(root/name,sources/name)
-    if profile_for(capture) in ('capabilities','capget','prctl','fsuid','setresuid','uid-setters','credential-setters'):shutil.copyfile(root/'native/upstream/include/uapi/linux/capability.h',sources/'upstream_capability.h')
+    if profile_for(capture) in ('capabilities','capget','prctl','fsuid','setresuid','uid-setters','credential-setters'):shutil.copyfile(upstream(root/'native')/'include/uapi/linux/capability.h',sources/'upstream_capability.h')
     if profile_for(capture) in ('prctl','fsuid','setresuid','uid-setters','credential-setters'):
-        for name in ('prctl','securebits'):shutil.copyfile(root/('native/upstream/include/uapi/linux/'+name+'.h'),sources/('upstream_'+name+'.h'))
+        for name in ('prctl','securebits'):shutil.copyfile(upstream(root/'native')/('include/uapi/linux/'+name+'.h'),sources/('upstream_'+name+'.h'))
     if profile_for(capture) in ('fsuid','setresuid','uid-setters','credential-setters'):
-        filesystem=(root/'native/upstream/include/linux/capability.h').read_bytes()
+        filesystem=(upstream(root/'native')/'include/linux/capability.h').read_bytes()
         (sources/'upstream_fs_capability.h').write_bytes(filesystem[:filesystem.index(b'static inline kernel_cap_t cap_drop(')])
     declarations=b'\n'.join((v['declaration']+';').encode() for v in found.values() if not v['syscall'])+b'\n' if profile_for(capture) in ('setresuid','uid-setters','credential-setters','fd-dup','file-io','file-positioned','fd-control','close-range','fstat','fchmod','fchown','fchown-capable','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit') else b''
     (sources/'syscalls.c').write_bytes(b'// SPDX-License-Identifier: GPL-2.0\n/* Original reviewed Linux syscall bodies; only SYSCALL_DEFINE wrappers are expanded. */\n#include "model.h"\n'+declarations+b'\n'.join((('long linux_'+n+'('+v['signature']+')' if v['syscall'] else v['declaration'])+'\n').encode()+v['body']+b'\n' for n,v in sorted(found.items(),key=lambda item:item[1]['syscall'])))
@@ -2905,11 +3128,11 @@ def prepare(args,sources):
         # Linux disables this warning: retain its original signed/unsigned
         # comparisons without weakening diagnostics on the reviewed models.
         # A default kernel build has no -Wextra either: the fd-control bodies keep their unused parameters.
-        ignored=b'#pragma GCC diagnostic ignored "-Wunused-parameter"\n' if profile_for(capture)=='fd-control' else b''
+        ignored=b'#pragma GCC diagnostic ignored "-Wunused-parameter"\n' if profile_for(capture) in ('fd-control','file-setrlimit') else b''
         p=sources/'syscalls.c';p.write_bytes(b'#pragma GCC diagnostic push\n#pragma GCC diagnostic ignored "-Wsign-compare"\n'+ignored+p.read_bytes()+b'#pragma GCC diagnostic pop\n')
     capture_sources(root,sources,capture)
     if profile_for(capture)=='fd-control':
-        for name,original in FD_CONTROL_ASSEMBLY.items():(sources/name).write_bytes((root/'native/upstream'/original).read_bytes())
+        for name,original in FD_CONTROL_ASSEMBLY.items():(sources/name).write_bytes((upstream(root/'native')/original).read_bytes())
         kernel_headers(root,sources,(root/'native/kernel.config').read_text())
         shutil.copyfile(root/'entry-glue.S',sources/'entry-glue.S')
     dependencies=['current task and parent IDs','initial user-namespace credentials','sequential xchg','single-task RCU balance','bounded 32-bit put_user']

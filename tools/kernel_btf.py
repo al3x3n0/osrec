@@ -71,15 +71,25 @@ class BTF(TypeTable):
                     member,target,bits=struct.unpack_from('<III',data,p);p+=12
                     t['members'].append((self.text(member),target,bits&0xffffff if info>>31 else bits,bits>>24 if info>>31 else 0))
             elif kind in ('enum','func_proto'):p+=8*count
-            elif kind in ('datasec','enum64'):p+=12*count
+            elif kind=='datasec':
+                # Variables of a data section: (var type id, byte offset in the section, size).
+                t['vars']=[struct.unpack_from('<III',data,p+12*k) for k in range(count)];p+=12*count
+            elif kind=='enum64':p+=12*count
             self.types.append(t)
         if p!=len(data):raise ValueError('truncated BTF type section')
         self.records={}
         for i,t in enumerate(self.types[1:],1):
             if t['kind']=='struct' and t['name'] and t['value']:self.records.setdefault(t['name'],[]).append(i)
     def text(self,offset):return self.strings[offset:self.strings.index(b'\0',offset)].decode()
+    def section_variable(self,section,name):
+        """(byte offset in `section`, size, type id) of a BTF variable, e.g. a per-CPU variable in .data..percpu."""
+        for t in self.types[1:]:
+            if t['kind']=='datasec' and t['name']==section:
+                for var,offset,size in t['vars']:
+                    if self.types[var]['name']==name:return offset,size,self.types[var]['value']
+        raise KeyError('%s has no variable %s'%(section,name))
 
-PATH=re.compile(r'(->|\.)([A-Za-z_][A-Za-z_0-9]*)|\[(\d+)\]|-><([A-Za-z_]\w*)\.([A-Za-z_]\w*)>')
+PATH=re.compile(r'(->|\.)([A-Za-z_][A-Za-z_0-9]*)|\[(\d+)\]|-><([A-Za-z_]\w*)\.([A-Za-z_]\w*)>|->\(([A-Za-z_]\w*)\)')
 def resolve(btf,read,address,record,path):
     """Read a scalar at `path` below a `record` object; `read(address,size)` returns int."""
     current=btf.struct(record);place=address;position=0
@@ -96,6 +106,14 @@ def resolve(btf,read,address,record,path):
             record=btf.struct(m.group(4));offset,member=btf.member(record,m.group(5))
             if btf.strip(member)!=btf.strip(t['value']):raise ValueError('container member type differs in '+path)
             place-=offset;current=record
+        elif m.group(6):
+            # `->(record)`: an untyped (`void *`) pointer the reviewed binding names as a `struct record`.
+            if t['kind']!='ptr':raise ValueError('cast step on non-pointer in '+path)
+            target=t['value']
+            while target and btf.types[target]['kind'] in QUALIFIERS:target=btf.types[target]['value']
+            if target:raise ValueError('cast step on a typed pointer in '+path)
+            place=read(place,btf.sizeof(current));current=btf.struct(m.group(6))
+            if not place:raise ValueError('null pointer in '+path)
         elif m.group(1)=='->':
             if t['kind']!='ptr':raise ValueError('-> on non-pointer in '+path)
             place=read(place,btf.sizeof(current));current=t['value']

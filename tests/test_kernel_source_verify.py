@@ -58,6 +58,22 @@ class LinkedObject(unittest.TestCase):
         code,_,(mismatched,_,_)=self.check('padded')
         self.assertEqual(len(code),128);self.assertEqual(mismatched,[])
 
+    def test_whole_audit_counts_sized_assembly_and_keeps_gaps(self):
+        import json
+        from unittest.mock import patch
+        shutil.copyfile(self.tmp/'a.elf',self.tmp/'vmlinux')
+        entry=dict(directory=str(self.tmp),file='a.s',command='unused')
+        (self.tmp/'compile_commands.json').write_text(json.dumps([entry]))
+        def compile_again(_entry,out):shutil.copyfile(self.tmp/'a.o',out)
+        with patch.object(ksv,'compile_unit',compile_again):
+            result=ksv.verify_all(self.tmp,workers=1)
+        functions=result['units'][0]['functions']
+        self.assertTrue(any(f['function']=='padded' and f['status']=='identical' for f in functions))
+        self.assertFalse(result['complete'])
+        self.assertLess(result['verified_bytes'],result['executable_bytes'])
+        # The branch outside every sized function is still unverified.
+        self.assertTrue(any(int(g['address'],16)<=self.address['entry']+16<int(g['address'],16)+g['size'] for g in result['gaps']))
+
     def test_changed_word_is_reported(self):
         code,relocated=self.obj.function('padded');live=bytearray(self.image.read(self.address['padded'],len(code)))
         live[4]^=1

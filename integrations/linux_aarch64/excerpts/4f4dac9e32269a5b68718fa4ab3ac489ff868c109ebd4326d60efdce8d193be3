@@ -1,0 +1,78 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Reviewed original Linux v6.10 kernel/futex/futex.h definitions. */
+
+static inline unsigned int futex_to_flags(unsigned int op)
+{
+	unsigned int flags = FLAGS_SIZE_32;
+
+	if (!(op & FUTEX_PRIVATE_FLAG))
+		flags |= FLAGS_SHARED;
+
+	if (op & FUTEX_CLOCK_REALTIME)
+		flags |= FLAGS_CLOCKRT;
+
+	return flags;
+}
+
+static inline bool should_fail_futex(bool fshared)
+{
+	return false;
+}
+
+static inline int futex_match(union futex_key *key1, union futex_key *key2)
+{
+	return (key1 && key2
+		&& key1->both.word == key2->both.word
+		&& key1->both.ptr == key2->both.ptr
+		&& key1->both.offset == key2->both.offset);
+}
+
+static inline void futex_hb_waiters_inc(struct futex_hash_bucket *hb)
+{
+#ifdef CONFIG_SMP
+	atomic_inc(&hb->waiters);
+	/*
+	 * Full barrier (A), see the ordering comment above.
+	 */
+	smp_mb__after_atomic();
+#endif
+}
+
+static inline void futex_hb_waiters_dec(struct futex_hash_bucket *hb)
+{
+#ifdef CONFIG_SMP
+	atomic_dec(&hb->waiters);
+#endif
+}
+
+static inline int futex_hb_waiters_pending(struct futex_hash_bucket *hb)
+{
+#ifdef CONFIG_SMP
+	/*
+	 * Full barrier (B), see the ordering comment above.
+	 */
+	smp_mb();
+	return atomic_read(&hb->waiters);
+#else
+	return 1;
+#endif
+}
+
+static inline void
+double_lock_hb(struct futex_hash_bucket *hb1, struct futex_hash_bucket *hb2)
+{
+	if (hb1 > hb2)
+		swap(hb1, hb2);
+
+	spin_lock(&hb1->lock);
+	if (hb1 != hb2)
+		spin_lock_nested(&hb2->lock, SINGLE_DEPTH_NESTING);
+}
+
+static inline void
+double_unlock_hb(struct futex_hash_bucket *hb1, struct futex_hash_bucket *hb2)
+{
+	spin_unlock(&hb1->lock);
+	if (hb1 != hb2)
+		spin_unlock(&hb2->lock);
+}

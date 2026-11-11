@@ -405,3 +405,67 @@ struct ucounts *current_ucounts(void){return current_cred()->ucounts;}
 /* The reviewed sequential task has an unlimited NPROC limit. Exec/fork and
  * external accounting consumers are outside this profile. */
 bool is_rlimit_overlimit(const struct ucounts *p,int type,uint64_t limit){(void)p;(void)type;(void)limit;return false;}
+
+/* fs/read_write.c vfs_writev on the regular file store (vfs_write above): FMODE_WRITE (both files of this model can
+ * write, so FMODE_CAN_WRITE holds), then import_iovec's checks on the iovec in the admitted call buffer (more than
+ * UIO_MAXIOV segments, or a negative length, is EINVAL; a length is clamped to MAX_RW_COUNT in total), then the
+ * segments in order through the store, as the shmem write_iter does. More than UIO_FASTIOV segments would kmalloc
+ * the iovec array, which this model does not hold. */
+ssize_t vfs_writev(struct file *p,const struct iovec __user *vec,unsigned long vlen,loff_t *pos,rwf_t flags)
+{
+    (void)flags;
+    if(!(p->f_mode&FMODE_WRITE))return -EBADF;
+    if(vlen>UIO_MAXIOV)return -EINVAL;
+    if(linux_assert(vlen>UIO_FASTIOV))return -ENOMEM;
+    uint64_t base[UIO_FASTIOV],length[UIO_FASTIOV],total=0;
+    for(unsigned long i=0;i<vlen;++i){
+        uint32_t w[4];const uint32_t *entry=(const uint32_t *)((uintptr_t)vec+16*i);
+        for(unsigned j=0;j<4;++j)if(linux_get_user_u32(&w[j],entry+j))return -EFAULT;
+        base[i]=(uint64_t)w[1]<<32|w[0];length[i]=(uint64_t)w[3]<<32|w[2];
+        if((int64_t)length[i]<0)return -EINVAL;
+        if(length[i]>MAX_RW_COUNT-total)length[i]=MAX_RW_COUNT-total;
+        total+=length[i];
+    }
+    if(!total)return 0;
+    ssize_t written=0;
+    for(unsigned long i=0;i<vlen;++i){
+        if(!length[i])continue;
+        ssize_t r=regular_transfer(p,(uintptr_t)base[i],(size_t)length[i],pos,1);
+        if(r<0){if(!written)written=r;break;}
+        written+=r;
+        if((uint64_t)r<length[i])break;
+    }
+    return written;
+}
+/* Below do_futex: a private FUTEX_WAKE or FUTEX_WAIT with no waiter. get_futex_key rejects an unaligned word (EINVAL)
+ * and one access_ok refuses (EFAULT); a shared word's key pins its page, outside this model. A wake finds no waiter
+ * (0); a wait reads the word and returns EAGAIN when it changed, and would sleep (outside the slice) otherwise. */
+static int futex_word_check(u32 __user *uaddr,unsigned int flags)
+{
+    if((uintptr_t)uaddr%sizeof(u32))return -EINVAL;
+    if((uintptr_t)uaddr>(UINT64_C(1)<<48)-sizeof(u32))return -EFAULT;
+    if(linux_assert(flags&FLAGS_SHARED))return -EFAULT;
+    return 0;
+}
+int futex_wake(u32 __user *uaddr,unsigned int flags,int nr_wake,u32 bitset)
+{
+    (void)nr_wake;
+    if(!bitset)return -EINVAL;
+    return futex_word_check(uaddr,flags);
+}
+int futex_wait(u32 __user *uaddr,unsigned int flags,u32 val,ktime_t *abs_time,u32 bitset)
+{
+    if(!bitset)return -EINVAL;
+    if(linux_assert(abs_time!=0))return -EINVAL;
+    int ret=futex_word_check(uaddr,flags);if(ret)return ret;
+    uint32_t uval;if(linux_get_user_u32(&uval,uaddr))return -EFAULT;
+    if(uval!=val)return -EAGAIN;
+    linux_assert(1);return -EINVAL;
+}
+int get_timespec64(struct timespec64 *ts,const struct __kernel_timespec __user *u){(void)ts;(void)u;linux_assert(1);return -EFAULT;}
+int futex_init_timeout(u32 cmd,u32 op,struct timespec64 *ts,ktime_t *t){(void)cmd;(void)op;(void)ts;(void)t;linux_assert(1);return -EINVAL;}
+int futex_requeue(u32 __user *u1,unsigned int f1,u32 __user *u2,unsigned int f2,int nr_wake,int nr_requeue,u32 *cmpval,int pi){(void)u1;(void)f1;(void)u2;(void)f2;(void)nr_wake;(void)nr_requeue;(void)cmpval;(void)pi;linux_assert(1);return -ENOSYS;}
+int futex_wake_op(u32 __user *u1,unsigned int flags,u32 __user *u2,int nr_wake,int nr_wake2,int op){(void)u1;(void)flags;(void)u2;(void)nr_wake;(void)nr_wake2;(void)op;linux_assert(1);return -ENOSYS;}
+int futex_lock_pi(u32 __user *u,unsigned int flags,ktime_t *time,int trylock){(void)u;(void)flags;(void)time;(void)trylock;linux_assert(1);return -ENOSYS;}
+int futex_unlock_pi(u32 __user *u,unsigned int flags){(void)u;(void)flags;linux_assert(1);return -ENOSYS;}
+int futex_wait_requeue_pi(u32 __user *u,unsigned int flags,u32 val,ktime_t *time,u32 bitset,u32 __user *u2){(void)u;(void)flags;(void)val;(void)time;(void)bitset;(void)u2;linux_assert(1);return -ENOSYS;}

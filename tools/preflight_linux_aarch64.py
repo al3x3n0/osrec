@@ -49,7 +49,7 @@ def inspect_profile(profile, review=None):
         'result_register': 0, 'continuation': 'svc-pc-plus-4',
     }:
         raise ValueError('Linux AArch64 application ABI differs')
-    abi_text = (integration / 'upstream/include/uapi/asm-generic/unistd.h').read_text()
+    abi_text = (review.upstream(integration) / 'include/uapi/asm-generic/unistd.h').read_text()
     abi = {name: int(number) for name, number in re.findall(
         r'^#define __NR(?:3264)?_(\w+)\s+(\d+)\s*$', abi_text, re.M)}
     reported_routes = []

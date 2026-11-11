@@ -66,7 +66,8 @@ def native_argument_header(port):
     text='/* Generated from the reviewed port argument kinds. Capture only. */\n'
     text+='static unsigned osrec_native_buffer_object(uint64_t syscall,unsigned argument)\n{\n    switch(syscall){\n'
     for route in port['roots']:
-        buffers=[j for j,kind in enumerate(route['arguments']) if kind=='buffer']
+        # An iovec array is in the witness buffer too (its segment bases are offsets again when recorded).
+        buffers=[j for j,kind in enumerate(route['arguments']) if kind in ('buffer','iovec')]
         if not buffers:continue
         text+='    case UINT64_C('+str(route['number'])+'):\n'
         for j in buffers:
@@ -104,7 +105,8 @@ def capture(args):
     producer_hashes={n:digest((ROOT/'tools'/n).read_bytes()) for n in ('capture_linux_aarch64.py','minimal_ext2.py' if root=='disk' else 'minimal_initramfs.py','compile_c_application.py')}
     out.mkdir(parents=True);stage=out/'sources';stage.mkdir()
     import shutil
-    shutil.copytree(integration/'upstream',out/'upstream')
+    # The capture records the profile's excerpts by manifest (prepare.py's excerpt store), materialized on use.
+    review.copy_excerpts(integration,out)
     (out/'source-identity.json').write_bytes((integration/'source-identity.json').read_bytes())
     port=json.loads((integration/'port-template.json').read_text())
     (stage/'linux-native-arguments.h').write_text(native_argument_header(port))
@@ -151,7 +153,7 @@ def capture(args):
     if profile=='setgroups-denied':
         command.insert(1,'-DOSREC_LINUX_SETGROUPS_DENIED_PROFILE')
     if profile in ('setgroups-denied','capabilities','capget','prctl','fsuid','setresuid','uid-setters','credential-setters','file-capabilities','file-fsgid','file-fsuid','file-groups','file-group-setters','file-status','file-capget','file-prctl','file-credentials','file-rlimit','file-limits','file-setrlimit'):
-        shutil.copyfile(integration/'upstream/include/uapi/linux/capability.h',stage/'linux-capability.h')
+        shutil.copyfile(review.upstream(integration)/'include/uapi/linux/capability.h',stage/'linux-capability.h')
     subprocess.run(command,check=True,capture_output=True,text=True,timeout=60)
     if root=='disk':disk=out/'root.ext2';disk.write_bytes(root_disk(elf.read_bytes()))
     else:disk=out/'root.cpio';disk.write_bytes(initramfs(elf.read_bytes()))

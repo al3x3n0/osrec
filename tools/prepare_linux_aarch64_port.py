@@ -19,7 +19,7 @@ def build_bundle(capture,out):
     # identified by hash and supplied separately when making a new capture.
     native=out/'native';native.mkdir()
     for name in ('capture.json','capture.manifest.json','kernel.config','init','root.ext2','qemu.log','source-identity.json'):shutil.copyfile(capture/name,native/name)
-    shutil.copytree(capture/'sources',native/'sources');shutil.copytree(capture/'upstream',native/'upstream')
+    shutil.copytree(capture/'sources',native/'sources');shutil.copytree(review.upstream(capture),native/'upstream',ignore=shutil.ignore_patterns(review.EXCERPT_STAMP))  # a bundle is self-contained: excerpts materialized, no store reference
     if (out/'application.c').read_bytes()!=(native/'sources/application.c').read_bytes():raise ValueError('application differs from captured native source')
     count=len(observed['calls'])
     spec=dict(call_sites=['prefix']*8+['default']*(count-8),frame=dict(tpidr_el0=0x123456789,tpidrro_el0=0xabcde0012,v=[[0x1020304050607000+i,0xaabbccddeeff0000+i] for i in range(32)],fpcr=0x400000,fpsr=16),objects=[dict(symbol='app_words',bytes=32,id=1)],assertions=[dict(symbol='app_returns',data=struct.pack('<'+str(count)+'Q',*[c['raw_bits'] for c in observed['calls']]).hex()),dict(symbol='app_count',data=struct.pack('<Q',count).hex()),dict(symbol='app_words',data=struct.pack('<8I',*observed['calls'][-1]['words']).hex())])

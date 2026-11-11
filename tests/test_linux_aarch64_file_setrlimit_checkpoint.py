@@ -16,17 +16,20 @@ def prepare_capture(dst):
 class LinuxFileSetrlimitTests(unittest.TestCase):
     def test_original_helper_witness_complete_routes_and_input_snapshots(self):
         r=reviewed_adapter();p=profile_integration('file-setrlimit');identity,defs=r.source_identity(p);old,_=r.source_identity(profile_integration('file-limits'))
-        self.assertEqual(len(defs),111);self.assertEqual({n:identity['definitions'][n] for n in old['definitions']},old['definitions']);self.assertEqual(identity['additional_sources'],old['additional_sources'])
+        self.assertEqual(len(defs),118);self.assertEqual({n:identity['definitions'][n] for n in old['definitions']},old['definitions'])
+        # writev and futex add their originals: the two futex excerpts, and writev/do_writev in fs/read_write.c.
+        self.assertEqual(set(defs)-set(old['definitions']),{'setrlimit','do_prlimit','writev','do_writev','futex','do_futex','futex_cmd_has_timeout','futex_to_flags','should_fail_futex'})
+        self.assertEqual({k:v for k,v in identity['additional_sources'].items() if k not in ('fs/read_write.c','kernel/futex/syscalls.c','kernel/futex/futex.h')},{k:v for k,v in old['additional_sources'].items() if k!='fs/read_write.c'})
         self.assertEqual(defs['do_prlimit']['declaration'].split('(')[0],'static int do_prlimit');self.assertIn(b'*rlim = *new_rlim;',defs['do_prlimit']['body']);self.assertIn(b'copy_from_user(&new_rlim, rlim, sizeof(*rlim))',defs['setrlimit']['body'])
         self.assertEqual(generate('file-setrlimit'),(p/'application.c').read_text());self.assertEqual((p/'application.c').read_bytes(),(FIXTURE/'sources/application.c').read_bytes())
-        routes={v['number'] for v in json.loads((p/'port-template.json').read_text())['roots']};union={v['number'] for profile in PROFILES for v in json.loads((profile_integration(profile)/'port-template.json').read_text())['roots']};self.assertEqual(routes,union);self.assertEqual(len(routes),39)
+        routes={v['number'] for v in json.loads((p/'port-template.json').read_text())['roots']};union={v['number'] for profile in PROFILES for v in json.loads((profile_integration(profile)/'port-template.json').read_text())['roots']};self.assertEqual(routes,union);self.assertEqual(len(routes),41)
         for i,(_,_,data) in enumerate(r.file_setrlimit_plan()):
             expected=list(data) if data is not None else [0xa5a50000+j for j in range(8)];words=r.input_words('file-setrlimit',i);self.assertEqual(words,expected);words[0]^=1;self.assertEqual(r.input_words('file-setrlimit',i),expected)
         self.assertNotIn('int do_prlimit(', (p/'models.c').read_text());self.assertNotIn('int do_prlimit(', (p/'model.h').read_text())
     def test_live_limit_changes_descriptor_admission_and_joint_resumes(self):
         with tempfile.TemporaryDirectory(prefix='osrec-linux-file-setrlimit-') as name:
             stage=Path(name);native=prepare_capture(stage/'native');r=reviewed_adapter();c,_=r.validate_capture(native);rows,states=r.projection(c);plan=r.file_setrlimit_plan();names={n:i for i,(n,_,_) in enumerate(plan)};at=lambda n:rows[names['file_setrlimit_'+n]]
-            self.assertEqual(len(rows),973);self.assertEqual(at('lower_nofile')['file_all_rlimits_after'][7],[4,8])
+            self.assertEqual(len(rows),983);self.assertEqual(at('lower_nofile')['file_all_rlimits_after'][7],[4,8])
             for n,errno in [('dup_denied',24),('dup3_denied',9),('fcntl_min_denied',22),('hard_raise_denied',1),('soft_exceeds_hard',22),('invalid_resource',22),('invalid_null',14),('null_nofile',14),('bad_pointer',14),('guard_pointer',14),('partial_input',14),('raise_memlock_hard_denied',1),('raise_nofile_hard_denied',1)]:self.assertEqual(at(n)['raw_bits'],(1<<64)-errno,n)
             self.assertEqual(at('existing_fd_usable')['raw_bits'],1);self.assertEqual(at('dup_restored')['raw_bits'],4);self.assertEqual(at('read_restored_nofile')['words'][4:],[8,0,8,0])
             self.assertEqual(at('unchanged_after_fault')['file_all_rlimits_after'][7],[8,8]);self.assertEqual(at('read_wide_core')['words'][1:5],[3,1,0xffffffff,0xffffffff])
@@ -38,12 +41,12 @@ class LinuxFileSetrlimitTests(unittest.TestCase):
                 if entry['number']==164:
                     self.assertEqual(row['words'],row['input_words'])
                     if row['raw_bits']:self.assertEqual(states[i],states[i+1],n)
-            result=run(SimpleNamespace(capture=native,out=stage/'pipeline',llvm_bin=LLVM,qemu=QEMU));self.assertEqual((result['logical_calls'],len(result['syscalls']),result['qemu_matrix_executions']),(973,39,32));self.assertFalse(result['runtime_host_interaction']);self.assertEqual((result['context_bytes'],result['record_bytes']),(1784,1552))
+            result=run(SimpleNamespace(capture=native,out=stage/'pipeline',llvm_bin=LLVM,qemu=QEMU));self.assertEqual((result['logical_calls'],len(result['syscalls']),result['qemu_matrix_executions']),(983,41,32));self.assertFalse(result['runtime_host_interaction']);self.assertEqual((result['context_bytes'],result['record_bytes']),(1784,1552))
             self.assertEqual(result['pause_ordinals'],[names['file_setrlimit_'+n]+1 for n in ('dup_denied','dup_restored','wide_core','lower_memlock_hard','raise_memlock_hard_denied','raise_nofile_hard_denied')])
             for st in result['saved_state']:
                 self.assertEqual(st['resource_limits'],rows[st['ordinal']-1]['file_all_rlimits_after']);self.assertEqual(st['nofile_limit'],st['resource_limits'][7][0])
             self.assertEqual(result['saved_state'][0]['resource_limits'][7],[4,8]);self.assertEqual(result['saved_state'][-1]['resource_limits'][7],[4,5])
-            k=json.loads((stage/'pipeline/kernel/manifest.json').read_text());self.assertEqual((k['target_observations']['verified_calls'],k['target_observations']['isolation_checks']),(2919,1946))
+            k=json.loads((stage/'pipeline/kernel/manifest.json').read_text());self.assertEqual((k['target_observations']['verified_calls'],k['target_observations']['isolation_checks']),(2949,1966))
             fields={v['path']:v for v in k['checkpoint_codec']['fields']}
             for j in range(16):
                 for field in ('rlim_cur','rlim_max'):self.assertEqual(fields[f'process_signal.rlim[{j}].{field}']['policy'],'persist')

@@ -41,8 +41,9 @@ class LinuxCloseRangeTests(unittest.TestCase):
         self.assertIn(b'for (; fd <= max_fd; fd++)',defs['__range_close']['body'])
         self.assertIn(b'bitmap_set(fdt->close_on_exec, fd, max_fd - fd + 1)',defs['__range_cloexec']['body'])
         self.assertIn(b'return fdt->max_fds - 1;',defs['last_fd']['body'])
-        names={n for n,_,_ in r.fd_control_plan()}
-        self.assertEqual([row for row in r.close_range_plan() if row[0] in names],r.fd_control_plan())
+        # close-range extends the fcntl workload without fd-control's writev and futex calls.
+        names={n for n,_,_ in r.fd_control_base_plan()}
+        self.assertEqual([row for row in r.close_range_plan() if row[0] in names],r.fd_control_base_plan())
         # Only invalid requests may contain UNSHARE: table cloning is excluded.
         for _,call,_ in r.close_range_plan():
             if call['number']==436:
@@ -74,8 +75,10 @@ class LinuxCloseRangeTests(unittest.TestCase):
             self.assertEqual(row('read_after_range_last_release')['raw_bits'],(1<<64)-9)
             changed={'close_alias_3','close_alias_4','close_alias_5','close_alias_6','last_regular_reference'}
             old=json.loads((ROOT/'tests/fixtures/linux-aarch64-fd-control-native/capture.json').read_text())
-            retained=[(n,v) for (n,_,_),v in zip(r.close_range_plan(),c['calls']) if n in {n for n,_,_ in r.fd_control_plan()}]
-            self.assertEqual({n for (n,v),prior in zip(retained,old['calls']) if v!=prior},changed)
+            base={n for n,_,_ in r.fd_control_base_plan()}
+            retained=[(n,v) for (n,_,_),v in zip(r.close_range_plan(),c['calls']) if n in base]
+            prior=[v for (n,_,_),v in zip(r.fd_control_plan(),old['calls']) if n in base]
+            self.assertEqual({n for (n,v),p in zip(retained,prior) if v!=p},changed)
             for n in changed:self.assertEqual(row(n)['raw_bits'],(1<<64)-9)
             result=run(SimpleNamespace(capture=native,out=stage/'pipeline',llvm_bin=LLVM,qemu=QEMU))
             self.assertEqual((result['logical_calls'],result['qemu_matrix_executions'],result['context_bytes'],result['record_bytes']),(267,32,960,860))

@@ -63,6 +63,18 @@ uint32_t osrec_kernel_checkpoint_check(const void *state,uint64_t next)
     }
     return OSREC_SLICE_OK;
 }
+/* An iovec array in the call buffer holds buffer offsets in its segment bases (the recorded form); the call sees them
+ * as user addresses, like a buffer argument (prepare.py application_source relocates them in the witness). */
+static void relocate_iovecs(const struct linux_observation *call,uint32_t words[8],uint64_t base)
+{
+    for(unsigned i=0;i+1<5;++i){
+        if(osrec_argument_kind(call->number,i)!=5 || call->args[i]>=32)continue;
+        for(uint64_t k=0;k<call->args[i+1] && call->args[i]+16*k+16<=32;++k){
+            unsigned at=(unsigned)(call->args[i]+16*k)/4;uint64_t v=((uint64_t)words[at+1]<<32|words[at])+base;
+            words[at]=(uint32_t)v;words[at+1]=(uint32_t)(v>>32);
+        }
+    }
+}
 static uint32_t enter(void *state,const struct osrec_slice_invocation *in,struct osrec_slice_result *out)
 {
     struct osrec_kernel_context *c=state;
@@ -75,17 +87,20 @@ static uint32_t enter(void *state,const struct osrec_slice_invocation *in,struct
     for(unsigned i=5;i<6;++i)if(in->args[i])return OSREC_SLICE_BAD_INPUT;
     for(unsigned i=0;i<5;++i){
         uint64_t expected=call->args[i];
-        if(osrec_argument_kind(in->number,i)==3)expected=expected==UINT64_MAX ? 0 : expected==UINT64_MAX-1 ? 1 : (in->number==80 ? sr->user_address : r->user_address)+expected;
+        if(osrec_argument_kind(in->number,i)==3 || osrec_argument_kind(in->number,i)==5)expected=expected==UINT64_MAX ? 0 : expected==UINT64_MAX-1 ? 1 : (in->number==80 ? sr->user_address : r->user_address)+expected;
         if(in->args[i]!=expected)return OSREC_SLICE_BAD_INPUT;
     }
-    for(unsigned i=0;i<8;++i)for(unsigned j=0;j<4;++j)if(r->image_address[4*i+j]!=(unsigned char)(linux_inputs[in->ordinal][i]>>(8*j)))return OSREC_SLICE_BAD_INPUT;
+    uint32_t before[8],after[8];
+    for(unsigned i=0;i<8;++i){before[i]=linux_inputs[in->ordinal][i];after[i]=call->words[i];}
+    relocate_iovecs(call,before,r->user_address);relocate_iovecs(call,after,r->user_address);
+    for(unsigned i=0;i<8;++i)for(unsigned j=0;j<4;++j)if(r->image_address[4*i+j]!=(unsigned char)(before[i]>>(8*j)))return OSREC_SLICE_BAD_INPUT;
     for(unsigned i=0;i<32;++i)for(unsigned j=0;j<4;++j)if(sr->image_address[4*i+j]!=(unsigned char)((0x5a5a0000u+i)>>(8*j)))return OSREC_SLICE_BAD_INPUT;
     c->active_memory=in->memory;
     uintptr_t arguments[6];for(unsigned i=0;i<6;++i)arguments[i]=(uintptr_t)in->args[i];
     out->raw=osrec_kernel_dispatch(c,in->number,arguments);
     c->active_memory=(struct osrec_user_memory){0};
     if((uint64_t)out->raw!=call->raw || osrec_kernel_checkpoint_check(c,in->ordinal+1))return OSREC_SLICE_DIVERGED;
-    for(unsigned i=0;i<8;++i)for(unsigned j=0;j<4;++j)if(r->image_address[4*i+j]!=(unsigned char)(call->words[i]>>(8*j)))return OSREC_SLICE_DIVERGED;
+    for(unsigned i=0;i<8;++i)for(unsigned j=0;j<4;++j)if(r->image_address[4*i+j]!=(unsigned char)(after[i]>>(8*j)))return OSREC_SLICE_DIVERGED;
     for(unsigned i=0;i<128;++i){if(in->number==80 && !out->raw && i>=72 && i<120)continue;if(sr->image_address[i]!=(unsigned char)(linux_stat_words[in->ordinal][i/4]>>(8*(i%4))))return OSREC_SLICE_DIVERGED;}
     return OSREC_SLICE_OK;
 }

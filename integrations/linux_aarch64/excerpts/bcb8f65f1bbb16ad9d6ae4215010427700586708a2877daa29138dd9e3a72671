@@ -1,0 +1,77 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Reviewed original Linux v6.10 kernel/locking/rwsem.c definitions (CONFIG_PREEMPT_RT unset). */
+
+static inline void rwsem_set_owner(struct rw_semaphore *sem)
+{
+	lockdep_assert_preemption_disabled();
+	atomic_long_set(&sem->owner, (long)current);
+}
+
+static inline void rwsem_clear_owner(struct rw_semaphore *sem)
+{
+	lockdep_assert_preemption_disabled();
+	atomic_long_set(&sem->owner, 0);
+}
+
+static inline bool rwsem_write_trylock(struct rw_semaphore *sem)
+{
+	long tmp = RWSEM_UNLOCKED_VALUE;
+
+	if (atomic_long_try_cmpxchg_acquire(&sem->count, &tmp, RWSEM_WRITER_LOCKED)) {
+		rwsem_set_owner(sem);
+		return true;
+	}
+
+	return false;
+}
+
+static inline int __down_write_common(struct rw_semaphore *sem, int state)
+{
+	int ret = 0;
+
+	preempt_disable();
+	if (unlikely(!rwsem_write_trylock(sem))) {
+		if (IS_ERR(rwsem_down_write_slowpath(sem, state)))
+			ret = -EINTR;
+	}
+	preempt_enable();
+	return ret;
+}
+
+static inline void __down_write(struct rw_semaphore *sem)
+{
+	__down_write_common(sem, TASK_UNINTERRUPTIBLE);
+}
+
+static inline void __up_write(struct rw_semaphore *sem)
+{
+	long tmp;
+
+	DEBUG_RWSEMS_WARN_ON(sem->magic != sem, sem);
+	/*
+	 * sem->owner may differ from current if the ownership is transferred
+	 * to an anonymous writer by setting the RWSEM_NONSPINNABLE bits.
+	 */
+	DEBUG_RWSEMS_WARN_ON((rwsem_owner(sem) != current) &&
+			    !rwsem_test_oflags(sem, RWSEM_NONSPINNABLE), sem);
+
+	preempt_disable();
+	rwsem_clear_owner(sem);
+	tmp = atomic_long_fetch_add_release(-RWSEM_WRITER_LOCKED, &sem->count);
+	if (unlikely(tmp & RWSEM_FLAG_WAITERS))
+		rwsem_wake(sem);
+	preempt_enable();
+}
+
+void __sched down_write(struct rw_semaphore *sem)
+{
+	might_sleep();
+	rwsem_acquire(&sem->dep_map, 0, 0, _RET_IP_);
+	LOCK_CONTENDED(sem, __down_write_trylock, __down_write);
+}
+
+void up_write(struct rw_semaphore *sem)
+{
+	rwsem_release(&sem->dep_map, _RET_IP_);
+	__up_write(sem);
+}

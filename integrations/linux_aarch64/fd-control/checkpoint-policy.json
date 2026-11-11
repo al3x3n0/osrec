@@ -231,6 +231,10 @@
             "flags": {
               "type": "unsigned long",
               "policy": "transient"
+            },
+            "preempt_count": {
+              "type": "uint64_t",
+              "policy": "transient"
             }
           }
         },
@@ -246,6 +250,34 @@
         },
         "flags": {
           "type": "unsigned int",
+          "policy": "transient"
+        },
+        "timer_slack_ns": {
+          "type": "uint64_t",
+          "policy": "transient"
+        },
+        "restart_block": {
+          "type": "struct restart_block",
+          "policy": "transient"
+        },
+        "nsproxy": {
+          "type": "struct nsproxy *",
+          "policy": "transient"
+        },
+        "comm": {
+          "type": "char[16]",
+          "policy": "transient"
+        },
+        "wake_q": {
+          "type": "struct wake_q_node",
+          "policy": "transient"
+        },
+        "pi_state_cache": {
+          "type": "struct futex_pi_state *",
+          "policy": "transient"
+        },
+        "pi_lock": {
+          "type": "int",
           "policy": "transient"
         }
       }
@@ -323,6 +355,10 @@
             "flags": {
               "type": "unsigned long",
               "policy": "transient"
+            },
+            "preempt_count": {
+              "type": "uint64_t",
+              "policy": "transient"
             }
           }
         },
@@ -339,6 +375,35 @@
         "flags": {
           "type": "unsigned int",
           "policy": "persist"
+        },
+        "timer_slack_ns": {
+          "type": "uint64_t",
+          "policy": "transient"
+        },
+        "restart_block": {
+          "type": "struct restart_block",
+          "policy": "transient"
+        },
+        "nsproxy": {
+          "type": "struct nsproxy *",
+          "policy": "self_reference",
+          "target": "nsproxy"
+        },
+        "comm": {
+          "type": "char[16]",
+          "policy": "transient"
+        },
+        "wake_q": {
+          "type": "struct wake_q_node",
+          "policy": "transient"
+        },
+        "pi_state_cache": {
+          "type": "struct futex_pi_state *",
+          "policy": "transient"
+        },
+        "pi_lock": {
+          "type": "int",
+          "policy": "transient"
         }
       }
     },
@@ -447,8 +512,11 @@
               },
               "mnt": {
                 "type": "struct vfsmount *",
-                "policy": "self_reference",
-                "target": "mount"
+                "policy": "context_reference",
+                "targets": [
+                  "vfs_mount.mnt"
+                ],
+                "nullable": false
               }
             }
           },
@@ -658,9 +726,49 @@
       "type": "struct super_block",
       "policy": "members",
       "members": {
-        "write_depth": {
-          "type": "int",
-          "policy": "transient"
+        "s_writers": {
+          "type": "struct sb_writers",
+          "policy": "members",
+          "members": {
+            "frozen": {
+              "type": "unsigned short",
+              "policy": "transient"
+            },
+            "rw_sem": {
+              "type": "struct percpu_rw_semaphore[3]",
+              "policy": "elements",
+              "element": {
+                "type": "struct percpu_rw_semaphore",
+                "policy": "members",
+                "members": {
+                  "rss": {
+                    "type": "struct rcu_sync",
+                    "policy": "members",
+                    "members": {
+                      "gp_state": {
+                        "type": "int",
+                        "policy": "persist"
+                      }
+                    }
+                  },
+                  "read_count": {
+                    "type": "unsigned int *",
+                    "policy": "context_reference",
+                    "targets": [
+                      "sb_read_count[0]",
+                      "sb_read_count[1]",
+                      "sb_read_count[2]"
+                    ],
+                    "nullable": false
+                  },
+                  "writer": {
+                    "type": "struct rcuwait",
+                    "policy": "transient"
+                  }
+                }
+              }
+            }
+          }
         },
         "s_fsnotify_info": {
           "type": "struct fsnotify_sb_info *",
@@ -700,6 +808,10 @@
           "type": "struct backing_dev_info *",
           "policy": "self_reference",
           "target": "noop_bdi"
+        },
+        "s_readonly_remount": {
+          "type": "int",
+          "policy": "transient"
         }
       }
     },
@@ -718,30 +830,6 @@
     "nop_mnt_idmap": {
       "type": "struct mnt_idmap",
       "policy": "transient"
-    },
-    "mount": {
-      "type": "struct vfsmount",
-      "policy": "members",
-      "members": {
-        "mnt_flags": {
-          "type": "int",
-          "policy": "persist"
-        },
-        "mnt_idmap": {
-          "type": "struct mnt_idmap *",
-          "policy": "self_reference",
-          "target": "nop_mnt_idmap"
-        },
-        "mnt_sb": {
-          "type": "struct super_block *",
-          "policy": "self_reference",
-          "target": "superblock"
-        },
-        "osrec_writers": {
-          "type": "int",
-          "policy": "transient"
-        }
-      }
     },
     "tk_core": {
       "type": "struct tk_core_model",
@@ -820,6 +908,10 @@
           },
           "swap": {
             "type": "swp_entry_t",
+            "policy": "transient"
+          },
+          "_pincount": {
+            "type": "atomic_t",
             "policy": "transient"
           }
         }
@@ -1028,7 +1120,7 @@
             }
           },
           "i_rwsem": {
-            "type": "int",
+            "type": "struct rw_semaphore",
             "policy": "transient"
           },
           "osrec_shmem": {
@@ -1099,6 +1191,506 @@
           }
         }
       }
+    },
+    "__futex_data": {
+      "type": "struct futex_data",
+      "policy": "members",
+      "members": {
+        "queues": {
+          "type": "struct futex_hash_bucket *",
+          "policy": "context_reference",
+          "targets": [
+            "futex_hash_buckets[0]"
+          ],
+          "nullable": false
+        },
+        "hashsize": {
+          "type": "uint64_t",
+          "policy": "persist"
+        }
+      }
+    },
+    "futex_hash_buckets": {
+      "type": "struct futex_hash_bucket[256]",
+      "policy": "elements",
+      "element": {
+        "type": "struct futex_hash_bucket",
+        "policy": "members",
+        "members": {
+          "waiters": {
+            "type": "atomic_t",
+            "policy": "members",
+            "members": {
+              "counter": {
+                "type": "int",
+                "policy": "persist"
+              }
+            }
+          },
+          "lock": {
+            "type": "int",
+            "policy": "transient"
+          },
+          "chain": {
+            "type": "struct plist_head",
+            "policy": "transient"
+          }
+        }
+      }
+    },
+    "vfs_mount": {
+      "type": "struct mount",
+      "policy": "members",
+      "members": {
+        "mnt_pcp": {
+          "type": "struct mnt_pcp *",
+          "policy": "self_reference",
+          "target": "mount_pcp"
+        },
+        "mnt": {
+          "type": "struct vfsmount",
+          "policy": "members",
+          "members": {
+            "mnt_flags": {
+              "type": "int",
+              "policy": "persist"
+            },
+            "mnt_idmap": {
+              "type": "struct mnt_idmap *",
+              "policy": "self_reference",
+              "target": "nop_mnt_idmap"
+            },
+            "mnt_sb": {
+              "type": "struct super_block *",
+              "policy": "self_reference",
+              "target": "superblock"
+            }
+          }
+        }
+      }
+    },
+    "mount_pcp": {
+      "type": "struct mnt_pcp",
+      "policy": "members",
+      "members": {
+        "mnt_count": {
+          "type": "int",
+          "policy": "transient"
+        },
+        "mnt_writers": {
+          "type": "int",
+          "policy": "persist"
+        }
+      }
+    },
+    "sb_read_count": {
+      "type": "unsigned int[3]",
+      "policy": "elements",
+      "element": {
+        "type": "unsigned int",
+        "policy": "persist"
+      }
+    },
+    "rcu_data": {
+      "type": "struct rcu_data",
+      "policy": "members",
+      "members": {
+        "rcu_need_heavy_qs": {
+          "type": "bool",
+          "policy": "transient"
+        },
+        "rcu_urgent_qs": {
+          "type": "bool",
+          "policy": "transient"
+        }
+      }
+    },
+    "kmalloc_size_index": {
+      "type": "uint8_t[24]",
+      "policy": "elements",
+      "element": {
+        "type": "uint8_t",
+        "policy": "persist"
+      }
+    },
+    "kmalloc_caches": {
+      "type": "struct kmem_cache *[4][14]",
+      "policy": "elements",
+      "element": {
+        "type": "struct kmem_cache *[14]",
+        "policy": "elements",
+        "element": {
+          "type": "struct kmem_cache *",
+          "policy": "context_reference",
+          "targets": [
+            "kmalloc_cache",
+            "kmalloc96_cache"
+          ],
+          "nullable": true
+        }
+      }
+    },
+    "kmalloc_cache": {
+      "type": "struct kmem_cache",
+      "policy": "members",
+      "members": {
+        "cpu_slab": {
+          "type": "struct kmem_cache_cpu *",
+          "policy": "context_reference",
+          "targets": [
+            "kmalloc_cpu"
+          ],
+          "nullable": true
+        },
+        "flags": {
+          "type": "slab_flags_t",
+          "policy": "transient"
+        },
+        "size": {
+          "type": "unsigned int",
+          "policy": "persist"
+        },
+        "object_size": {
+          "type": "unsigned int",
+          "policy": "persist"
+        },
+        "offset": {
+          "type": "unsigned int",
+          "policy": "persist"
+        },
+        "ctor": {
+          "type": "void (*)(void *)",
+          "policy": "transient"
+        },
+        "red_left_pad": {
+          "type": "unsigned int",
+          "policy": "persist"
+        }
+      }
+    },
+    "kmalloc_cpu": {
+      "type": "struct kmem_cache_cpu",
+      "policy": "members",
+      "members": {
+        "freelist": {
+          "type": "void **",
+          "policy": "context_reference",
+          "targets": [
+            "kmalloc_object"
+          ],
+          "nullable": true
+        },
+        "tid": {
+          "type": "unsigned long",
+          "policy": "persist"
+        },
+        "freelist_tid": {
+          "type": "freelist_aba_t",
+          "policy": "transient"
+        },
+        "slab": {
+          "type": "struct slab *",
+          "policy": "context_reference",
+          "targets": [
+            "kmalloc_object_slab"
+          ],
+          "nullable": true
+        }
+      }
+    },
+    "kmalloc_object": {
+      "type": "struct kmalloc_object",
+      "policy": "members",
+      "members": {
+        "words": {
+          "type": "uint64_t[24]",
+          "policy": "elements",
+          "element": {
+            "type": "uint64_t",
+            "policy": "persist"
+          }
+        }
+      }
+    },
+    "kmalloc_object_slab": {
+      "type": "struct slab",
+      "policy": "members",
+      "members": {
+        "__page_flags": {
+          "type": "unsigned long",
+          "policy": "transient"
+        },
+        "slab_cache": {
+          "type": "struct kmem_cache *",
+          "policy": "context_reference",
+          "targets": [
+            "kmalloc_cache"
+          ],
+          "nullable": true
+        }
+      }
+    },
+    "hrtimer_bases": {
+      "type": "struct hrtimer_cpu_base",
+      "policy": "members",
+      "members": {
+        "clock_base": {
+          "type": "struct hrtimer_clock_base[8]",
+          "policy": "elements",
+          "element": {
+            "type": "struct hrtimer_clock_base",
+            "policy": "members",
+            "members": {
+              "cpu_base": {
+                "type": "struct hrtimer_cpu_base *",
+                "policy": "self_reference",
+                "target": "hrtimer_bases"
+              },
+              "index": {
+                "type": "unsigned int",
+                "policy": "transient"
+              },
+              "clockid": {
+                "type": "clockid_t",
+                "policy": "transient"
+              },
+              "seq": {
+                "type": "seqcount_raw_spinlock_t",
+                "policy": "members",
+                "members": {
+                  "sequence": {
+                    "type": "uint32_t",
+                    "policy": "persist"
+                  }
+                }
+              },
+              "running": {
+                "type": "struct hrtimer *",
+                "policy": "transient"
+              }
+            }
+          }
+        }
+      }
+    },
+    "init_time_ns": {
+      "type": "struct time_namespace",
+      "policy": "transient"
+    },
+    "nsproxy": {
+      "type": "struct nsproxy",
+      "policy": "members",
+      "members": {
+        "time_ns": {
+          "type": "struct time_namespace *",
+          "policy": "self_reference",
+          "target": "init_time_ns"
+        }
+      }
+    },
+    "user_page_address": {
+      "type": "unsigned long",
+      "policy": "persist"
+    },
+    "user_folio": {
+      "type": "struct folio",
+      "policy": "members",
+      "members": {
+        "flags": {
+          "type": "uint64_t",
+          "policy": "persist"
+        },
+        "mapping": {
+          "type": "struct address_space *",
+          "policy": "transient"
+        },
+        "index": {
+          "type": "uint64_t",
+          "policy": "transient"
+        },
+        "_refcount": {
+          "type": "atomic_t",
+          "policy": "members",
+          "members": {
+            "counter": {
+              "type": "int",
+              "policy": "persist"
+            }
+          }
+        },
+        "page": {
+          "type": "struct page",
+          "policy": "transient"
+        },
+        "swap": {
+          "type": "swp_entry_t",
+          "policy": "transient"
+        },
+        "_pincount": {
+          "type": "atomic_t",
+          "policy": "transient"
+        }
+      }
+    },
+    "kmalloc96_cache": {
+      "type": "struct kmem_cache",
+      "policy": "members",
+      "members": {
+        "cpu_slab": {
+          "type": "struct kmem_cache_cpu *",
+          "policy": "context_reference",
+          "targets": [
+            "kmalloc96_cpu"
+          ],
+          "nullable": true
+        },
+        "flags": {
+          "type": "slab_flags_t",
+          "policy": "transient"
+        },
+        "size": {
+          "type": "unsigned int",
+          "policy": "persist"
+        },
+        "object_size": {
+          "type": "unsigned int",
+          "policy": "persist"
+        },
+        "offset": {
+          "type": "unsigned int",
+          "policy": "persist"
+        },
+        "ctor": {
+          "type": "void (*)(void *)",
+          "policy": "transient"
+        },
+        "red_left_pad": {
+          "type": "unsigned int",
+          "policy": "persist"
+        }
+      }
+    },
+    "kmalloc96_cpu": {
+      "type": "struct kmem_cache_cpu",
+      "policy": "members",
+      "members": {
+        "freelist": {
+          "type": "void **",
+          "policy": "context_reference",
+          "targets": [
+            "kmalloc96_object"
+          ],
+          "nullable": true
+        },
+        "tid": {
+          "type": "unsigned long",
+          "policy": "persist"
+        },
+        "freelist_tid": {
+          "type": "freelist_aba_t",
+          "policy": "transient"
+        },
+        "slab": {
+          "type": "struct slab *",
+          "policy": "context_reference",
+          "targets": [
+            "kmalloc96_object_slab"
+          ],
+          "nullable": true
+        }
+      }
+    },
+    "kmalloc96_object": {
+      "type": "struct kmalloc96_object",
+      "policy": "members",
+      "members": {
+        "words": {
+          "type": "uint64_t[12]",
+          "policy": "elements",
+          "element": {
+            "type": "uint64_t",
+            "policy": "persist"
+          }
+        }
+      }
+    },
+    "kmalloc96_object_slab": {
+      "type": "struct slab",
+      "policy": "members",
+      "members": {
+        "__page_flags": {
+          "type": "unsigned long",
+          "policy": "transient"
+        },
+        "slab_cache": {
+          "type": "struct kmem_cache *",
+          "policy": "context_reference",
+          "targets": [
+            "kmalloc96_cache"
+          ],
+          "nullable": true
+        }
+      }
+    },
+    "osrec_pgd_table": {
+      "type": "struct osrec_pgd_page",
+      "policy": "members",
+      "members": {
+        "entries": {
+          "type": "pgd_t[512]",
+          "policy": "persist"
+        }
+      }
+    },
+    "osrec_pud_table": {
+      "type": "struct osrec_pud_page",
+      "policy": "members",
+      "members": {
+        "entries": {
+          "type": "pud_t[512]",
+          "policy": "persist"
+        }
+      }
+    },
+    "osrec_pmd_table": {
+      "type": "struct osrec_pmd_page",
+      "policy": "members",
+      "members": {
+        "entries": {
+          "type": "pmd_t[512]",
+          "policy": "persist"
+        }
+      }
+    },
+    "osrec_pte_table": {
+      "type": "struct osrec_pte_page",
+      "policy": "members",
+      "members": {
+        "entries": {
+          "type": "pte_t[512]",
+          "policy": "persist"
+        }
+      }
+    },
+    "osrec_mm_value": {
+      "type": "unsigned long",
+      "policy": "persist"
+    },
+    "osrec_pud_table_pa": {
+      "type": "unsigned long",
+      "policy": "persist"
+    },
+    "osrec_pmd_table_pa": {
+      "type": "unsigned long",
+      "policy": "persist"
+    },
+    "osrec_pte_table_pa": {
+      "type": "unsigned long",
+      "policy": "persist"
+    },
+    "osrec_user_pfn": {
+      "type": "unsigned long",
+      "policy": "persist"
     }
   }
 }

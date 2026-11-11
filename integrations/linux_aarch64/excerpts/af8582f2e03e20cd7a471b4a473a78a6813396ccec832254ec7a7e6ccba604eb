@@ -1,0 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Reviewed original Linux v6.10 include/linux/rwsem.h definitions (CONFIG_PREEMPT_RT unset). */
+
+static inline int rwsem_is_locked(struct rw_semaphore *sem)
+{
+	return atomic_long_read(&sem->count) != RWSEM_UNLOCKED_VALUE;
+}

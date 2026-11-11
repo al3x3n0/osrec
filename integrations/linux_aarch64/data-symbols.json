@@ -1,0 +1,453 @@
+{
+  "format": "osrec-kernel-data-symbol-review-v1",
+  "kernel_image_sha256": "d196f8248abdddab384e4998a9714501b2932ccfafd9b8ba45112c7dea2cfa35",
+  "image_base": "0xffff800080000000",
+  "review": "The base is KIMAGE_VADDR for 48-bit VAs (CONFIG_RANDOMIZE_BASE unset); the tool also checks it against function-entry encodings. Reference offsets were found with --list and read against the v6.10 source: futex_hash loads futex_queues (ADD then LDR of __futex_data+0) and futex_init forms &__futex_data before storing futex_hashsize at +8. rcu_data: rcu_all_qs, rcu_qs and rcu_momentary_dyntick_idle form its per-CPU address (ADRP+ADD); rcu_all_qs then adds the BTF offset of rcu_urgent_qs (277) and TPIDR_EL1. kmalloc_size_index and kmalloc_caches: __kmalloc_noprof, __kmalloc_node_noprof and kmalloc_node_track_caller_noprof each form both addresses (ADRP+ADD, the inlined kmalloc_slab); the size index table ends where the cache table begins, and a live 144-byte kmalloc loads kmalloc_size_index[17] and kmalloc_caches[0][2] from them. hrtimer_bases has no reference of its own: its address is its BTF .data..percpu offset plus the section base that rcu_data's references fix. init_time_ns: __arm64_sys_futex forms its address (ADRP+ADD) for the inlined timens_ktime_to_host comparison.",
+  "symbols": {
+    "__futex_data": {
+      "source": "kernel/futex/core.c (v6.10): static struct { struct futex_hash_bucket *queues; unsigned long hashsize; } __futex_data __read_mostly __aligned(2*sizeof(long)); futex_queues and futex_hashsize are macros for its members.",
+      "layout": {
+        "size": 16,
+        "align": 16,
+        "fields": {
+          "queues": {
+            "offset": 0,
+            "size": 8,
+            "pointer_to": "futex_hash_bucket"
+          },
+          "hashsize": {
+            "offset": 8,
+            "size": 8
+          }
+        }
+      },
+      "references": [
+        {
+          "function": "futex_hash",
+          "adrp": 8,
+          "use": 12,
+          "form": "add"
+        },
+        {
+          "function": "futex_hash",
+          "adrp": 8,
+          "use": 24,
+          "form": "ldr"
+        },
+        {
+          "function": "futex_init",
+          "adrp": 52,
+          "use": 56,
+          "form": "add"
+        }
+      ],
+      "live_checks": [
+        {
+          "check": "power_of_two",
+          "field": "hashsize",
+          "minimum": 16
+        },
+        {
+          "check": "linear_map",
+          "field": "queues",
+          "align": 64
+        },
+        {
+          "check": "empty_lists",
+          "array": "queues",
+          "count": "hashsize",
+          "record": "futex_hash_bucket",
+          "stride": 64,
+          "counter": "waiters.counter",
+          "list": "chain.node_list",
+          "lock": "lock"
+        }
+      ]
+    },
+    "rcu_data": {
+      "source": "kernel/rcu/tree.c (v6.10): static DEFINE_PER_CPU_SHARED_ALIGNED(struct rcu_data, rcu_data); a per-CPU variable, so the derived address is its per-CPU link address and each CPU's copy is at that address plus the CPU's offset (arm64: TPIDR_EL1).",
+      "percpu": true,
+      "btf_record": "rcu_data",
+      "layout": {
+        "size": 960,
+        "align": 64,
+        "fields": {
+          "rcu_need_heavy_qs": {
+            "offset": 276,
+            "size": 1
+          },
+          "rcu_urgent_qs": {
+            "offset": 277,
+            "size": 1
+          }
+        }
+      },
+      "references": [
+        {
+          "function": "rcu_all_qs",
+          "adrp": 16,
+          "use": 20,
+          "form": "add"
+        },
+        {
+          "function": "rcu_qs",
+          "adrp": 16,
+          "use": 20,
+          "form": "add"
+        },
+        {
+          "function": "rcu_momentary_dyntick_idle",
+          "adrp": 8,
+          "use": 16,
+          "form": "add"
+        }
+      ],
+      "live_checks": []
+    },
+    "kmalloc_size_index": {
+      "source": "mm/slab_common.c (v6.10): u8 kmalloc_size_index[24] __ro_after_init, the kmalloc cache index of each 8-byte size class up to 192 bytes (mm/slab.h kmalloc_slab reads kmalloc_size_index[size_index_elem(size)]).",
+      "section": "ro_after_init",
+      "layout": {
+        "size": 24,
+        "align": 1,
+        "fields": {
+          "i0": {
+            "offset": 0,
+            "size": 1
+          },
+          "i1": {
+            "offset": 1,
+            "size": 1
+          },
+          "i2": {
+            "offset": 2,
+            "size": 1
+          },
+          "i3": {
+            "offset": 3,
+            "size": 1
+          },
+          "i4": {
+            "offset": 4,
+            "size": 1
+          },
+          "i5": {
+            "offset": 5,
+            "size": 1
+          },
+          "i6": {
+            "offset": 6,
+            "size": 1
+          },
+          "i7": {
+            "offset": 7,
+            "size": 1
+          },
+          "i8": {
+            "offset": 8,
+            "size": 1
+          },
+          "i9": {
+            "offset": 9,
+            "size": 1
+          },
+          "i10": {
+            "offset": 10,
+            "size": 1
+          },
+          "i11": {
+            "offset": 11,
+            "size": 1
+          },
+          "i12": {
+            "offset": 12,
+            "size": 1
+          },
+          "i13": {
+            "offset": 13,
+            "size": 1
+          },
+          "i14": {
+            "offset": 14,
+            "size": 1
+          },
+          "i15": {
+            "offset": 15,
+            "size": 1
+          },
+          "i16": {
+            "offset": 16,
+            "size": 1
+          },
+          "i17": {
+            "offset": 17,
+            "size": 1
+          },
+          "i18": {
+            "offset": 18,
+            "size": 1
+          },
+          "i19": {
+            "offset": 19,
+            "size": 1
+          },
+          "i20": {
+            "offset": 20,
+            "size": 1
+          },
+          "i21": {
+            "offset": 21,
+            "size": 1
+          },
+          "i22": {
+            "offset": 22,
+            "size": 1
+          },
+          "i23": {
+            "offset": 23,
+            "size": 1
+          }
+        }
+      },
+      "references": [
+        {
+          "function": "__kmalloc_noprof",
+          "adrp": 412,
+          "use": 416,
+          "form": "add"
+        },
+        {
+          "function": "__kmalloc_node_noprof",
+          "adrp": 412,
+          "use": 416,
+          "form": "add"
+        },
+        {
+          "function": "kmalloc_node_track_caller_noprof",
+          "adrp": 412,
+          "use": 416,
+          "form": "add"
+        }
+      ],
+      "live_checks": []
+    },
+    "kmalloc_caches": {
+      "source": "mm/slab_common.c (v6.10): struct kmem_cache *kmalloc_caches[NR_KMALLOC_TYPES][KMALLOC_SHIFT_HIGH + 1] __ro_after_init. With ZONE_DMA and MEMCG_KMEM and without RANDOM_KMALLOC_CACHES, NR_KMALLOC_TYPES is 4 (NORMAL, RECLAIM, DMA, CGROUP); SLUB with 4 KiB pages has KMALLOC_SHIFT_HIGH 13, so 14 entries per type. kmalloc_slab indexes [kmalloc_type(flags)][index]; the fields are the KMALLOC_NORMAL row.",
+      "section": "ro_after_init",
+      "layout": {
+        "size": 448,
+        "align": 8,
+        "fields": {
+          "normal_0": {
+            "offset": 0,
+            "size": 8
+          },
+          "normal_1": {
+            "offset": 8,
+            "size": 8
+          },
+          "normal_2": {
+            "offset": 16,
+            "size": 8
+          },
+          "normal_3": {
+            "offset": 24,
+            "size": 8
+          },
+          "normal_4": {
+            "offset": 32,
+            "size": 8
+          },
+          "normal_5": {
+            "offset": 40,
+            "size": 8
+          },
+          "normal_6": {
+            "offset": 48,
+            "size": 8
+          },
+          "normal_7": {
+            "offset": 56,
+            "size": 8
+          },
+          "normal_8": {
+            "offset": 64,
+            "size": 8
+          },
+          "normal_9": {
+            "offset": 72,
+            "size": 8
+          },
+          "normal_10": {
+            "offset": 80,
+            "size": 8
+          },
+          "normal_11": {
+            "offset": 88,
+            "size": 8
+          },
+          "normal_12": {
+            "offset": 96,
+            "size": 8
+          },
+          "normal_13": {
+            "offset": 104,
+            "size": 8
+          }
+        }
+      },
+      "references": [
+        {
+          "function": "__kmalloc_noprof",
+          "adrp": 124,
+          "use": 128,
+          "form": "add"
+        },
+        {
+          "function": "__kmalloc_node_noprof",
+          "adrp": 128,
+          "use": 132,
+          "form": "add"
+        },
+        {
+          "function": "kmalloc_node_track_caller_noprof",
+          "adrp": 124,
+          "use": 128,
+          "form": "add"
+        }
+      ],
+      "live_checks": []
+    },
+    "hrtimer_bases": {
+      "source": "kernel/time/hrtimer.c (v6.10): DEFINE_PER_CPU(struct hrtimer_cpu_base, hrtimer_bases); each CPU's eight clock bases (monotonic, realtime, boottime, tai; then their soft variants). __hrtimer_init points a timer at its clock base and hrtimer_active reads the base's seq and running.",
+      "percpu": true,
+      "btf_record": "hrtimer_cpu_base",
+      "btf_percpu": {
+        "calibrate": "rcu_data"
+      },
+      "layout": {
+        "size": 576,
+        "align": 64,
+        "fields": {
+          "clock_base[0].seq.seqcount.sequence": {
+            "offset": 80,
+            "size": 4
+          },
+          "clock_base[0].running": {
+            "offset": 88,
+            "size": 8
+          },
+          "clock_base[1].seq.seqcount.sequence": {
+            "offset": 144,
+            "size": 4
+          },
+          "clock_base[1].running": {
+            "offset": 152,
+            "size": 8
+          },
+          "clock_base[2].seq.seqcount.sequence": {
+            "offset": 208,
+            "size": 4
+          },
+          "clock_base[2].running": {
+            "offset": 216,
+            "size": 8
+          },
+          "clock_base[3].seq.seqcount.sequence": {
+            "offset": 272,
+            "size": 4
+          },
+          "clock_base[3].running": {
+            "offset": 280,
+            "size": 8
+          },
+          "clock_base[4].seq.seqcount.sequence": {
+            "offset": 336,
+            "size": 4
+          },
+          "clock_base[4].running": {
+            "offset": 344,
+            "size": 8
+          },
+          "clock_base[5].seq.seqcount.sequence": {
+            "offset": 400,
+            "size": 4
+          },
+          "clock_base[5].running": {
+            "offset": 408,
+            "size": 8
+          },
+          "clock_base[6].seq.seqcount.sequence": {
+            "offset": 464,
+            "size": 4
+          },
+          "clock_base[6].running": {
+            "offset": 472,
+            "size": 8
+          },
+          "clock_base[7].seq.seqcount.sequence": {
+            "offset": 528,
+            "size": 4
+          },
+          "clock_base[7].running": {
+            "offset": 536,
+            "size": 8
+          }
+        }
+      },
+      "live_checks": []
+    },
+    "init_time_ns": {
+      "source": "kernel/time/namespace.c (v6.10): struct time_namespace init_time_ns, the initial time namespace. timens_ktime_to_host (include/linux/time_namespace.h, inlined into __arm64_sys_futex for an absolute futex timeout) returns the time unchanged when current->nsproxy->time_ns is &init_time_ns.",
+      "btf_record": "time_namespace",
+      "layout": {
+        "size": 88,
+        "align": 8,
+        "fields": {
+          "user_ns": {
+            "offset": 0,
+            "size": 8
+          }
+        }
+      },
+      "references": [
+        {
+          "function": "__arm64_sys_futex",
+          "adrp": 332,
+          "use": 336,
+          "form": "add"
+        }
+      ],
+      "live_checks": []
+    },
+    "memstart_addr": {
+      "source": "arch/arm64/mm/init.c (v6.10): s64 memstart_addr __ro_after_init, PHYS_OFFSET: the physical address the linear map starts at. A physical address pa is the linear-map address PAGE_OFFSET + (pa - memstart_addr) and has the struct page at vmemmap index (pa - memstart_addr) >> PAGE_SHIFT. kernel_page_present and dma_direct_alloc load it for virt_to_phys/page_to_phys.",
+      "section": "ro_after_init",
+      "layout": {
+        "size": 8,
+        "align": 8,
+        "fields": {
+          "value": {
+            "offset": 0,
+            "size": 8
+          }
+        }
+      },
+      "references": [
+        {
+          "function": "kernel_page_present",
+          "adrp": 56,
+          "use": 72,
+          "form": "ldr"
+        },
+        {
+          "function": "dma_direct_alloc",
+          "adrp": 244,
+          "use": 256,
+          "form": "ldr"
+        }
+      ],
+      "live_checks": []
+    }
+  }
+}

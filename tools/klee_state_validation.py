@@ -146,8 +146,8 @@ static const struct osrec_user_region regions[%d]={
 static const uint64_t arguments_in[VARIANTS][6]={
 %s
 };
-__attribute__((noinline)) void osrec_boundary_done(void){for(;;)__asm__ volatile("wfe");}
-__attribute__((noinline)) void replay_fault(void){osrec_result[2]=3;osrec_boundary_done();}
+__attribute__((__noinline__)) void osrec_boundary_done(void){for(;;)__asm__ volatile("wfe");}
+__attribute__((__noinline__)) void replay_fault(void){osrec_result[2]=3;osrec_boundary_done();}
 static void osrec_live_put(uint64_t *out,const void *p,size_t n){uint64_t v=0;for(size_t i=0;i<n && i<8;++i)v|=(uint64_t)((const unsigned char *)p)[i]<<(8*i);*out=v;}
 %s
 static void (*const binds[VARIANTS])(struct osrec_kernel_context *)={%s};

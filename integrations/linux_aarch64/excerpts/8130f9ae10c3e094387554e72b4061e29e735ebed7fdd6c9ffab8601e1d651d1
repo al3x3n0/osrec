@@ -1,0 +1,596 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+/* Reviewed original Linux v6.10 mm/gup.c definitions. */
+
+size_t fault_in_readable(const char __user *uaddr, size_t size)
+{
+	const char __user *start = uaddr, *end;
+	volatile char c;
+
+	if (unlikely(size == 0))
+		return 0;
+	if (!user_read_access_begin(uaddr, size))
+		return size;
+	if (!PAGE_ALIGNED(uaddr)) {
+		unsafe_get_user(c, uaddr, out);
+		uaddr = (const char __user *)PAGE_ALIGN((unsigned long)uaddr);
+	}
+	end = (const char __user *)PAGE_ALIGN((unsigned long)start + size);
+	if (unlikely(end < start))
+		end = NULL;
+	while (uaddr != end) {
+		unsafe_get_user(c, uaddr, out);
+		uaddr += PAGE_SIZE;
+	}
+
+out:
+	user_read_access_end();
+	(void)c;
+	if (size > uaddr - start)
+		return size - (uaddr - start);
+	return 0;
+}
+
+static inline struct folio *try_get_folio(struct page *page, int refs)
+{
+	struct folio *folio;
+
+retry:
+	folio = page_folio(page);
+	if (WARN_ON_ONCE(folio_ref_count(folio) < 0))
+		return NULL;
+	if (unlikely(!folio_ref_try_add(folio, refs)))
+		return NULL;
+
+	/*
+	 * At this point we have a stable reference to the folio; but it
+	 * could be that between calling page_folio() and the refcount
+	 * increment, the folio was split, in which case we'd end up
+	 * holding a reference on a folio that has nothing to do with the page
+	 * we were given anymore.
+	 * So now that the folio is stable, recheck that the page still
+	 * belongs to this folio.
+	 */
+	if (unlikely(page_folio(page) != folio)) {
+		if (!put_devmap_managed_folio_refs(folio, refs))
+			folio_put_refs(folio, refs);
+		goto retry;
+	}
+
+	return folio;
+}
+
+static void gup_put_folio(struct folio *folio, int refs, unsigned int flags)
+{
+	if (flags & FOLL_PIN) {
+		if (is_zero_folio(folio))
+			return;
+		node_stat_mod_folio(folio, NR_FOLL_PIN_RELEASED, refs);
+		if (folio_test_large(folio))
+			atomic_sub(refs, &folio->_pincount);
+		else
+			refs *= GUP_PIN_COUNTING_BIAS;
+	}
+
+	if (!put_devmap_managed_folio_refs(folio, refs))
+		folio_put_refs(folio, refs);
+}
+
+static struct folio *try_grab_folio_fast(struct page *page, int refs,
+					 unsigned int flags)
+{
+	struct folio *folio;
+
+	/* Raise warn if it is not called in fast GUP */
+	VM_WARN_ON_ONCE(!irqs_disabled());
+
+	if (WARN_ON_ONCE((flags & (FOLL_GET | FOLL_PIN)) == 0))
+		return NULL;
+
+	if (unlikely(!(flags & FOLL_PCI_P2PDMA) && is_pci_p2pdma_page(page)))
+		return NULL;
+
+	if (flags & FOLL_GET)
+		return try_get_folio(page, refs);
+
+	/* FOLL_PIN is set */
+
+	/*
+	 * Don't take a pin on the zero page - it's not going anywhere
+	 * and it is used in a *lot* of places.
+	 */
+	if (is_zero_page(page))
+		return page_folio(page);
+
+	folio = try_get_folio(page, refs);
+	if (!folio)
+		return NULL;
+
+	/*
+	 * Can't do FOLL_LONGTERM + FOLL_PIN gup fast path if not in a
+	 * right zone, so fail and let the caller fall back to the slow
+	 * path.
+	 */
+	if (unlikely((flags & FOLL_LONGTERM) &&
+		     !folio_is_longterm_pinnable(folio))) {
+		if (!put_devmap_managed_folio_refs(folio, refs))
+			folio_put_refs(folio, refs);
+		return NULL;
+	}
+
+	/*
+	 * When pinning a large folio, use an exact count to track it.
+	 *
+	 * However, be sure to *also* increment the normal folio
+	 * refcount field at least once, so that the folio really
+	 * is pinned.  That's why the refcount from the earlier
+	 * try_get_folio() is left intact.
+	 */
+	if (folio_test_large(folio))
+		atomic_add(refs, &folio->_pincount);
+	else
+		folio_ref_add(folio,
+				refs * (GUP_PIN_COUNTING_BIAS - 1));
+	/*
+	 * Adjust the pincount before re-checking the PTE for changes.
+	 * This is essentially a smp_mb() and is paired with a memory
+	 * barrier in folio_try_share_anon_rmap_*().
+	 */
+	smp_mb__after_atomic();
+
+	node_stat_mod_folio(folio, NR_FOLL_PIN_ACQUIRED, refs);
+
+	return folio;
+}
+
+static bool gup_fast_folio_allowed(struct folio *folio, unsigned int flags)
+{
+	bool reject_file_backed = false;
+	struct address_space *mapping;
+	bool check_secretmem = false;
+	unsigned long mapping_flags;
+
+	/*
+	 * If we aren't pinning then no problematic write can occur. A long term
+	 * pin is the most egregious case so this is the one we disallow.
+	 */
+	if ((flags & (FOLL_PIN | FOLL_LONGTERM | FOLL_WRITE)) ==
+	    (FOLL_PIN | FOLL_LONGTERM | FOLL_WRITE))
+		reject_file_backed = true;
+
+	/* We hold a folio reference, so we can safely access folio fields. */
+
+	/* secretmem folios are always order-0 folios. */
+	if (IS_ENABLED(CONFIG_SECRETMEM) && !folio_test_large(folio))
+		check_secretmem = true;
+
+	if (!reject_file_backed && !check_secretmem)
+		return true;
+
+	if (WARN_ON_ONCE(folio_test_slab(folio)))
+		return false;
+
+	/* hugetlb neither requires dirty-tracking nor can be secretmem. */
+	if (folio_test_hugetlb(folio))
+		return true;
+
+	/*
+	 * GUP-fast disables IRQs. When IRQS are disabled, RCU grace periods
+	 * cannot proceed, which means no actions performed under RCU can
+	 * proceed either.
+	 *
+	 * inodes and thus their mappings are freed under RCU, which means the
+	 * mapping cannot be freed beneath us and thus we can safely dereference
+	 * it.
+	 */
+	lockdep_assert_irqs_disabled();
+
+	/*
+	 * However, there may be operations which _alter_ the mapping, so ensure
+	 * we read it once and only once.
+	 */
+	mapping = READ_ONCE(folio->mapping);
+
+	/*
+	 * The mapping may have been truncated, in any case we cannot determine
+	 * if this mapping is safe - fall back to slow path to determine how to
+	 * proceed.
+	 */
+	if (!mapping)
+		return false;
+
+	/* Anonymous folios pose no problem. */
+	mapping_flags = (unsigned long)mapping & PAGE_MAPPING_FLAGS;
+	if (mapping_flags)
+		return mapping_flags & PAGE_MAPPING_ANON;
+
+	/*
+	 * At this point, we know the mapping is non-null and points to an
+	 * address_space object.
+	 */
+	if (check_secretmem && secretmem_mapping(mapping))
+		return false;
+	/* The only remaining allowed file system is shmem. */
+	return !reject_file_backed || shmem_mapping(mapping);
+}
+
+static int gup_fast_pte_range(pmd_t pmd, pmd_t *pmdp, unsigned long addr,
+		unsigned long end, unsigned int flags, struct page **pages,
+		int *nr)
+{
+	struct dev_pagemap *pgmap = NULL;
+	int nr_start = *nr, ret = 0;
+	pte_t *ptep, *ptem;
+
+	ptem = ptep = pte_offset_map(&pmd, addr);
+	if (!ptep)
+		return 0;
+	do {
+		pte_t pte = ptep_get_lockless(ptep);
+		struct page *page;
+		struct folio *folio;
+
+		/*
+		 * Always fallback to ordinary GUP on PROT_NONE-mapped pages:
+		 * pte_access_permitted() better should reject these pages
+		 * either way: otherwise, GUP-fast might succeed in
+		 * cases where ordinary GUP would fail due to VMA access
+		 * permissions.
+		 */
+		if (pte_protnone(pte))
+			goto pte_unmap;
+
+		if (!pte_access_permitted(pte, flags & FOLL_WRITE))
+			goto pte_unmap;
+
+		if (pte_devmap(pte)) {
+			if (unlikely(flags & FOLL_LONGTERM))
+				goto pte_unmap;
+
+			pgmap = get_dev_pagemap(pte_pfn(pte), pgmap);
+			if (unlikely(!pgmap)) {
+				gup_fast_undo_dev_pagemap(nr, nr_start, flags, pages);
+				goto pte_unmap;
+			}
+		} else if (pte_special(pte))
+			goto pte_unmap;
+
+		VM_BUG_ON(!pfn_valid(pte_pfn(pte)));
+		page = pte_page(pte);
+
+		folio = try_grab_folio_fast(page, 1, flags);
+		if (!folio)
+			goto pte_unmap;
+
+		if (unlikely(pmd_val(pmd) != pmd_val(*pmdp)) ||
+		    unlikely(pte_val(pte) != pte_val(ptep_get(ptep)))) {
+			gup_put_folio(folio, 1, flags);
+			goto pte_unmap;
+		}
+
+		if (!gup_fast_folio_allowed(folio, flags)) {
+			gup_put_folio(folio, 1, flags);
+			goto pte_unmap;
+		}
+
+		if (!pte_write(pte) && gup_must_unshare(NULL, flags, page)) {
+			gup_put_folio(folio, 1, flags);
+			goto pte_unmap;
+		}
+
+		/*
+		 * We need to make the page accessible if and only if we are
+		 * going to access its content (the FOLL_PIN case).  Please
+		 * see Documentation/core-api/pin_user_pages.rst for
+		 * details.
+		 */
+		if (flags & FOLL_PIN) {
+			ret = arch_make_page_accessible(page);
+			if (ret) {
+				gup_put_folio(folio, 1, flags);
+				goto pte_unmap;
+			}
+		}
+		folio_set_referenced(folio);
+		pages[*nr] = page;
+		(*nr)++;
+	} while (ptep++, addr += PAGE_SIZE, addr != end);
+
+	ret = 1;
+
+pte_unmap:
+	if (pgmap)
+		put_dev_pagemap(pgmap);
+	pte_unmap(ptem);
+	return ret;
+}
+
+static int gup_fast_pmd_range(pud_t *pudp, pud_t pud, unsigned long addr,
+		unsigned long end, unsigned int flags, struct page **pages,
+		int *nr)
+{
+	unsigned long next;
+	pmd_t *pmdp;
+
+	pmdp = pmd_offset_lockless(pudp, pud, addr);
+	do {
+		pmd_t pmd = pmdp_get_lockless(pmdp);
+
+		next = pmd_addr_end(addr, end);
+		if (!pmd_present(pmd))
+			return 0;
+
+		if (unlikely(pmd_leaf(pmd))) {
+			/* See gup_fast_pte_range() */
+			if (pmd_protnone(pmd))
+				return 0;
+
+			if (!gup_fast_pmd_leaf(pmd, pmdp, addr, next, flags,
+				pages, nr))
+				return 0;
+
+		} else if (unlikely(is_hugepd(__hugepd(pmd_val(pmd))))) {
+			/*
+			 * architecture have different format for hugetlbfs
+			 * pmd format and THP pmd format
+			 */
+			if (gup_hugepd(NULL, __hugepd(pmd_val(pmd)), addr,
+				       PMD_SHIFT, next, flags, pages, nr,
+				       true) != 1)
+				return 0;
+		} else if (!gup_fast_pte_range(pmd, pmdp, addr, next, flags,
+					       pages, nr))
+			return 0;
+	} while (pmdp++, addr = next, addr != end);
+
+	return 1;
+}
+
+static int gup_fast_pud_range(p4d_t *p4dp, p4d_t p4d, unsigned long addr,
+		unsigned long end, unsigned int flags, struct page **pages,
+		int *nr)
+{
+	unsigned long next;
+	pud_t *pudp;
+
+	pudp = pud_offset_lockless(p4dp, p4d, addr);
+	do {
+		pud_t pud = READ_ONCE(*pudp);
+
+		next = pud_addr_end(addr, end);
+		if (unlikely(!pud_present(pud)))
+			return 0;
+		if (unlikely(pud_leaf(pud))) {
+			if (!gup_fast_pud_leaf(pud, pudp, addr, next, flags,
+					       pages, nr))
+				return 0;
+		} else if (unlikely(is_hugepd(__hugepd(pud_val(pud))))) {
+			if (gup_hugepd(NULL, __hugepd(pud_val(pud)), addr,
+				       PUD_SHIFT, next, flags, pages, nr,
+				       true) != 1)
+				return 0;
+		} else if (!gup_fast_pmd_range(pudp, pud, addr, next, flags,
+					       pages, nr))
+			return 0;
+	} while (pudp++, addr = next, addr != end);
+
+	return 1;
+}
+
+static int gup_fast_p4d_range(pgd_t *pgdp, pgd_t pgd, unsigned long addr,
+		unsigned long end, unsigned int flags, struct page **pages,
+		int *nr)
+{
+	unsigned long next;
+	p4d_t *p4dp;
+
+	p4dp = p4d_offset_lockless(pgdp, pgd, addr);
+	do {
+		p4d_t p4d = READ_ONCE(*p4dp);
+
+		next = p4d_addr_end(addr, end);
+		if (!p4d_present(p4d))
+			return 0;
+		BUILD_BUG_ON(p4d_leaf(p4d));
+		if (unlikely(is_hugepd(__hugepd(p4d_val(p4d))))) {
+			if (gup_hugepd(NULL, __hugepd(p4d_val(p4d)), addr,
+				       P4D_SHIFT, next, flags, pages, nr,
+				       true) != 1)
+				return 0;
+		} else if (!gup_fast_pud_range(p4dp, p4d, addr, next, flags,
+					       pages, nr))
+			return 0;
+	} while (p4dp++, addr = next, addr != end);
+
+	return 1;
+}
+
+static void gup_fast_pgd_range(unsigned long addr, unsigned long end,
+		unsigned int flags, struct page **pages, int *nr)
+{
+	unsigned long next;
+	pgd_t *pgdp;
+
+	pgdp = pgd_offset(current->mm, addr);
+	do {
+		pgd_t pgd = READ_ONCE(*pgdp);
+
+		next = pgd_addr_end(addr, end);
+		if (pgd_none(pgd))
+			return;
+		if (unlikely(pgd_leaf(pgd))) {
+			if (!gup_fast_pgd_leaf(pgd, pgdp, addr, next, flags,
+					       pages, nr))
+				return;
+		} else if (unlikely(is_hugepd(__hugepd(pgd_val(pgd))))) {
+			if (gup_hugepd(NULL, __hugepd(pgd_val(pgd)), addr,
+				       PGDIR_SHIFT, next, flags, pages, nr,
+				       true) != 1)
+				return;
+		} else if (!gup_fast_p4d_range(pgdp, pgd, addr, next, flags,
+					       pages, nr))
+			return;
+	} while (pgdp++, addr = next, addr != end);
+}
+
+static unsigned long gup_fast(unsigned long start, unsigned long end,
+		unsigned int gup_flags, struct page **pages)
+{
+	unsigned long flags;
+	int nr_pinned = 0;
+	unsigned seq;
+
+	if (!IS_ENABLED(CONFIG_HAVE_GUP_FAST) ||
+	    !gup_fast_permitted(start, end))
+		return 0;
+
+	if (gup_flags & FOLL_PIN) {
+		seq = raw_read_seqcount(&current->mm->write_protect_seq);
+		if (seq & 1)
+			return 0;
+	}
+
+	/*
+	 * Disable interrupts. The nested form is used, in order to allow full,
+	 * general purpose use of this routine.
+	 *
+	 * With interrupts disabled, we block page table pages from being freed
+	 * from under us. See struct mmu_table_batch comments in
+	 * include/asm-generic/tlb.h for more details.
+	 *
+	 * We do not adopt an rcu_read_lock() here as we also want to block IPIs
+	 * that come from THPs splitting.
+	 */
+	local_irq_save(flags);
+	gup_fast_pgd_range(start, end, gup_flags, pages, &nr_pinned);
+	local_irq_restore(flags);
+
+	/*
+	 * When pinning pages for DMA there could be a concurrent write protect
+	 * from fork() via copy_page_range(), in this case always fail GUP-fast.
+	 */
+	if (gup_flags & FOLL_PIN) {
+		if (read_seqcount_retry(&current->mm->write_protect_seq, seq)) {
+			gup_fast_unpin_user_pages(pages, nr_pinned);
+			return 0;
+		} else {
+			sanity_check_pinned_pages(pages, nr_pinned);
+		}
+	}
+	return nr_pinned;
+}
+
+static int gup_fast_fallback(unsigned long start, unsigned long nr_pages,
+		unsigned int gup_flags, struct page **pages)
+{
+	unsigned long len, end;
+	unsigned long nr_pinned;
+	int locked = 0;
+	int ret;
+
+	if (WARN_ON_ONCE(gup_flags & ~(FOLL_WRITE | FOLL_LONGTERM |
+				       FOLL_FORCE | FOLL_PIN | FOLL_GET |
+				       FOLL_FAST_ONLY | FOLL_NOFAULT |
+				       FOLL_PCI_P2PDMA | FOLL_HONOR_NUMA_FAULT)))
+		return -EINVAL;
+
+	if (gup_flags & FOLL_PIN)
+		mm_set_has_pinned_flag(&current->mm->flags);
+
+	if (!(gup_flags & FOLL_FAST_ONLY))
+		might_lock_read(&current->mm->mmap_lock);
+
+	start = untagged_addr(start) & PAGE_MASK;
+	len = nr_pages << PAGE_SHIFT;
+	if (check_add_overflow(start, len, &end))
+		return -EOVERFLOW;
+	if (end > TASK_SIZE_MAX)
+		return -EFAULT;
+	if (unlikely(!access_ok((void __user *)start, len)))
+		return -EFAULT;
+
+	nr_pinned = gup_fast(start, end, gup_flags, pages);
+	if (nr_pinned == nr_pages || gup_flags & FOLL_FAST_ONLY)
+		return nr_pinned;
+
+	/* Slow path: try to get the remaining pages with get_user_pages */
+	start += nr_pinned << PAGE_SHIFT;
+	pages += nr_pinned;
+	ret = __gup_longterm_locked(current->mm, start, nr_pages - nr_pinned,
+				    pages, &locked,
+				    gup_flags | FOLL_TOUCH | FOLL_UNLOCKABLE);
+	if (ret < 0) {
+		/*
+		 * The caller has to unpin the pages we already pinned so
+		 * returning -errno is not an option
+		 */
+		if (nr_pinned)
+			return nr_pinned;
+		return ret;
+	}
+	return ret + nr_pinned;
+}
+
+static bool is_valid_gup_args(struct page **pages, int *locked,
+			      unsigned int *gup_flags_p, unsigned int to_set)
+{
+	unsigned int gup_flags = *gup_flags_p;
+
+	/*
+	 * These flags not allowed to be specified externally to the gup
+	 * interfaces:
+	 * - FOLL_TOUCH/FOLL_PIN/FOLL_TRIED/FOLL_FAST_ONLY are internal only
+	 * - FOLL_REMOTE is internal only and used on follow_page()
+	 * - FOLL_UNLOCKABLE is internal only and used if locked is !NULL
+	 */
+	if (WARN_ON_ONCE(gup_flags & INTERNAL_GUP_FLAGS))
+		return false;
+
+	gup_flags |= to_set;
+	if (locked) {
+		/* At the external interface locked must be set */
+		if (WARN_ON_ONCE(*locked != 1))
+			return false;
+
+		gup_flags |= FOLL_UNLOCKABLE;
+	}
+
+	/* FOLL_GET and FOLL_PIN are mutually exclusive. */
+	if (WARN_ON_ONCE((gup_flags & (FOLL_PIN | FOLL_GET)) ==
+			 (FOLL_PIN | FOLL_GET)))
+		return false;
+
+	/* LONGTERM can only be specified when pinning */
+	if (WARN_ON_ONCE(!(gup_flags & FOLL_PIN) && (gup_flags & FOLL_LONGTERM)))
+		return false;
+
+	/* Pages input must be given if using GET/PIN */
+	if (WARN_ON_ONCE((gup_flags & (FOLL_GET | FOLL_PIN)) && !pages))
+		return false;
+
+	/* We want to allow the pgmap to be hot-unplugged at all times */
+	if (WARN_ON_ONCE((gup_flags & FOLL_LONGTERM) &&
+			 (gup_flags & FOLL_PCI_P2PDMA)))
+		return false;
+
+	*gup_flags_p = gup_flags;
+	return true;
+}
+
+int get_user_pages_fast(unsigned long start, int nr_pages,
+			unsigned int gup_flags, struct page **pages)
+{
+	/*
+	 * The caller may or may not have explicitly set FOLL_GET; either way is
+	 * OK. However, internally (within mm/gup.c), gup fast variants must set
+	 * FOLL_GET, because gup fast is always a "pin with a +1 page refcount"
+	 * request.
+	 */
+	if (!is_valid_gup_args(pages, NULL, &gup_flags, FOLL_GET))
+		return -EINVAL;
+	return gup_fast_fallback(start, nr_pages, gup_flags, pages);
+}
+
+static bool gup_fast_permitted(unsigned long start, unsigned long end)
+{
+	return true;
+}

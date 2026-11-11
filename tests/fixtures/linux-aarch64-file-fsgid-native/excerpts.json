@@ -1,0 +1,15 @@
+{
+ "files": {
+  "fs/file.c": "2ca43b502039d9cc59aa8a3f29bec2a6ad45db0732f6b4f6ce8f6de2e2d673c9",
+  "fs/open.c": "6ec6e90fac696061dc5995dda45741a10853793492b7c02ae2b5b558ab9c3d7e",
+  "fs/read_write.c": "4ed51c1f62d1063fe7485c4683049c6959907a67f7eef2b9e1899d1782edbea7",
+  "fs/stat.c": "dd513f2c313fc9e4022adf6d09ba83b2f3f1a230351ad9ae78e40b96a81770a8",
+  "include/uapi/asm-generic/stat.h": "a72ea1ea8861f90afec442d62a36e00f9ff4e4897aa6740ff60064cd3665d8f1",
+  "include/uapi/asm-generic/unistd.h": "593cb5a5ca652eda130873c19dc9b2329c023142f5a4379d44dc6b225292e34f",
+  "include/uapi/linux/capability.h": "2d5a272edd29df2bc7b29bc8b6ebf27db41e7210d0de47ea90518991f0ac557d",
+  "kernel/capability.c": "92852d067f95e8aaaed8a89c73b880b379a5ca6fe984f80d725ba5439f57328b",
+  "kernel/sys.c": "1619e11ffc45086ff93ee039bc7a5dcc9cc06944106d85f5444be26b47da585f",
+  "security/commoncap.c": "c8d62d65a16c297c1a6e6698118c545c8b393bb933e543d723580727952ae0c8"
+ },
+ "format": "osrec-kernel-excerpts-v1"
+}

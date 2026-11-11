@@ -96,6 +96,24 @@ void replay_main(void){osrec_result[0]=0x4f535243;osrec_result[1]=18;osrec_conte
             with self.assertRaises(ValueError):validate_port(bad)
         bad=dict(port);bad['roots']=[port['roots'][0],port['roots'][0]]
         with self.assertRaises(ValueError):validate_port(bad)
+        # Automatic-variable initialization follows the kernel's CONFIG_INIT_STACK_ALL_*.
+        for value in ('zero','pattern','none'):validate_port(dict(port,stack_init=value))
+        with self.assertRaises(ValueError):validate_port(dict(port,stack_init='uninitialized'))
+
+    def test_readonly_initializer_names_a_context_free_callback(self):
+        # futex_q_init's .wake = futex_wake_mark: a stored callback the slice never calls through.
+        header='#ifndef TOY_H\n#define TOY_H\n#include <stdint.h>\ntypedef void (*cb_t)(void);\nstruct ops {cb_t f;uint64_t v;};\nuint64_t Root(uint64_t);\n#endif\n'
+        good='static uint64_t state;static void quiet(void){}\nstatic const struct ops table={quiet,3};\nuint64_t Root(uint64_t n){return state+=n+table.v+(table.f!=0);}\n'
+        with tempfile.TemporaryDirectory() as name:
+            s=Path(name);(s/'toy.h').write_text(header);(s/'kernel.c').write_text('#include "toy.h"\n'+good)
+            plan=transform(s,['kernel.c'],['toy.h'],LLVM/'clang',include_dirs=[ROOT/'include'])
+            self.assertEqual(plan['context_functions'],['Root'])
+            text=(s/'kernel.c').read_text();self.assertIn('={osrec_kernel_quiet,3}',text.replace(' ',''))
+            run([LLVM/'clang','--target=aarch64-none-elf','-ffreestanding','-std=c11','-Wall','-Werror','-fsyntax-only','-I'+str(s),'-I'+str(ROOT/'include'),s/'kernel.c'])
+        # A callback that needs the context cannot escape through the initializer.
+        with tempfile.TemporaryDirectory() as name:
+            s=Path(name);(s/'toy.h').write_text(header);(s/'kernel.c').write_text('#include "toy.h"\n'+good.replace('static void quiet(void){}','static void quiet(void){++state;}'))
+            with self.assertRaisesRegex(ValueError,'readonly initializer'):transform(s,['kernel.c'],['toy.h'],LLVM/'clang',include_dirs=[ROOT/'include'])
 
     def test_initialized_arrays_designators_cycles_and_private_constants(self):
         with tempfile.TemporaryDirectory() as name:

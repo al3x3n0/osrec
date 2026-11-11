@@ -37,20 +37,67 @@
      "length": 3,
      "access": "write",
      "objects": [
-      "argument:ctx->file_data.bytes"
+      "argument:ctx->file_data.bytes",
+      "automatic"
      ]
     }
    ],
    "reason": "copies from user memory: writes its kernel destination span; user bytes go through the replay user-memory contract and are not kernel entry state",
-   "implementation": "models.c __arch_copy_from_user: page_span fails unless [pointer, pointer + n) lies inside file_data.bytes, then copies byte by byte through user_byte"
+   "implementation": "models.c __arch_copy_from_user: page_span fails unless [pointer, pointer + n) lies inside file_data.bytes or the slice stack (__stack_bottom..__stack_top), then copies byte by byte through user_byte"
   },
-  "osrec_kernel_linux_get_user_byte": {
+  "osrec_kernel_linux_get_user": {
+   "kind": "memory_model",
+   "writes": [
+    1
+   ],
+   "user_values": [
+    1
+   ],
+   "reason": "__get_user (unsafe_get_user) of one naturally sized user value: the user address is checked against the replay user-memory map; only the value written to *value is kernel-visible, plus the transient model fault flag. A pointer it loads (an iovec iov_base) is a user-space address",
+   "implementation": "models.c linux_get_user: fails with -EFAULT unless the size bytes lie in an object the call names (its 32-byte buffer, or a writev iovec array and segments), then copies them to *value"
+  },
+  "__builtin_return_address": {
+   "kind": "scalar_transcript",
+   "reason": "_RET_IP_ (include/linux/instruction_pointer.h): the caller's return address, a code address SLUB passes only to its slow paths and tracepoints (__slab_alloc, __slab_free, trace_kmalloc), none of which the fast paths reach; it is no kernel entry state",
+   "implementation": "Clang builtin __builtin_return_address(0)"
+  },
+  "__builtin_mul_overflow": {
    "kind": "memory_model",
    "writes": [
     2
    ],
-   "reason": "reads one user byte (unsafe_get_user): the user address is checked against the replay user-memory map; only the byte at value is kernel-visible, plus the transient model fault flag",
-   "implementation": "models.c linux_get_user_byte: fails with -EFAULT unless the address lies in the admitted 32-byte user object, then stores that byte to *value"
+   "reason": "check_mul_overflow (include/linux/overflow.h): stores the product of its two integer operands through its third argument, a local, and returns whether it overflowed; it reads no memory",
+   "implementation": "Clang builtin __builtin_mul_overflow"
+  },
+  "memset": {
+   "kind": "memory_model",
+   "spans": [
+    {
+     "pointer": 0,
+     "length": 2,
+     "access": "write",
+     "objects": [
+      "argument:ctx->kmalloc_object.words",
+      "automatic"
+     ],
+     "fill": "zero"
+    }
+   ],
+   "reason": "SLUB's init-on-alloc/free zeroing (slab_post_alloc_hook, slab_free_hook, maybe_wipe_obj_freeptr) clears the allocated object; it is reached only when init_on_alloc/init_on_free or __GFP_ZERO asks for it; __hrtimer_init zeroes an on-stack timer (automatic storage of the waiting call)",
+   "implementation": "arm64 memset.S (assembled verbatim)"
+  },
+  "__builtin_object_size": {
+   "kind": "memory_model",
+   "reason": "check_copy_size's compile-time object-size query (include/linux/thread_info.h): an integer the compiler computes from the pointer's declared object, or -1; it reads and writes no memory",
+   "implementation": "Clang builtin __builtin_object_size"
+  },
+  "__builtin_add_overflow": {
+   "kind": "memory_model",
+   "writes": [
+    2
+   ],
+   "reason": "check_add_overflow (include/linux/overflow.h): stores the sum of its two integer operands through its third argument, a local, and returns whether it overflowed; it reads no memory",
+   "implementation": "Clang builtin __builtin_add_overflow"
   }
  },
  "state_ranges": [
@@ -69,6 +116,65 @@
    "max": 64,
    "reason": "a regular file of the slice holds at most the 64-byte store (file_data); the console has size 0, so every page index below the size is 0",
    "validated_by": "live state field inode_pool[].i_size, checked against each captured state (state_range_checks)"
+  },
+  {
+   "record": "struct backing_dev_info",
+   "field": "capabilities",
+   "min": 0,
+   "max": 0,
+   "reason": "tmpfs inodes use noop_backing_dev_info, whose capabilities are 0: no BDI_CAP_WRITEBACK, so balance_dirty_pages_ratelimited returns before the dirty-throttling state",
+   "validated_by": "live precondition noop_bdi.capabilities"
+  },
+  {
+   "record": "struct uid_gid_map",
+   "field": "nr_extents",
+   "min": 0,
+   "max": 5,
+   "reason": "the slice maps hold UID_GID_MAP_MAX_BASE_EXTENTS (5) inline extents; the sorted forward/reverse arrays of larger maps are not part of the model",
+   "validated_by": "live state fields user_ns.uid_map.nr_extents, user_ns.gid_map.nr_extents"
+  },
+  {
+   "record": "struct futex_data",
+   "field": "hashsize",
+   "min": 256,
+   "max": 256,
+   "reason": "futex_init sizes the hash at roundup_pow_of_two(256 * num_possible_cpus()); the slice's bucket pool holds 256 buckets (one possible CPU), so futex_hash's index hash & (hashsize - 1) stays inside it",
+   "validated_by": "live state field __futex_data.hashsize"
+  },
+  {
+   "record": "struct futex_hash_bucket",
+   "field": "waiters.counter",
+   "min": 0,
+   "max": 0,
+   "reason": "the slice admits states where no task waits on a futex: every bucket has no waiters (and, live-checked, an empty chain), so futex_wake returns before walking a chain and a wait that queues itself faults in futex_wait_queue",
+   "validated_by": "live state field futex_hash_buckets[].waiters.counter"
+  },
+  {
+   "record": "struct osrec_kernel_context",
+   "field": "kmalloc_size_index",
+   "elements": true,
+   "min": 0,
+   "max": 13,
+   "reason": "each kmalloc_size_index entry is the kmalloc_caches index (KMALLOC_SHIFT_LOW..KMALLOC_SHIFT_HIGH, 3..13, or the 96- and 192-byte caches 1 and 2) of its 8-byte size class; setup_kmalloc_cache_index_table only stores such indexes; the size classes 129..192 (entries 16..23) are the kmalloc-192 cache, index 2, when KMALLOC_MIN_SIZE is at most 64 (arm64: 8)",
+   "validated_by": "live state field kmalloc_size_index[]",
+   "element_ranges": [
+    {
+     "indices": [
+      16,
+      23
+     ],
+     "min": 2,
+     "max": 2
+    }
+   ]
+  },
+  {
+   "record": "struct kmem_cache",
+   "field": "offset",
+   "min": 0,
+   "max": 184,
+   "reason": "the free pointer lies inside the 192-byte slice object (SLUB places it at ALIGN_DOWN(object_size / 2, sizeof(void *)) for caches without a constructor): offset + 8 <= object_size",
+   "validated_by": "live state field kmalloc_cache.offset"
   }
  ],
  "input_domains": [
@@ -139,6 +245,88 @@
    "parameter": "buf",
    "reason": "the user buffer argument is a user-space address: the slice reaches its bytes only through user-memory boundaries",
    "validated_by": "contract register of the SVC boundary observation (argument buf); user objects are admitted by the live binding"
+  },
+  {
+   "function": "osrec_kernel_linux_read",
+   "parameter": "buf",
+   "reason": "the user buffer argument is a user-space address: the slice reaches its bytes only through user-memory boundaries",
+   "validated_by": "contract register of the SVC boundary observation (argument buf); user objects are admitted by the live binding"
+  },
+  {
+   "function": "osrec_kernel_linux_write",
+   "parameter": "buf",
+   "reason": "the user buffer argument is a user-space address: the slice reaches its bytes only through user-memory boundaries",
+   "validated_by": "contract register of the SVC boundary observation (argument buf); user objects are admitted by the live binding"
+  },
+  {
+   "function": "osrec_kernel_linux_writev",
+   "parameter": "vec",
+   "reason": "the iovec array argument is a user-space address: the slice reads its entries only through __get_user",
+   "validated_by": "contract register of the SVC boundary observation (argument buf); user objects are admitted by the live binding"
+  }
+ ],
+ "fault_assertions": [
+  {
+   "function": "osrec_kernel_linux_assert",
+   "condition_argument": 1,
+   "reason": "linux_assert(ctx, failure) sets the sticky model_fault flag when a reviewed model sees a broken kernel invariant (a descriptor the caller validated through fdget is below max_fds; a lock is held as expected)",
+   "validated_by": "the reduced replay exports model_fault after the call and never reports a faulted run as equivalent"
+  }
+ ],
+ "pointer_extents": [
+  {
+   "record": "struct futex_data",
+   "field": "queues",
+   "extent_field": "hashsize",
+   "reason": "__futex_data.queues is the bucket array futex_init allocated with hashsize entries",
+   "validated_by": "checkpoint policy: __futex_data.queues is a context reference to futex_hash_buckets[0] (256 buckets); the live binding requires the derived __futex_data's queues to hold hashsize buckets"
+  }
+ ],
+ "argument_ranges": [
+  {
+   "function": "osrec_kernel_linux_writev",
+   "parameter": "vlen",
+   "min": 0,
+   "max": 12,
+   "reason": "the fd-control slice holds one kmalloc-192 object: an iovec array of at most 12 segments (192 bytes); larger arrays come from other kmalloc caches, which the slice does not hold",
+   "validated_by": "the live binding admits at most 12 iovec segments (user_objects.iovec.max_segments); svc_boundary.py rejects an observation with more, and the reduced replay checks the observed argument"
+  }
+ ],
+ "allocations": [
+  {
+   "function": "osrec_kernel_kmalloc_array_noprof",
+   "element_type": "struct iovec",
+   "elements": 12,
+   "object": "argument:ctx->kmalloc_object.words",
+   "reason": "kmalloc_array's one caller in the slice is iovec_from_user, which allocates the iovec array, writes every segment (copy_iovec_from_user) before any read, and leaves it to vfs_writev's kfree; the memory is the kmalloc-192 object at the head of the per-CPU freelist",
+   "validated_by": "the allocator body is analyzed (its freelist, cache and free-pointer reads are entry reads); the live binding binds the object and the reduced replay compares its words after the call"
+  }
+ ],
+ "pointer_objects": [
+  {
+   "record": "struct kmem_cache_cpu",
+   "field": "freelist",
+   "object_type": "struct kmalloc_object",
+   "reason": "a non-null per-CPU freelist head is the address of a free object of the cache; the slice's kmalloc-192 objects are struct kmalloc_object (24 words)",
+   "validated_by": "checkpoint policy: kmalloc_cpu.freelist is a context reference to kmalloc_object; the live binding requires the head object to lie in the cache's per-CPU slab with an object size of 192"
+  }
+ ],
+ "deallocators": [
+  {
+   "function": "osrec_kernel_kfree",
+   "parameter": "object",
+   "reason": "kfree releases memory a kmalloc allocated, or ignores NULL and ZERO_SIZE_PTR; passing automatic (stack) storage is undefined behavior, which the kernel never does (vfs_writev frees its iovec array only when import_iovec replaced the on-stack one)",
+   "validated_by": "kernel memory safety; the reduced replay runs the original kfree, which faults (virt_to_folio) on any address outside the slice slab object"
+  }
+ ],
+ "empty_lists": [
+  {
+   "heads": [
+    "argument:ctx->__futex_data.queues[].chain.node_list",
+    "argument:ctx->futex_hash_buckets[].chain.node_list"
+   ],
+   "reason": "no futex waiter is queued at a boundary the slice replays: blocking and waking are outside it, so a hash bucket chain is never linked (plist_add is reached only through __futex_queue and futex_wait_queue, faulting models) and each chain head links to itself",
+   "validated_by": "live binding: the __futex_data array requires every live bucket chain empty (empty_lists chain.node_list); checkpoint policy: futex_hash_buckets[].chain is transient, so the replay keeps the slice initializer, which self-links every head; the analysis rejects a call that stores to a head"
   }
  ]
 }

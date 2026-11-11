@@ -1,0 +1,9 @@
+{
+ "files": {
+  "fs/file.c": "4a9b990af26654a99b9c8495842399420e4e85c71a87fb97460976729476d393",
+  "fs/open.c": "442fd66c45f46a7a52408c3867b66a4d0640694d9b97678dbc103cbdc27ccbba",
+  "include/uapi/asm-generic/unistd.h": "4f33f448832f61b22d726a3a4d208ddf65b96a247c76889469280638c29ce7e2",
+  "kernel/sys.c": "b86dcdfaaba1307126884f311f3d574be93cd2cfbc0a36b487968b72eb9bf81a"
+ },
+ "format": "osrec-kernel-excerpts-v1"
+}

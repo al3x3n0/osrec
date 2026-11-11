@@ -21,7 +21,11 @@ through a kallsyms dump (`linux_kallsyms.py`).
 - Original assembly the slice assembles verbatim (`linux-*.S`, such as arm64
   `memset.S`) counts the same way: every name its `SYM_FUNC_START` and
   `SYM_FUNC_ALIAS` lines define is original, and reachable when a reachable
-  slice function calls one of them by name.
+  slice function calls one of them by name, or its compiled code in the slice
+  image (`slices.elf` beside the sources) calls one, as the compiler does for
+  automatic-variable zeroing (`memset`). The image's calls between slice
+  functions count too, so a call a macro spells (`cond_resched()`) reaches its
+  callee.
 - A binary replay (`kernel_boundary_replay.py`) runs authentic code when it
   executes the captured kernel instructions themselves and is equivalent.
 
@@ -30,11 +34,12 @@ corresponds to the slice root `linux_NAME`, and compiler suffixes
 (`.constprop.0`, `.isra.0`, `.part.0`) are ignored. Functions the kernel
 inlined count under their caller.
 """
-import argparse,json,re
+import argparse,json,os,re,subprocess
 from collections import Counter,OrderedDict
 from pathlib import Path
 from kernel_boundary_capture import parse_trace
 from linux_kallsyms import Symbols
+LLVM=Path(os.environ.get('OSREC_LLVM16_BIN','/opt/homebrew/opt/llvm@16/bin'))
 
 def slice_functions(sources):
     """Original (syscalls.c) and model (models.c) function names defined in a slice port, and its call graph."""
@@ -46,6 +51,14 @@ def slice_functions(sources):
         group|=set(re.findall(r'SYM_CODE_START(?:_LOCAL)?(?:_NOALIGN)?\((\w+)\)',text))
         group|={'el%s%s_%s_%s'%m for m in re.findall(r'^\s*entry_handler\s+(\d+),\s*(\w+),\s*(\d+),\s*(\w+)',text,re.M)}
         for n in group:assembly[n]=group;calls.setdefault(n,set())
+    # A macro of the model header that calls slice functions (`cond_resched()` -> `_cond_resched`) calls
+    # them wherever a body uses it.
+    macros={}
+    header=Path(sources)/'model.h'
+    if header.is_file():
+        for m in re.finditer(r'^#define\s+(\w+)\(([^)]*)\)((?:.*\\\n)*.*)$',header.read_text(),re.M):
+            called=set(re.findall(r'\bosrec_kernel_(\w+)\s*\(',m.group(3)))
+            if called:macros[m.group(1)]=called
     def defined(name):
         text=(Path(sources)/name).read_text();names=set()
         for m in re.finditer(r'^[A-Za-z_][\w \t\*]*?\bosrec_kernel_(\w+)\s*\([^;{]*\)\s*\{',text,re.M):
@@ -55,10 +68,26 @@ def slice_functions(sources):
                 if not depth:break
             body=text[start:start+b.end()]
             names.add(m.group(1));calls.setdefault(m.group(1),set()).update(re.findall(r'\bosrec_kernel_(\w+)\s*\(',body))
+            for macro,called in macros.items():
+                if re.search(r'\b%s\s*\('%macro,body):calls[m.group(1)].update(called)
             for n,group in assembly.items():
                 if re.search(r'\b%s\s*\('%n,body):calls[m.group(1)].update(group)
         return names
-    return defined('syscalls.c')|set(assembly),defined('models.c'),calls
+    originals=defined('syscalls.c');models=defined('models.c')
+    # Calls the compiler emitted (automatic-variable zeroing as `bl memset`) or a macro spelled
+    # (`cond_resched()` calling `__cond_resched`) are in the slice image, not the function's source
+    # text: add each call a slice function's compiled code makes.
+    elf=Path(sources).parent/'slices.elf'
+    if elf.is_file():
+        listing=subprocess.run([str(LLVM/'llvm-objdump'),'-d','--no-show-raw-insn',str(elf)],capture_output=True,text=True,check=True).stdout;function=None
+        for line in listing.splitlines():
+            m=re.match(r'^[0-9a-f]+ <(\w+)>:$',line)
+            if m:function=m.group(1)[len('osrec_kernel_'):] if m.group(1).startswith('osrec_kernel_') else None;continue
+            m=re.search(r'\t(?:bl|b)\t(?:0x)?[0-9a-f]+ <(\w+)>',line)
+            if not m or function not in calls:continue
+            if m.group(1) in assembly:calls[function].update(assembly[m.group(1)])
+            elif m.group(1).startswith('osrec_kernel_'):calls[function].add(m.group(1)[len('osrec_kernel_'):])
+    return originals|set(assembly),models,calls
 
 # Entry root -> the entry assembly that calls it on the way in and returns on the way out.
 ENTRY_ROOTS={'el0t_64_sync_handler':('vectors','el0t_64_sync','ret_to_user')}

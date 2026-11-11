@@ -48,9 +48,13 @@ class ConstGraph:
     def __init__(self,analyzer):
         self.analyzer=analyzer;self._definitions={};self._walks={}
 
-    def definition(self,name,require_const=True):
-        """(definition, initializer) of a global defined exactly once with an initializer."""
-        key=(name,require_const)
+    def definition(self,name,require_const=True,syntax=True):
+        """(definition, initializer) of a global defined exactly once with an initializer.
+
+        `syntax=False` skips the address-graph syntax check for callers that use only the
+        object's immutability (a file-scope initializer is a constant expression), not its values.
+        """
+        key=(name,require_const,syntax)
         if key not in self._definitions:
             nodes=self.analyzer._global_declarations.get(name,[]);result=None
             definitions=[n for n in nodes if n.get('init')]
@@ -64,7 +68,7 @@ class ConstGraph:
                     not re.search(r'\bvolatile\b',type_of(n)) and
                     {c.get('kind') for c in children(n) if c.get('kind','').endswith('Attr')}<=ATTRIBUTES for n in nodes):
                 node=definitions[0];parts=[c for c in children(node) if not c.get('kind','').endswith('Attr')]
-                if len(parts)==1 and node.get('storageClass')!='extern' and self.constant_syntax(parts[0]):result=(node,parts[0])
+                if len(parts)==1 and node.get('storageClass')!='extern' and (not syntax or self.constant_syntax(parts[0])):result=(node,parts[0])
             self._definitions[key]=result
         return self._definitions[key]
 

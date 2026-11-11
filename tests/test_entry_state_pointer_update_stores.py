@@ -71,7 +71,8 @@ class PointerUpdateStoreTests(unittest.TestCase):
                 p=self.plan(MODEL+'void root(void){unsigned*p='+initial+';'+expression+'=7;}')
                 self.assertIn('array_bounds',{b['kind'] for b in p['blockers']})
     def test_unknown_const_volatile_and_alias_limits_remain_review(self):
-        p=self.plan('void root(unsigned*arg){unsigned*p=arg;*p++=7;}');self.assertTrue(p['blockers'])
+        # *p++ stores at the old value, arg itself; the store past it has an unproven extent.
+        p=self.plan('void root(unsigned*arg){unsigned*p=arg;*p++=7;*p=8;}');self.assertTrue(p['blockers'])
         p=self.plan('const unsigned a[4]={};void root(void){unsigned*p=a;*p++=7;}')
         self.assertIn('const_argument_write',{b['kind'] for b in p['blockers']})
         p=self.plan('volatile unsigned a[4];void root(void){volatile unsigned*p=a;*p++=7;}')

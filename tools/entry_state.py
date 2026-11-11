@@ -167,8 +167,13 @@ def validate_state_ranges(ranges):
     result={}
     if not isinstance(ranges,list):raise ValueError('state_ranges must be a list')
     for item in ranges:
-        if (not isinstance(item,dict) or set(item)-{'record','field','min','max','reason','validated_by'} or
-            not re.fullmatch(r'struct [A-Za-z_]\w*',str(item.get('record',''))) or not re.fullmatch(r'[A-Za-z_]\w*',str(item.get('field',''))) or
+        # `elements`: the range holds for every element of an array field (a table indexed at run time).
+        # `element_ranges`: tighter ranges of the elements at an index interval ({indices: [lo, hi], min, max}).
+        if 'element_ranges' in item and (not item.get('elements') or not isinstance(item['element_ranges'],list) or any(not isinstance(r,dict) or set(r)!={'indices','min','max'} or
+                len(r['indices'])!=2 or any(type(v) is not int for v in [*r['indices'],r['min'],r['max']]) or not 0<=r['indices'][0]<=r['indices'][1] or not item['min']<=r['min']<=r['max']<=item['max'] for r in item['element_ranges'])):
+            raise ValueError('invalid element ranges')
+        if (not isinstance(item,dict) or set(item)-{'record','field','min','max','reason','validated_by','elements','element_ranges'} or item.get('elements',True) is not True or
+            not re.fullmatch(r'struct [A-Za-z_]\w*',str(item.get('record',''))) or not re.fullmatch(r'[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?',str(item.get('field',''))) or
             type(item.get('min')) is not int or type(item.get('max')) is not int or item['min']>item['max'] or not item.get('reason') or not item.get('validated_by')):
             raise ValueError('state range requires record, field, integer min<=max, reason and validated_by')
         key=(item['record'],item['field'])
@@ -389,6 +394,7 @@ def fixed_global_read(item,plan):
     if 'immutable_global' not in item:return False
     proof=item['immutable_global']
     if isinstance(proof,dict) and proof.get('kind')=='defined_const_initializer_leaf':return constant_leaf_read(item,proof,plan)
+    if isinstance(proof,dict) and proof.get('kind')=='defined_const_record':return constant_record_read(item,proof,plan)
     required={'kind','object','type','initializer','initializer_sha256','declaration_location'}
     if isinstance(proof,dict) and proof.get('kind')=='defined_const_numeric_record':required|={'schema','schema_sha256'}
     if not isinstance(proof,dict) or set(proof)!=required:raise ValueError('invalid immutable global evidence')
@@ -416,6 +422,25 @@ def fixed_global_read(item,plan):
                leaf is not None and item.get('type')==leaf)
     else:valid=False
     if not valid:raise ValueError('invalid immutable global evidence')
+    origin=re.compile(re.escape('global:'+name)+r'(?=$|[.\[\)]|->)')
+    if any(origin.search(row['path']) for row in plan.get('state_writes',[])):
+        raise ValueError('immutable global is also written: '+name)
+    return True
+
+def constant_record_read(item,proof,plan):
+    """Validate evidence for a whole-record read of a defined const global (`struct futex_q q = futex_q_init;`).
+
+    A file-scope initializer is a constant expression (C11 6.7.9p4), so a const object defined once
+    holds fixed program data; the copy reads no entry state. Values it copies out (addresses) are
+    resolved separately where they are used.
+    """
+    required={'kind','object','type','initializer_sha256','declaration_location'}
+    name=proof.get('object');typ=proof.get('type')
+    if (set(proof)!=required or not isinstance(name,str) or not re.fullmatch(r'(?:tu[0-9]+:)?[A-Za-z_]\w*',name) or
+        not isinstance(typ,str) or not typ.startswith('const ') or record_type_key(typ) is None or item.get('path')!='global:'+name or item.get('type')!=typ or
+        item.get('volatile') or item.get('bitfield') or item.get('pointer_edge') or item.get('entry_candidate') is not True or
+        not isinstance(proof['declaration_location'],dict) or not isinstance(proof['initializer_sha256'],str)):
+        raise ValueError('invalid constant record evidence')
     origin=re.compile(re.escape('global:'+name)+r'(?=$|[.\[\)]|->)')
     if any(origin.search(row['path']) for row in plan.get('state_writes',[])):
         raise ValueError('immutable global is also written: '+name)
@@ -513,11 +538,22 @@ def load_ast(database,source,clang=None):
     return tree,identity
 
 
+
+class RootRanges(dict):
+    """Root parameter intervals from argument_ranges contracts; reading one records its use."""
+    def __init__(self,analyzer):
+        super().__init__();self.analyzer=analyzer;self.contracts={}
+    def __contains__(self,key):return key in self.contracts
+    def __getitem__(self,key):
+        contract=self.contracts[key];self.analyzer.argument_range_uses.add((contract['function'].split(':',1)[-1],contract['parameter']))
+        return (contract['min'],contract['max'])
+    def get(self,key,default=None):return self[key] if key in self.contracts else default
+
 class Analyzer:
-    def __init__(self,tree,boundaries=None,max_contexts=500,max_range_elements=64,prune_written=False,argument_objects=None,preserve_write_state=False,max_alias_paths=DEFAULT_MAX_ALIAS_PATHS,cache_alias_syntax=True,state_ranges=None,linked_symbols=None,volatile_fields=None,operand_free_asm=None,volatile_accesses=None,pointer_extents=None,callback_targets=None,pointer_values=None,pointer_identity=None,user_addresses=None):
+    def __init__(self,tree,boundaries=None,max_contexts=500,max_range_elements=64,prune_written=False,argument_objects=None,preserve_write_state=False,max_alias_paths=DEFAULT_MAX_ALIAS_PATHS,cache_alias_syntax=True,state_ranges=None,linked_symbols=None,volatile_fields=None,operand_free_asm=None,volatile_accesses=None,pointer_extents=None,callback_targets=None,pointer_values=None,pointer_identity=None,user_addresses=None,fault_assertions=None,argument_ranges=None,allocations=None,pointer_objects=None,deallocators=None,empty_lists=None):
         if preserve_write_state and not prune_written:raise ValueError('write-state preservation requires prune_written')
         if type(max_alias_paths) is not int or max_alias_paths<1:raise ValueError('max_alias_paths must be a positive integer')
-        self.max_alias_paths=max_alias_paths;self.alias_path_limit_observed=False
+        self.max_alias_paths=max_alias_paths;self.alias_path_limit_observed=False;self._quiet_limits=[];self._tree=tree
         self.cache_alias_syntax=cache_alias_syntax
         self._effect_nodes_cache={};self._alias_program_cache={};self._return_program_cache={}
         self._expression_nodes_cache={};self._direct_calls_cache={};self._parameters_cache={}
@@ -525,7 +561,7 @@ class Analyzer:
         self._bounded_pointer_keys={};self._bounded_pointers={};self._pointer_access_constants={};self._pointer_access_types={};self._pointer_scope_cache={};self._definite_pointer_cache={};self._pointer_initialization_environments={};self.pointer_initializations=[];self.pointer_returns=[];self.pointer_stores=[];self.index_values=[];self._local_index_definitions={};self._local_index_cache={};self._local_index_inputs={};self._local_index_declarations={}
         self._diagnostic_keys=set();self._diagnostic_nodes={}
         from entry_state_values import Values
-        self._scalar_objects={};self._scalar_fields={};self.trap_proofs=[];self.tagged_pointer_proofs=[];self.ordering_asm_proofs=[];self.extent_assumptions=[];self.infeasible_accesses=[]
+        self._scalar_objects={};self._scalar_fields={};self.trap_proofs=[];self.tagged_pointer_proofs=[];self.ordering_asm_proofs=[];self.extent_assumptions=[];self._union_tags={};self.range_uses=set();self.assertion_uses=[];self.array_summaries=[];self.infeasible_accesses=[];self.automatic_views=[]
         def classification(item,name):
             if item is None:return None
             if not isinstance(item,dict) or set(item)!={'classification','reason','validated_by'} or not all(isinstance(v,str) and v for v in item.values()):
@@ -559,6 +595,14 @@ class Analyzer:
                     not all(isinstance(item[k],str) and item[k] for k in item)):
                 raise ValueError('user addresses require function, parameter, reason and validated_by')
             self.user_addresses.add((item['function'].split(':',1)[-1],item['parameter']))
+        # Functions whose condition argument rejects the run when it holds (a model's sticky fault flag
+        # that the replay checks): after such a call statement the condition is false.
+        self.fault_assertions={};self.fault_assertion_items=list(fault_assertions or [])
+        for item in self.fault_assertion_items:
+            if (not isinstance(item,dict) or set(item)!={'function','condition_argument','reason','validated_by'} or type(item['condition_argument']) is not int or
+                    item['condition_argument']<0 or not all(isinstance(item[k],str) and item[k] for k in ('function','reason','validated_by'))):
+                raise ValueError('fault assertions require function, condition_argument, reason and validated_by')
+            self.fault_assertions[item['function'].split(':',1)[-1]]=item['condition_argument']
         self._auto_objects={};self._auto_info={};self._auto_store={};self._auto_reads={};self._auto_late=False;self._auto_storage=None;self._auto_sites={};self._call_nodes=[]
         self.volatile_fields={}
         for item in volatile_fields or []:
@@ -566,6 +610,36 @@ class Analyzer:
             self.volatile_fields[(item['record'],item['field'])]=dict(item)
         self.null_guard_proofs=[];self.masked_pointer_proofs=[];self.external_accesses=[]
         self.state_ranges=validate_state_ranges(state_ranges or []);self.values=Values(self)
+        # Root parameter ranges the boundary enforces (writev's vlen: the binding admits at most 12 segments).
+        self.argument_ranges={}
+        for item in argument_ranges or []:
+            if (not isinstance(item,dict) or set(item)!={'function','parameter','min','max','reason','validated_by'} or type(item['min']) is not int or
+                    type(item['max']) is not int or not 0<=item['min']<=item['max'] or not item['reason'] or not item['validated_by']):
+                raise ValueError('argument range requires function, parameter, min<=max, reason and validated_by')
+            self.argument_ranges[(item['function'].split(':',1)[-1],item['parameter'])]=dict(item)
+        # Allocators whose result is fresh memory the call writes before it reads: a summarized object of
+        # `elements` `element_type` records backed by the listed context object.
+        self.allocations={}
+        for item in allocations or []:
+            if (not isinstance(item,dict) or set(item)!={'function','element_type','elements','object','reason','validated_by'} or type(item['elements']) is not int or
+                    item['elements']<=0 or not re.fullmatch(r'argument:ctx->[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*',str(item['object'])) or not item['reason'] or not item['validated_by']):
+                raise ValueError('allocation requires function, element_type, elements, object, reason and validated_by')
+            self.allocations[item['function'].split(':',1)[-1]]=dict(item)
+        # Pointer fields whose non-null value is the address of an object of a declared type (kmem_cache_cpu.freelist).
+        self.pointer_objects={}
+        for item in pointer_objects or []:
+            if (not isinstance(item,dict) or set(item)!={'record','field','object_type','reason','validated_by'} or not re.fullmatch(r'struct [A-Za-z_]\w*',str(item['record'])) or
+                    not re.fullmatch(r'struct [A-Za-z_]\w*',str(item['object_type'])) or not item['reason'] or not item['validated_by']):
+                raise ValueError('pointer object requires record, field, object_type, reason and validated_by')
+            self.pointer_objects[(item['record'],item['field'])]=dict(item)
+        self.allocation_uses=[];self.argument_range_uses=set()
+        from entry_state_lists import validate as empty_list_contracts
+        self.empty_list_heads=empty_list_contracts(empty_lists);self.empty_list_items=[dict(i) for i in empty_lists or []];self.list_proofs=[]
+        self.deallocators={}
+        for item in deallocators or []:
+            if not isinstance(item,dict) or set(item)!={'function','parameter','reason','validated_by'} or not isinstance(item['parameter'],str) or not item['reason'] or not item['validated_by']:
+                raise ValueError('deallocator requires function, parameter, reason and validated_by')
+            self.deallocators[item['function'].split(':',1)[-1]]=dict(item)
         # Struct layouts by tag, for pointer fields of automatic records passed by value.
         self.record_layouts={};self._field_records={};self.record_decls={}
         for n in walk(tree):
@@ -669,14 +743,16 @@ class Analyzer:
             if field is None or '*' not in type_of(field) or owners!=[item['record']]:raise ValueError('pointer values field must be a pointer member unique to its record: '+item['field'])
             self.pointer_values[item['field']]=item['alignment']
         from entry_state_const_graph import ConstGraph
-        self.const_graph=ConstGraph(self);self.container_proofs=[]
+        self.const_graph=ConstGraph(self);self.container_proofs=[];self._stable_bases={}
         self._derived_keys={};self._derived_pointers={};self.derived_proofs=[];self.span_proofs=[];self._mutation_nodes={}
         self._auto_scalars={};self._auto_scalar_reads={};self.branch_proofs=[];self._taken_arms={};self.quiet=0;self._visited_gotos={}
-        self._flow={};self._flow_live=True;self._flow_off=0;self._flow_masks=[];self._flow_carried=[];self._flow_returns=[];self._flow_return_classes=[];self._last_partition=None;self._recent_partition=None;self._flow_weak=0;self._pure={};self._written_fields={};self._decisions={};self._unreachable=set();self._prior_unreachable=frozenset();self._auto_written={};self._auto_scalar_written={};self._inline_cache={};self._goto_states={};self._prior_goto_states=None;self._optimistic=True
+        self._flow={};self._flow_live=True;self._flow_off=0;self._flow_masks=[];self._flow_carried=[];self._flow_stable=[];self._flow_returns=[];self._flow_return_classes=[];self._return_values=[];self._last_return_values=None;self._recent_return={};self._prior_returns={};self._last_partition=None;self._recent_partition=None;self._flow_weak=0;self._pure={};self._written_fields={};self._decisions={};self._unreachable=set();self._prior_unreachable=frozenset();self._auto_written={};self._auto_scalar_written={};self._inline_cache={};self._goto_states={};self._prior_goto_states=None;self._optimistic=True
         self._constant_record_groups={name:nodes for name,nodes in global_declarations.items() if any(
             type_of(n).startswith('const ') and not arithmetic_scalar(type_of(n)) and not numeric_array(type_of(n)) and n.get('init') for n in nodes)}
         self._constant_records={};self._constant_record_index=None;self._constant_record_shapes={}
-        self.automatic_scalars={n['id']:n for n in walk(tree) if n.get('kind')=='VarDecl' and
+        # Parameters are automatic objects of their call too (C11 6.9.1p9): `&param` in a callee is that
+        # frame's copy (is_valid_gup_args' &gup_flags), not the caller's value.
+        self.automatic_scalars={n['id']:n for n in walk(tree) if n.get('kind') in ('VarDecl','ParmVarDecl') and
             n['id'] not in self.globals and n.get('storageClass') is None and not n.get('tls') and
             arithmetic_scalar(type_of(n)) and not re.search(r'\bconst\b',type_of(n)) and
             not any(c.get('kind')=='CleanupAttr' for c in children(n))}
@@ -685,6 +761,13 @@ class Analyzer:
             fixed_array(type_of(n)) and
             not re.search(r'\bvolatile\b|_Atomic',type_of(n)) and
             not any(c.get('kind')=='CleanupAttr' for c in children(n))}
+        # By-value record parameters whose address is taken (gup_fast_pte_range's &pmd): tracked like an
+        # automatic record of their call, never as the root's argument.
+        self.parameter_records={n['id']:n for n in walk(tree) if n.get('kind')=='ParmVarDecl' and
+            '*' not in type_of(n) and '[' not in type_of(n) and
+            (re.sub(r'^const\s+','',type_of(n)).startswith(('struct ','union ')) or
+             (n.get('_translation_unit'),re.sub(r'^const\s+','',type_of(n))) in getattr(self,'record_typedefs',{})) and
+            not re.search(r'\bvolatile\b|_Atomic',type_of(n))}
         self.automatic_records={n['id']:n for n in walk(tree) if n.get('kind')=='VarDecl' and
             n['id'] not in self.globals and n.get('storageClass') is None and not n.get('tls') and
             '*' not in type_of(n) and '[' not in type_of(n) and
@@ -713,10 +796,13 @@ class Analyzer:
                 if effect in policy and (policy['kind']!='memory_model' or not isinstance(policy[effect],list) or
                         not all(type(i) is int and 0<=i<16 for i in policy[effect])):
                     raise ValueError('boundary '+name+' '+effect+' must list pointer argument indexes on a memory_model')
+            if 'user_values' in policy and (not isinstance(policy['user_values'],list) or not set(policy['user_values'])<=set(policy.get('writes',[])) or
+                    not all(type(i) is int for i in policy['user_values'])):
+                raise ValueError('boundary '+name+' user_values must list written argument indexes')
             if 'spans' in policy and (policy['kind']!='memory_model' or not isinstance(policy['spans'],list) or not policy['spans'] or not all(
-                    isinstance(span,dict) and set(span)=={'pointer','length','access','objects'} and type(span['pointer']) is int and 0<=span['pointer']<16 and
+                    isinstance(span,dict) and set(span)-{'fill'}=={'pointer','length','access','objects'} and span.get('fill','data') in ('data','zero') and type(span['pointer']) is int and 0<=span['pointer']<16 and
                     type(span['length']) is int and 0<=span['length']<16 and span['access'] in ('read','write') and isinstance(span['objects'],list) and span['objects'] and
-                    all(isinstance(o,str) and re.fullmatch(r'(?:global:[A-Za-z_]\w*|argument:[A-Za-z_]\w*(?:->|\.)[A-Za-z_][\w.>\[\]-]*)',o) for o in span['objects'])
+                    all(isinstance(o,str) and re.fullmatch(r'(?:automatic|global:[A-Za-z_]\w*|argument:[A-Za-z_]\w*(?:->|\.)[A-Za-z_][\w.>\[\]-]*)',o) for o in span['objects'])
                     for span in policy['spans'])):
                 raise ValueError('boundary '+name+' spans must list pointer, length, access (read/write) and the checked objects')
 
@@ -901,12 +987,12 @@ class Analyzer:
         result._referenced_globals=set()
         result.pointer_differences=[]
         result.pointer_comparisons=[]
-        result.pointer_updates=[];result.container_proofs=[]
+        result.pointer_updates=[];result.container_proofs=[];result._stable_bases={};result.list_proofs=[]
         result._derived_keys={};result._derived_pointers={};result.derived_proofs=[];result.span_proofs=[]
         result._auto_scalars={};result._auto_scalar_reads={};result.branch_proofs=[];result._taken_arms={};result.quiet=0;result._visited_gotos={}
-        result._flow={};result._flow_live=True;result._flow_off=0;result._flow_masks=[];result._flow_carried=[];result._flow_returns=[];result._flow_return_classes=[];result._last_partition=None;result._recent_partition=None;result._flow_weak=0;result._pure={};result._written_fields={};result._decisions={};result._unreachable=set();result._auto_written={};result._auto_scalar_written={};result._inline_cache={};result._goto_states={}
+        result._flow={};result._flow_live=True;result._flow_off=0;result._flow_masks=[];result._flow_carried=[];result._flow_stable=[];result._flow_returns=[];result._flow_return_classes=[];result._return_values=[];result._last_return_values=None;result._recent_return={};result._prior_returns={};result._last_partition=None;result._recent_partition=None;result._flow_weak=0;result._pure={};result._written_fields={};result._decisions={};result._unreachable=set();result._auto_written={};result._auto_scalar_written={};result._inline_cache={};result._goto_states={}
         for name in ('reads','writes','calls','blockers','arguments','ranges'):setattr(result,name,[])
-        result.contexts=0;result.providers={};result.loop_index_sites={};result.alias_path_limit_observed=False
+        result.contexts=0;result.providers={};result.loop_index_sites={};result.alias_path_limit_observed=False;result._quiet_limits=[]
         result._effect_nodes_cache={};result._alias_program_cache={};result._return_program_cache={}
         result._expression_nodes_cache={};result._direct_calls_cache={};result._parameters_cache={}
         result._static_index_cache={};result._array_lvalue_cache={}
@@ -914,7 +1000,7 @@ class Analyzer:
         result._diagnostic_keys=set();result._diagnostic_nodes={}
         from entry_state_values import Values
         result.callback_uses=[];result._auto_objects={};result._auto_info={};result._auto_store={};result._auto_reads={};result._auto_late=False;result._auto_storage=None;result._auto_sites={};result._call_nodes=[]
-        result._scalar_objects={};result._scalar_fields={};result.trap_proofs=[];result.tagged_pointer_proofs=[];result.ordering_asm_proofs=[];result.extent_assumptions=[];result.infeasible_accesses=[];result._context_calls={};result.null_guard_proofs=[];result.masked_pointer_proofs=[];result.external_accesses=[];result.values=Values(result)
+        result._scalar_objects={};result._scalar_fields={};result.trap_proofs=[];result.tagged_pointer_proofs=[];result.ordering_asm_proofs=[];result.extent_assumptions=[];result._union_tags={};result.range_uses=set();result.assertion_uses=[];result.array_summaries=[];result.infeasible_accesses=[];result.automatic_views=[];result._context_calls={};result.allocation_uses=[];result.argument_range_uses=set();result.null_guard_proofs=[];result.masked_pointer_proofs=[];result.external_accesses=[];result.values=Values(result)
         result._local_volatile_storage={};result.local_volatile_proofs=[];result.user_address_proofs=[]
         result.scalar_addresses=[]
         result._self_recursion_syntax={};result.recursion_proofs=[]
@@ -946,8 +1032,27 @@ class Analyzer:
             typ=typ[:-1].strip()
         typ=re.sub(r'^(?:const|volatile)\s+','',typ)
         contract=self.state_ranges.get((typ,member.get('name')))
+        if contract is None:contract=self.nested_state_range(member)
         if contract is None or self.fields.get(member.get('referencedMemberDecl'),{}).get('isBitfield'):return None
         return contract
+
+    def nested_state_range(self,member):
+        """A range declared on a member of a member (`struct futex_hash_bucket` `waiters.counter`).
+
+        It applies when the inner record is reached as that member of the outer record: `(&o->m)->f`,
+        `o->m.f` or `o.m.f`. The inner record alone (`atomic_t`) may hold unrelated counters.
+        """
+        base=unwrap(children(member)[0])
+        if member.get('isArrow'):
+            if base.get('kind')!='UnaryOperator' or base.get('opcode')!='&' or not children(base):return None
+            base=unwrap(children(base)[0])
+        if base.get('kind')!='MemberExpr' or not children(base):return None
+        typ=type_of(children(base)[0]).strip()
+        if base.get('isArrow'):
+            if not typ.endswith('*'):return None
+            typ=typ[:-1].strip()
+        typ=re.sub(r'^(?:const|volatile)\s+','',typ)
+        return self.state_ranges.get((typ,base.get('name')+'.'+member.get('name')))
 
     def context_ranges(self,stack):
         return self._context_calls.get(tuple(stack),{})
@@ -973,20 +1078,79 @@ class Analyzer:
         owner=None
         for index in range(len(stack),0,-1):
             name=stack[index-1]
-            if name in self.functions and key in self.values.facts_for(name).declarations:
+            if name in self.functions and (key in self.values.facts_for(name).declarations or key in self.parameter_records and any(c.get('id')==key for c in children(self.functions[name]))):
                 owner=tuple(stack[:index]);break
         if owner is None:return None
         token=self._auto_objects.get((owner,key))
         if token is None:
             token='auto:%d'%len(self._auto_objects);self._auto_objects[(owner,key)]=token
-            declaration=self.values.facts_for(owner[-1]).declarations[key]
-            self._auto_info[token]=dict(owner=owner,declaration=key,initialized=bool(children(declaration)))
+            declaration=self.values.facts_for(owner[-1]).declarations.get(key)
+            # A parameter holds its argument from the call on: initialized.
+            self._auto_info[token]=dict(owner=owner,declaration=key,initialized=declaration is None or bool(children(declaration)))
         return token
+    def summary_array(self,key):
+        """(element type, element count, element record or None) for an automatic one-dimensional array
+        of pointers or of records with pointer fields, which is tracked as one summarized object."""
+        cache=self.__dict__.setdefault('_summary_arrays',{})
+        if key not in cache:
+            result=None;declaration=self.automatic_arrays.get(key)
+            shape=declared_array_shape(type_of(declaration)) if declaration is not None else None
+            if shape is not None and len(shape[1])==1 and shape[1][0]:
+                element=shape[0];record=self.record_declaration(element) if '*' not in element else None
+                pointers=object_pointer_element(element) or (record is not None and any('*' in f[1] and '(' not in f[1] for f in self.flat_fields(record)))
+                if pointers:result=(element,shape[1][0],record)
+            cache[key]=result
+        return cache[key]
+    def summary_token(self,path):
+        """The summarized array a pointer value `auto:N` points into (any element or one past), or None."""
+        return path if path in self._auto_info and self._auto_info[path].get('summary') else None
+    def summary_origin(self,key,node,stack):
+        """`auto:N` for a pointer into the summarized automatic array `key` (its decay)."""
+        shape=self.summary_array(key)
+        if shape is None:return None
+        token=self.auto_origin(key,stack)
+        if token is None:return None
+        info=self._auto_info[token]
+        if not info.get('summary'):
+            info['summary']=dict(element_type=shape[0],elements=shape[1])
+            self.array_summaries.append(dict(kind='automatic_array_summary',function=info['owner'][-1],call_path=list(info['owner']),
+                array=self.values.facts_for(info['owner'][-1]).declarations[key].get('name'),element_type=shape[0],elements=shape[1],location=self.location(node),
+                assumptions=['element accesses stay inside the array (kernel memory safety)','an element is read only after it is stored'],
+                validated_by='the reduced replay image initializes automatic storage with a pattern (-ftrivial-auto-var-init=pattern): an element read before its store yields the pattern, which no admitted object holds'))
+        return token
+    def summary_paths(self,paths):
+        """The summarized arrays `paths` all point into, or None."""
+        return frozenset(paths) if paths and all(self.summary_token(p) for p in paths) else None
+    def summary_arithmetic(self,node,env,stack):
+        """`p + k`, `p - k` and `&p[k]` on a pointer into a summarized array stay that array."""
+        node=unwrap(node);terms=children(node)
+        if node.get('kind')=='BinaryOperator' and node.get('opcode') in ('+','-') and len(terms)==2:
+            pointers=[t for t in terms if '*' in type_of(t)]
+            if len(pointers)==1:
+                values=self.resolve(pointers[0],env,stack)
+                # Arithmetic on a null pointer is undefined (C11 6.5.6): a null alternative has no result.
+                found=self.summary_paths(values-{'null',INFEASIBLE})
+                if found is not None:
+                    if 'null' in values:self.derived_proofs.append(dict(kind='null_pointer_arithmetic_excluded',function=stack[-1],call_path=stack,location=self.location(node),
+                        reason='pointer arithmetic on a null pointer is undefined behavior (C11 6.5.6p8); only the summarized arrays remain'))
+                    return set(found)
+            if len(pointers)==2 and node.get('opcode')=='-':
+                left,right=(self.summary_paths(self.resolve(t,env,stack)) for t in terms)
+                if left is not None and left==right:return set()
+        return None
+    def auto_record(self,token):
+        """The record declaration whose fields an automatic object holds (a summarized array's element)."""
+        info=self._auto_info[token]
+        if info.get('summary'):return self.record_declaration(info['summary']['element_type'])
+        declaration=next((n for n in self.values.facts_for(info['owner'][-1]).order if n.get('id')==info['declaration']),None)
+        return self.record_declaration(type_of(declaration)) if declaration is not None else None
     def escaped_record(self,node,stack):
         """An automatic record whose address is taken in its function: tracked through an auto origin."""
         if node.get('kind')!='DeclRefExpr':return None
         key=node.get('referencedDecl',{}).get('id')
-        if key not in self.automatic_records or not stack or stack[-1] not in self.functions:return None
+        parameter=key in self.parameter_records and key not in self.automatic_records
+        if (key not in self.automatic_records and not parameter) or not stack or stack[-1] not in self.functions:return None
+        if parameter and (len(stack)<2 or not any(c.get('id')==key for c in children(self.functions[stack[-1]]))):return None
         if key not in self.values.facts_for(stack[-1]).escaped:return None
         return self.auto_origin(key,stack)
     def escaped_pointer_local(self,node,stack):
@@ -1067,13 +1231,84 @@ class Analyzer:
         for (member,record),term in zip(members,terms):
             if not assign(member,record,term):return None
         return values
+    def tag_fields(self,declaration):
+        """Integer fields of a record (outside unions) that the program writes only by whole-record
+        stores (`*i = (struct T){.type = X, ...}`): they stay as set with the union bits stored beside them."""
+        cache=self.__dict__.setdefault('_tag_field_cache',{})
+        if declaration is None:return ()
+        key=declaration.get('id')
+        if key not in cache:
+            written=self.__dict__.get('_field_level_writes')
+            if written is None:
+                written=set()
+                for function in self.functions.values():
+                    for n in walk(function):
+                        kind=n.get('kind');terms=children(n)
+                        target=None
+                        if kind in ('BinaryOperator','CompoundAssignOperator') and n.get('opcode','').endswith('=') and n.get('opcode') not in ('==','!=','<=','>=') and terms:target=terms[0]
+                        elif kind=='UnaryOperator' and n.get('opcode') in ('++','--','&') and terms:target=terms[0]
+                        target=unwrap(target) if target is not None else None
+                        if target is not None and target.get('kind')=='MemberExpr':written.add(target.get('referencedMemberDecl'))
+                self._field_level_writes=written
+            from entry_state_values import integer_type
+            cache[key]=tuple(f[0] for f in self.flat_fields(declaration) if integer_type(f[1]) and not f[3] and f[2] not in written)
+        return cache[key]
+    def stores_record(self,node,record_type,active=frozenset()):
+        """Can `node` (or a function it calls) store a whole `record_type` object (`*p = (struct T){...}`)?"""
+        cache=self.__dict__.setdefault('_record_store_cache',{})
+        for n in walk(node):
+            kind=n.get('kind')
+            if kind=='BinaryOperator' and n.get('opcode')=='=' and children(n) and re.sub(r'^(?:const |volatile )+','',type_of(children(n)[0]).strip())==record_type:return True
+            if kind=='CallExpr':
+                name=callee(n)
+                if name is None or name not in self.functions:
+                    if name is None or not self.boundary(name):return True
+                    continue
+                if name in active:continue
+                key=(name,record_type)
+                if key not in cache:cache[key]=self.stores_record(self.functions[name],record_type,active|{name})
+                if cache[key]:return True
+        return False
+    def union_fields(self,declaration):
+        return {f[0] for f in self.flat_fields(declaration) if f[3] and '*' in f[1] and '(' not in f[1]}
+    def current_tag(self,token,declaration):
+        """The tag fields' current singleton values in this object (fields with unknown values are left out)."""
+        tag=[]
+        for field in self.tag_fields(declaration):
+            value=self.flow_value((token,field));interval=value[1] if value is not None and value[0]=='i' else self._auto_scalars.get((token,field))
+            if isinstance(interval,tuple) and interval[0]==interval[1]:tag.append((field,interval[0]))
+        return frozenset(tag)
+    def tag_union_values(self,token,field,values,tag):
+        """Record the tag-field values these union-member values were stored beside."""
+        tags=self.__dict__.setdefault('_union_tags',{}).setdefault((token,field),{})
+        for v in values:tags.setdefault(v,set()).add(tag)
+    def union_filter(self,token,field,values):
+        """Values of a union member whose recorded tags agree with the tag fields' current values."""
+        tags=self.__dict__.get('_union_tags',{}).get((token,field))
+        if not tags:return values
+        declaration=self.auto_record(token)
+        current={}
+        for f in self.tag_fields(declaration):
+            value=self.flow_value((token,f));interval=value[1] if value is not None and value[0]=='i' else None
+            if isinstance(interval,tuple):current[f]=interval
+        if not current:return values
+        def agrees(tag):return all(f not in current or current[f][0]<=x<=current[f][1] for f,x in tag)
+        kept={v for v in values if v not in tags or any(agrees(t) for t in tags[v])}
+        return kept or values
     def owner_site(self,token,node,stack):
         """The node in the owning function through which this access happens (itself or a call site)."""
         owner=self._auto_info[token]['owner']
         if len(stack)<=len(owner) or len(self._call_nodes)<len(owner):return node
         return self._call_nodes[len(owner)-1]
+    RECURSIVE_CHAIN=re.compile(r'(->[A-Za-z_]\w*)\1{2,}')
     def auto_write(self,token,field,paths,node=None,stack=None,strong=False):
         key=(token,field)
+        # A summarized array's field stands for every element: a store updates one of them.
+        if self._auto_info.get(token,{}).get('summary'):strong=False
+        # A walk along a recursive link (node->parent->parent...) would grow a stored value by one
+        # step per pass and never reach a fixpoint: three equal steps widen to an unknown origin.
+        if any(self.RECURSIVE_CHAIN.search(p) for p in paths):
+            paths={'unresolved:recursive-chain' if self.RECURSIVE_CHAIN.search(p) else p for p in paths}
         self.flow_write(key,'p',paths,strong)
         self._auto_written[key]=self._auto_written.get(key,set())|set(paths)
         if node is not None:
@@ -1087,10 +1322,13 @@ class Analyzer:
         key=(token,field);values=self._auto_store.get(key)
         self._auto_reads[key]=max(self._auto_reads.get(key,-1),len(values) if values else 0)
         flow=self.flow_value(key)
-        if flow is not None and flow[0]=='p':return set(flow[1])
+        # An empty flow set holds no value at all (nothing stored on the path yet), never "no pointer": fall back.
+        if flow is not None and flow[0]=='p' and flow[1]:return self.union_filter(token,field,set(flow[1]))
         if not values:return {'unresolved:auto-field'}
+        values=self.union_filter(token,field,set(values))
         info=self._auto_info[token]
-        if not info.get('initialized') and node is not None:
+        # A summarized array's elements are read only after a store: its stated (replay-checked) assumption.
+        if not info.get('initialized') and node is not None and not info.get('summary'):
             # Without an initializer the field is indeterminate unless a write dominates this read.
             site=self.owner_site(token,node,stack);facts=self.values.facts_for(info['owner'][-1])
             direct=field=='*' and site is node and facts.contains(node) and facts.dominated(node,info['declaration'])
@@ -1104,20 +1342,84 @@ class Analyzer:
     def flow_join_values(kind,a,b):
         if kind=='p':return frozenset(a)|frozenset(b)
         return None if a is None or b is None else (min(a[0],b[0]),max(a[1],b[1]))
-    def flow_carried(self,token):
-        return any(token in carried for carried in self._flow_carried)
+    def flow_carried(self,token,key=None):
+        return any(token in carried for carried in self._flow_carried) and not (key is not None and any(key in stable for stable in self._flow_stable))
     def flow_write(self,key,kind,value,strong):
-        if self.flow_carried(key[0]):self._flow.pop(key,None);return
+        if self.flow_carried(key[0],key):self._flow.pop(key,None);return
         if strong and not self._flow_weak:self._flow[key]=(kind,frozenset(value) if kind=='p' else value);return
         old=self._flow.get(key)
         if old is not None and old[0]=='u':self._flow[key]=('u',None)
         elif old is not None:self._flow[key]=(kind,self.flow_join_values(kind,old[1],frozenset(value) if kind=='p' else value))
     def flow_value(self,key):
-        if self._flow_off or not self._flow_live or self.flow_carried(key[0]):return None
+        if self._flow_off or not self._flow_live or self.flow_carried(key[0],key):return None
         # Inside a callee's out-of-order alias closure, keys it may store are unknown.
-        if any(set(key[1].split('.'))&mask for mask in self._flow_masks):return None
+        if key[0]!='PL' and any(set(key[1].split('.'))&mask for mask in self._flow_masks):return None
         value=self._flow.get(key)
         return value if value is not None and value[0]!='u' else None
+    def overwritten_after(self,call,token,prefix,env,stack):
+        """Fields of a stack object that a later statement of the call's block assigns before anything can read them.
+
+        The call (memset) is a statement of a compound block. Each later top-level statement up to an assignment
+        `p->field = value` (p resolving to the object) must not mention the field, and no call there may receive a
+        pointer to the object: then the zero the call stored in that field is never read."""
+        facts=self.function_facts(call,stack)
+        if facts is None or facts.has_labels:return set()
+        statement=call;parent=facts.parent.get(id(statement))
+        while parent is not None and parent.get('kind') in ('ImplicitCastExpr','ParenExpr','CStyleCastExpr'):statement=parent;parent=facts.parent.get(id(statement))
+        if parent is None or parent.get('kind')!='CompoundStmt':return set()
+        terms=children(parent);index=next(i for i,t in enumerate(terms) if t is statement)
+        found=set();blocked=set()
+        object_paths=lambda n:{v for v in self.resolve(n,env,stack) if re.match(r'^(?:\*\()*'+re.escape(token)+r'(?![\d])',v)}
+        self.quiet+=1
+        try:
+            for later in terms[index+1:]:
+                if later.get('kind') not in ('BinaryOperator','CompoundAssignOperator','UnaryOperator','CallExpr','DeclStmt','IfStmt','ImplicitCastExpr','CStyleCastExpr') or any(n.get('kind') in ('GotoStmt','ReturnStmt','LabelStmt') for n in walk(later)):break
+                names={n.get('name') for n in walk(later) if n.get('kind')=='MemberExpr'}
+                if any(n.get('kind')=='CallExpr' and any('*' in type_of(a) and object_paths(a) for a in children(n)[1:]) for n in walk(later)):break
+                plain=unwrap(later)
+                if plain.get('kind')=='BinaryOperator' and plain.get('opcode')=='=' and unwrap(children(plain)[0]).get('kind')=='MemberExpr':
+                    left=unwrap(children(plain)[0]);storage=self.storage_paths(left,env,stack)
+                    keys={self.auto_key(p) for p in storage}
+                    if len(storage)==1 and all(k is not None and k[0]==token for k in keys) and left.get('name') not in {n.get('name') for n in walk(children(plain)[1]) if n.get('kind')=='MemberExpr'}:
+                        field=next(iter(keys))[1]
+                        if field not in blocked:found.add(field)
+                blocked|={f for (t,f) in self._auto_store if t==token and f.rsplit('.',1)[-1] in names}-found
+        finally:self.quiet-=1
+        if found:self.span_proofs.append(dict(kind='dead_zero_fill',function=stack[-1],call_path=stack,location=self.location(call),object=token,fields=sorted(found),
+            evidence='a later statement of the block assigns each field before any read of it or any call receiving the object'))
+        return found
+    def always_rejects(self,name):
+        """Does the body of `name` call a fault assertion with a nonzero constant condition, unconditionally,
+        before any return (models.c's `linux_assert(1)` fault models)?"""
+        cache=self.__dict__.setdefault('_always_rejects',{})
+        if name not in cache:
+            cache[name]=False;function=self.functions.get(name)
+            body=next((c for c in children(function) if c.get('kind')=='CompoundStmt'),None) if function else None
+            for statement in children(body) if body else []:
+                if statement.get('kind')=='ReturnStmt' or any(n.get('kind') in ('ReturnStmt','GotoStmt','LabelStmt') for n in walk(statement)):break
+                call=unwrap(statement)
+                if call.get('kind')=='CallExpr' and callee(call).split(':',1)[-1] in self.fault_assertions:
+                    index=self.fault_assertions[callee(call).split(':',1)[-1]];arguments=children(call)[1:]
+                    bounds=self.constant_interval(arguments[index]) if index<len(arguments) else None
+                    if bounds is not None and bounds[0]>0:cache[name]=True;break
+        return cache[name]
+    def loop_writes_no_stack_objects(self,loop,env,stack):
+        facts=self.function_facts(loop,stack)
+        if facts is None or facts.has_labels:return False
+        for n in walk(loop):
+            kind=n.get('kind');terms=children(n)
+            if kind in ('BinaryOperator','CompoundAssignOperator') and n.get('opcode','').endswith('=') and n.get('opcode') not in ('==','!=','<=','>=') or kind=='UnaryOperator' and n.get('opcode') in ('++','--'):
+                target=unwrap(terms[0]) if terms else {}
+                key=target.get('referencedDecl',{}).get('id') if target.get('kind')=='DeclRefExpr' else None
+                if key is None or key in self.globals or key in facts.escaped or key not in facts.declarations and target.get('referencedDecl',{}).get('kind')!='ParmVarDecl':return False
+            elif kind in ('GCCAsmStmt','MSAsmStmt','StmtExpr'):return False
+            elif kind=='CallExpr':
+                self.quiet+=1
+                try:
+                    for argument in terms[1:]:
+                        if '*' in type_of(argument) and any(re.match(r'^(?:\*\()*auto:\d+',v) or v.startswith('unresolved:') for v in self.resolve(argument,env,stack)):return False
+                finally:self.quiet-=1
+        return True
     def flow_snapshot(self):return (dict(self._flow),self._flow_live)
     def flow_restore(self,state):self._flow=dict(state[0]);self._flow_live=state[1]
     def flow_join(self,states):
@@ -1140,7 +1442,7 @@ class Analyzer:
         the gotos that jump to it (an unvisited goto was unreachable); without a previous
         pass, or for a case label, every value falls back to its union over all writes."""
         # Integer locals of enclosing frames cannot change inside this function (they do not escape).
-        kept={k:v for k,v in self._flow.items() if k[0]=='L' and k[1]!=tuple(stack)}
+        kept={k:v for k,v in self._flow.items() if k[0] in ('L','PL') and k[1]!=tuple(stack)}
         if label is not None and (self._prior_goto_states is not None or self._optimistic):
             states=[self.flow_snapshot()] if self._flow_live else []
             states+=[state for (target,context),state in (self._prior_goto_states or {}).items() if target==label and context==tuple(stack)]
@@ -1189,6 +1491,40 @@ class Analyzer:
                 node.get('kind')=='UnaryOperator' and node.get('opcode') in ('++','--')):return None
         target=unwrap(terms[0])
         return target.get('referencedDecl',{}).get('id') if target.get('kind')=='DeclRefExpr' else None
+    def pointer_local_key(self,node,stack):
+        """('PL', frame, id): the flow key of a pointer local or parameter whose address is never taken."""
+        node=unwrap(node)
+        if node.get('kind')!='DeclRefExpr' or not stack or stack[-1] not in self.functions:return None
+        declaration=node.get('referencedDecl',{});key=declaration.get('id')
+        typ=type_of(node)
+        if declaration.get('kind') not in ('VarDecl','ParmVarDecl') or key in self.globals or '*' not in typ or '(' in typ or '[' in typ:return None
+        facts=self.values.facts_for(stack[-1])
+        if key in facts.escaped or (declaration.get('kind')=='VarDecl' and key not in facts.declarations):return None
+        return ('PL',tuple(stack),key)
+    def pointer_local_write(self,key,values):
+        """A store to a pointer local: its flow value is now exactly these values. Values that only the
+        alias closure resolves well (pointer arithmetic: derived and bounded pointers) leave none."""
+        if key is None:return
+        # Bounded cursors have a separate versioned update certificate. A flow value seeded at
+        # declaration must never hide later versions or an out-of-bounds alternative.
+        plain=values and not any(re.search(r'(?:^|\*\()(?:unresolved:|derived-pointer:|bounded-pointer:|argument:|local:)',v) for v in values)
+        if self._flow_live and plain:self._flow[key]=('p',frozenset(values))
+        else:self._flow.pop(key,None)
+    def local_null_tests(self,condition,truth,stack):
+        """(pointer-local key, nonnull) pairs that `condition` having `truth` implies."""
+        from entry_state_values import condition as strip,is_null
+        node=strip(condition);kind=node.get('kind');op=node.get('opcode');terms=children(node)
+        if kind=='UnaryOperator' and op=='!' and len(terms)==1:return self.local_null_tests(terms[0],not truth,stack)
+        if kind=='BinaryOperator' and op in ('&&','||') and len(terms)==2:
+            return [t for term in terms for t in self.local_null_tests(term,truth,stack)] if (op=='&&')==truth else []
+        if kind=='BinaryOperator' and op in ('==','!=') and len(terms)==2:
+            for pointer,other in (terms,terms[::-1]):
+                if is_null(other):
+                    key=self.pointer_local_key(pointer,stack)
+                    return [(key,(op=='!=')==truth)] if key is not None else []
+            return []
+        key=self.pointer_local_key(node,stack) if '*' in type_of(node) else None
+        return [(key,truth)] if key is not None else []
     def null_tests(self,condition,truth,stack):
         """(token, nonnull) pairs that `condition` having `truth` implies for escaped pointer locals."""
         from entry_state_values import condition as strip,is_null
@@ -1244,7 +1580,7 @@ class Analyzer:
                 for key in f:keys.setdefault(key,None)
         for key in keys:
             # The callee's own frame is gone; partitions of partitions do not nest.
-            if key[0] in ('L','RP') and len(key[1])>len(frame):continue
+            if key[0] in ('L','RP','PL') and len(key[1])>len(frame):continue
             if key[0]=='RP':continue
             joined=self._flow.get(key)
             if joined is not None and joined[0]=='r':continue
@@ -1322,6 +1658,13 @@ class Analyzer:
         """Restrict escaped pointer locals in the arm's state to the values the condition allows."""
         if not self._flow_live:return
         self.partition_refine(condition,truth,stack)
+        for local,nonnull in self.local_null_tests(condition,truth,stack):
+            value=self.flow_value(local)
+            if value is None or value[0]!='p':continue
+            refined=set(value[1])-{'null'} if nonnull else {'null'}&set(value[1])
+            # No value this local holds satisfies the test: the arm never runs.
+            if not refined:self._flow_live=False;return
+            self._flow[local]=('p',frozenset(refined))
         for token,nonnull in self.null_tests(condition,truth,stack):
             key=(token,'*');value=self.flow_value(key)
             values=set(value[1]) if value is not None else set(self._auto_store.get(key,set()))
@@ -1330,6 +1673,34 @@ class Analyzer:
             refined=values-{'null'} if nonnull else {'null'}
             if refined:self._flow[key]=('p',frozenset(refined))
         self.value_split_refine(condition,truth,env,stack)
+        self.tag_split_refine(condition,truth,env,stack)
+    def tag_split_refine(self,condition,truth,env,stack):
+        """Narrow a small-interval tag field of an object the condition reads (directly or through
+        a called helper) to the values under which the condition can have this truth."""
+        if not self._flow_live or not stack or stack[-1] not in self.functions:return
+        tokens=set()
+        for n in walk(condition):
+            if '*' in type_of(n) and n.get('kind') in ('DeclRefExpr','MemberExpr','UnaryOperator'):
+                self.quiet+=1
+                try:tokens|={re.match(r'^(?:\*\()*(auto:\d+)',v)[1] for v in self.resolve(n,env,stack) if re.match(r'^(?:\*\()*(auto:\d+)',v)}
+                finally:self.quiet-=1
+        for token in sorted(tokens):
+            record=self.auto_record(token)
+            for field in self.tag_fields(record):
+                key=(token,field);value=self.flow_value(key)
+                if value is None or value[0]!='i' or not isinstance(value[1],tuple):continue
+                low,high=value[1]
+                if low==high or high-low>7:continue
+                kept=[]
+                for x in range(low,high+1):
+                    self._flow[key]=('i',(x,x))
+                    self.values.pointer_env.append(env);self.values.call_stack.append(list(stack));self.quiet+=1
+                    try:bounds,_=self.values.interval(condition,stack[-1],self.context_ranges(stack))
+                    finally:self.values.pointer_env.pop();self.values.call_stack.pop();self.quiet-=1
+                    outcome=None if bounds is None else 0 if bounds==(0,0) else 1 if bounds[0]>0 or bounds[1]<0 else None
+                    if outcome is None or outcome==int(truth):kept.append(x)
+                self._flow[key]=('i',(min(kept),max(kept))) if kept else value
+                if not kept:self._flow_live=False;return
     @staticmethod
     def value_classes(values):
         """Pointer values grouped by integer view: null, the error range, each constant address, objects."""
@@ -1362,6 +1733,16 @@ class Analyzer:
             if current is None:self._flow.pop(key,None)
             else:self._flow[key]=current
             if kept and kept!=values:self._flow[key]=('p',frozenset(kept))
+    def boundary_user_value(self,name,argument,node,env,stack):
+        """A boundary that loads a user-space pointer from user memory (__get_user of an iovec's
+        iov_base) stores a user address: the pointer local it writes holds `user:NAME`."""
+        for value in self.resolve(argument,env,stack):
+            match=re.fullmatch(r'(auto:\d+)',value)
+            if match is None:continue
+            info=self._auto_info[match[1]]
+            declaration=next((n for n in self.values.facts_for(info['owner'][-1]).order if n.get('id')==info['declaration']),None)
+            if declaration is not None and '*' in type_of(declaration) and '(' not in type_of(declaration) and self.record_declaration(type_of(declaration)) is None:
+                self.auto_write(match[1],'*',{'user:'+name.split(':',1)[-1]},node,stack,strong=True)
     def referenced_tokens(self,env):
         """Objects named by this frame's values, closed over the pointers stored in objects."""
         pattern=re.compile(r'auto:(\d+)')
@@ -1369,7 +1750,7 @@ class Analyzer:
         pending=list(found)
         while pending:
             token=pending.pop()
-            for (owner,field),values in list(self._auto_store.items())+[(k,v[1]) for k,v in self._flow.items() if v[0]=='p']:
+            for (owner,field),values in list(self._auto_store.items())+[(k,v[1]) for k,v in self._flow.items() if v[0]=='p' and k[0]!='PL']:
                 if owner!=token:continue
                 for v in values:
                     for m in pattern.findall(v):
@@ -1442,6 +1823,7 @@ class Analyzer:
     def auto_scalar_write(self,token,field,interval,node=None,stack=None,strong=False):
         """Union an integer field's possible values (None: unknown) over every write to it."""
         key=(token,field)
+        if self._auto_info.get(token,{}).get('summary'):strong=False
         if node is not None:
             site=self.owner_site(token,node,stack)
             if all(site is not other for other in self._auto_sites.setdefault(key,[])):self._auto_sites[key].append(site)
@@ -1498,6 +1880,28 @@ class Analyzer:
             if bounds is None:bounds,_=self.values.interval(term,stack[-1],self.context_ranges(stack))
             values[member['name']]=tuple(bounds) if bounds is not None else None
         return values
+    def const_table(self,base):
+        """Element values of a const global integer array with a constant initializer (its definition may be in
+        another translation unit), or None. An element left to the array filler takes the filler's value."""
+        while base.get('kind') in ('ImplicitCastExpr','ParenExpr') and children(base):base=children(base)[0]
+        declaration=base.get('referencedDecl',{}) if base.get('kind')=='DeclRefExpr' else {}
+        if declaration.get('kind')!='VarDecl' or declaration.get('id') not in self.globals:return None
+        cache=self.__dict__.setdefault('_const_tables',{})
+        name=declaration.get('name')
+        if name not in cache:
+            cache[name]=None
+            for node in self.globals.values():
+                init=children(node)[-1] if children(node) else None
+                if node.get('name')!=name or init is None or init.get('kind')!='InitListExpr' or not type_of(node).startswith('const ') or not fixed_array(type_of(node)):continue
+                count=int(fixed_array(type_of(node))[2]);values=[]
+                filler=node.get('array_filler') or init.get('array_filler') or []
+                fill=self.constant_interval(filler[0]) if filler else None
+                for term in children(init)[:count]:
+                    bounds=self.constant_interval(term) if term.get('kind')!='ImplicitValueInitExpr' else fill
+                    values.append(bounds[0] if bounds and bounds[0]==bounds[1] else None)
+                values+=[fill[0] if fill and fill[0]==fill[1] else None]*(count-len(values))
+                cache[name]=values
+        return cache[name]
     def constant_interval(self,term):
         """A constant integer expression (enum constants included), converted to the term's own type."""
         inner=term
@@ -1528,6 +1932,7 @@ class Analyzer:
         condition=parts[0] if node.get('kind')=='WhileStmt' and len(parts)==2 else parts[2] if node.get('kind')=='ForStmt' and len(parts)==5 and not parts[1].get('kind') else None
         if condition is None or not condition.get('kind'):return False
         key=(id(condition),tuple(stack))
+        if key not in self._decisions and self.empty_list_heads and self.empty_list_walk(node,env,stack):self._decisions[key]=0
         if key not in self._decisions:
             name=stack[-1] if stack else None
             entry_env=env
@@ -1541,6 +1946,21 @@ class Analyzer:
                 finally:self.quiet-=1
             self._decisions[key]=self.decided(condition,entry_env,stack)
         return self._decisions[key]==0
+    def empty_list_walk(self,node,env,stack):
+        """A list walk over a contract's empty head: its cursor starts at the head, so the loop never runs."""
+        from entry_state_lists import walk_parts,head as list_head,SENTINEL
+        parts=walk_parts(node)
+        if parts is None:return False
+        cursor,fields,bound,value,first=parts
+        self.quiet+=1
+        try:heads=self.resolve(bound,env,stack);cursors=self.resolve(value,env,stack)
+        finally:self.quiet-=1
+        if not heads or not all(list_head(self.empty_list_heads,h) for h in heads):return False
+        if not cursors or cursors!={SENTINEL+h+'#'+fields for h in heads}:return False
+        self.list_proofs.append(dict(kind='empty_list_walk',function=stack[-1],call_path=stack,location=self.location(node),member=fields,
+            heads=sorted({re.sub(r'\[\d+\]','[]',h) for h in heads}),
+            reason='the initializer sets the cursor from HEAD->next and the condition compares &cursor->member with the same side-effect-free HEAD: an empty head links to itself, so the condition is false on entry'))
+        return True
     def decided(self,condition,env,stack):
         """0 or 1 when the condition's interval in this call context excludes the other outcome."""
         if not stack or stack[-1] not in self.functions:return None
@@ -1584,6 +2004,97 @@ class Analyzer:
                 return True
         return False
 
+    def guard_classes(self,node,key,values,env,stack):
+        """Drop the value classes of a pointer local (an ERR_PTR constant, null) that a dominating
+        guard excludes: `if (IS_ERR(p)) return ...;` before the use is evaluated with p holding each
+        class alone, and a class it decides the other way never reaches the use."""
+        if not any(re.fullmatch(r'const-address:\d+',v) or v=='error-pointer' for v in values):return values
+        groups=self.value_classes(values);facts=self.function_facts(node,stack)
+        active=self.__dict__.setdefault('_guard_split_active',set())
+        if len(groups)<2 or facts is None or id(node) in active:return values
+        kept=set(values);active.add(id(node))
+        # A local copied from another (`void *x = (void *)object;`, neither changed since) holds the same
+        # value: a guard on the source narrows the copy (kfree tests object, then frees x).
+        keys={key};source=self.copied_local(node,key,facts)
+        if source is not None:keys.add(source)
+        try:
+            for cond,truth,guard in facts.facts(node):
+                if not any(n.get('kind')=='DeclRefExpr' and n.get('referencedDecl',{}).get('id') in keys for n in walk(cond)):continue
+                local=('PL',tuple(stack),key);held=self._flow.get(local)
+                for group in groups:
+                    if not group<=kept or len(kept)==len(group):continue
+                    self.values.pointer_env.append({**env,**{k:set(group) for k in keys}});self.values.call_stack.append(list(stack));self.quiet+=1
+                    if held is not None:self._flow[local]=('p',frozenset(group))
+                    try:bounds,_=self.values.interval(cond,stack[-1],self.context_ranges(stack))
+                    finally:
+                        self.values.pointer_env.pop();self.values.call_stack.pop();self.quiet-=1
+                        if held is not None:self._flow[local]=held
+                    outcome=None if bounds is None else 0 if bounds==(0,0) else 1 if bounds[0]>0 or bounds[1]<0 else None
+                    if outcome is not None and outcome!=int(truth):
+                        kept-=group
+                        self.null_guard_proofs.append(dict(kind='value_class_guard',function=stack[-1],call_path=stack,value=sorted(group),
+                            guard=self.location(guard),location=self.location(node)))
+        finally:active.discard(id(node))
+        return kept
+    def return_correlated_nonnull(self,node,key,env,stack):
+        """`r = f(..., x, ...)`; later a guard proves r non-null: x is non-null when f returns null only where its
+        parameter for x is null (`if (!time) return NULL;`) and otherwise returns a parameter given a non-null
+        address (`return timeout;` for `&timeout`). Neither r nor x may change or escape (futex_setup_timer)."""
+        from entry_state_values import implies_nonnull,match_variable,is_null
+        facts=self.function_facts(node,stack)
+        if facts is None or key in facts.escaped or facts.has_labels:return False
+        if facts.declarations.get(key) is not None and len(facts.mutations.get(key,()))>1 or key not in facts.declarations and facts.mutations.get(key):return False
+        for cond,truth,guard in facts.facts(node):
+            for local,declaration in facts.declarations.items():
+                if local==key or local in facts.escaped or '*' not in type_of(declaration) or not implies_nonnull(cond,truth,match_variable(local)):continue
+                # r's one definition: an initializer or a single assignment of a direct call.
+                stores=[n for n in facts.order if n.get('kind')=='BinaryOperator' and n.get('opcode')=='=' and children(n) and unwrap(children(n)[0]).get('referencedDecl',{}).get('id')==local]
+                if len(stores)+(1 if children(declaration) else 0)!=1:continue
+                call=unwrap(children(stores[0])[1] if stores else children(declaration)[-1])
+                if call.get('kind')!='CallExpr':continue
+                name=self.direct_call(call)
+                if not name or name not in self.functions:continue
+                arguments=children(call)[1:];parameters=self.parameters(self.functions[name])
+                index=next((i for i,a in enumerate(arguments) if unwrap(a).get('kind')=='DeclRefExpr' and unwrap(a).get('referencedDecl',{}).get('id')==key),None)
+                if index is None or index>=len(parameters):continue
+                if self.null_only_when_null(name,parameters,index,arguments,env,stack):
+                    self.null_guard_proofs.append(dict(kind='return_correlated_guard',function=stack[-1],call_path=stack,value=facts.declarations.get(key,{}).get('name') or 'parameter',
+                        result=declaration.get('name'),callee=name,guard=self.location(guard),location=self.location(node)))
+                    return True
+        return False
+    def null_only_when_null(self,name,parameters,index,arguments,env,stack):
+        from entry_state_values import implies_nonnull,match_variable,is_null
+        function=self.functions[name];callee=self.values.facts_for(name);parameter=parameters[index]['id']
+        if parameter in callee.escaped or callee.mutations.get(parameter) or callee.has_labels:return False
+        returns=[n for n in callee.order if n.get('kind')=='ReturnStmt']
+        if not returns:return False
+        for r in returns:
+            value=unwrap(children(r)[0]) if children(r) else None
+            if value is None:return False
+            if is_null(children(r)[0]) or is_null(value):
+                # A null return must lie where the parameter is null: a guard whose opposite truth proves it non-null.
+                if not any(implies_nonnull(c,not t,match_variable(parameter)) for c,t,_ in callee.facts(r)):return False
+                continue
+            # Any other return passes back a parameter whose argument here is a non-null address.
+            target=value.get('referencedDecl',{}) if value.get('kind')=='DeclRefExpr' else {}
+            position=next((i for i,p in enumerate(parameters) if p['id']==target.get('id')),None)
+            if position is None or target.get('id') in callee.mutations or position>=len(arguments):return False
+            self.quiet+=1
+            try:passed=self.resolve(arguments[position],env,stack)
+            finally:self.quiet-=1
+            if not passed or any(v=='null' or v.startswith(('unresolved:','const-address:','error-pointer')) for v in passed):return False
+        return True
+    def copied_local(self,node,key,facts):
+        """The variable a pointer local was initialized from by a plain (cast) copy, when neither is ever assigned."""
+        declaration=facts.declarations.get(key)
+        if declaration is None or not children(declaration) or facts.mutations.get(key,[])!=[facts.span[id(declaration)][1]] or key in facts.escaped:return None
+        value=children(declaration)[-1]
+        while value.get('kind') in ('ParenExpr','ImplicitCastExpr','CStyleCastExpr') and children(value) and (value.get('kind')=='ParenExpr' or value.get('castKind') in ('NoOp','BitCast','LValueToRValue')):value=children(value)[0]
+        if value.get('kind')!='DeclRefExpr':return None
+        source=value.get('referencedDecl',{}).get('id')
+        if source is None or source in self.globals or source in facts.escaped or facts.mutations.get(source) and source in facts.declarations and facts.mutations[source]!=[facts.span[id(facts.declarations[source])][1]]:return None
+        if source not in facts.declarations and facts.mutations.get(source):return None
+        return source
     def nonnull(self,node,match,label,stack):
         """A dominating guard proves this read of a pointer non-null."""
         from entry_state_values import implies_nonnull
@@ -1878,6 +2389,210 @@ class Analyzer:
                 live=scope is not None and scope[:len(origin['scope'])]==origin['scope']
             if not live:self.issue('pointer_arithmetic',node,stack,'bounded pointer is outside its automatic storage scope/lifetime')
 
+    SCALAR_BYTES={'_Bool':1,'char':1,'signed char':1,'unsigned char':1,'short':2,'unsigned short':2,'int':4,'unsigned int':4,
+                  'long':8,'unsigned long':8,'long long':8,'unsigned long long':8}
+    def type_bytes(self,typ):
+        """Byte size on the AArch64 slice target, or None."""
+        layout=self.type_layout(typ);return layout[0] if layout else None
+
+    def named_type(self,typ):
+        """(resolved type spelling, record declaration or None) through typedefs, including typedefs of
+        anonymous records (freeptr_t), which the typedef table spells by their own name."""
+        typ=re.sub(r'^(?:const |volatile )+','',(typ or '').strip())
+        if '_typedef_records' not in self.__dict__:
+            records={n['id']:n for n in walk(self._tree) if n.get('kind')=='RecordDecl' and n.get('completeDefinition')}
+            self._typedef_records={}
+            for n in walk(self._tree):
+                if n.get('kind')!='TypedefDecl':continue
+                ref=next((x['decl']['id'] for x in walk(n) if x.get('kind')=='RecordType' and x.get('decl',{}).get('id') in records),None)
+                if ref is not None:self._typedef_records.setdefault(n['name'],records[ref])
+        for _ in range(8):
+            record=self.record_declaration(typ)
+            if record is not None:return typ,record
+            if typ in self._typedef_records:return typ,self._typedef_records[typ]
+            target=next((t for (unit,name),t in self.typedefs.items() if name==typ),None)
+            if target is None or target==typ:return typ,None
+            typ=re.sub(r'^(?:const |volatile )+','',target.strip())
+        return typ,None
+
+    def type_layout(self,typ,depth=0):
+        """(size, alignment) of a type under the AArch64 LP64 ABI: scalars, pointers, fixed arrays and
+        records of them (C11 layout: members in order at aligned offsets, unions overlaid), or None."""
+        typ=re.sub(r'^(?:const |volatile )+','',(typ or '').strip())
+        if depth>8 or not typ:return None
+        if not re.search(r'[\[*]',typ):typ,_=self.named_type(typ)
+        if typ in self.SCALAR_BYTES:return self.SCALAR_BYTES[typ],self.SCALAR_BYTES[typ]
+        if typ in ('__int128','unsigned __int128'):return 16,16
+        if typ.endswith('*') and '(' not in typ:return 8,8
+        array=re.fullmatch(r'(.+?)\s*\[(\d+)\]((?:\[\d+\])*)',typ)
+        if array and '(' not in typ:
+            inner=self.type_layout((array[1]+(' '+array[3] if array[3] else '')).strip(),depth+1)
+            return (inner[0]*int(array[2]),inner[1]) if inner else None
+        _,record=self.named_type(typ)
+        if record is None:return None
+        if any(c.get('kind')=='FieldDecl' and c.get('isBitfield') for c in walk(record)):return None
+        size=0;align=1;union=record.get('tagUsed')=='union'
+        members=[]
+        for k,child in enumerate(children(record)):
+            if child.get('kind')!='FieldDecl':continue
+            if child.get('name'):
+                layout=self.type_layout(type_of(child),depth+1)
+                # A named member of an anonymous record type (union futex_key's `struct {...} shared;`): the
+                # record is declared just before the field.
+                previous=children(record)[k-1] if k else None
+                if layout is None and previous is not None and previous.get('kind')=='RecordDecl' and not previous.get('name') and re.search(r'\((?:unnamed|anonymous) ',type_of(child)):
+                    layout=self.anonymous_layout(previous,depth+1)
+                members.append(layout)
+            else:
+                anonymous=children(record)[k-1] if k and children(record)[k-1].get('kind')=='RecordDecl' else None
+                members.append(self.type_layout((anonymous.get('tagUsed','struct')+' '+anonymous['name']) if anonymous and anonymous.get('name') else None,depth+1) if anonymous is None or anonymous.get('name') else self.anonymous_layout(anonymous,depth+1))
+        for member in members:
+            if member is None:return None
+            msize,malign=member;align=max(align,malign)
+            if union:size=max(size,msize)
+            else:size=(size+malign-1)//malign*malign+msize
+        return (size+align-1)//align*align,align
+
+    def anonymous_layout(self,record,depth):
+        size=0;align=1;union=record.get('tagUsed')=='union'
+        for k,child in enumerate(children(record)):
+            if child.get('kind')!='FieldDecl':continue
+            member=self.type_layout(type_of(child),depth+1) if child.get('name') else self.anonymous_layout(children(record)[k-1],depth+1) if k and children(record)[k-1].get('kind')=='RecordDecl' else None
+            if member is None:return None
+            msize,malign=member;align=max(align,malign)
+            if union:size=max(size,msize)
+            else:size=(size+malign-1)//malign*malign+msize
+        return (size+align-1)//align*align,align
+
+    def entry_path_type(self,path):
+        """Declared type of an entry lvalue path (`argument:ctx->a[0][2]->b.c`), or None."""
+        match=re.match(r'argument:ctx',path)
+        if match is None:return None
+        typ='struct osrec_kernel_context *';rest=path[match.end():]
+        for step in re.findall(r'->[A-Za-z_]\w*|\.[A-Za-z_]\w*|\[\d+\]',rest):
+            if step.startswith('['):
+                array=re.fullmatch(r'(.+?)\s*\[(\d+)\]((?:\[\d+\])*)',typ)
+                if array:typ=(array[1]+(' '+array[3] if array[3] else '')).strip();continue
+                if typ.endswith('*'):typ=typ[:-1].strip();continue
+                return None
+            if step.startswith('->'):
+                if not typ.endswith('*'):return None
+                typ=typ[:-1].strip()
+            record=self.record_declaration(typ)
+            if record is None:return None
+            name=step.lstrip('-.>');typ=next((f[1] for f in self.flat_fields(record) if f[0]==name),None)
+            if typ is None:return None
+        if ''.join(re.findall(r'->[A-Za-z_]\w*|\.[A-Za-z_]\w*|\[\d+\]',rest))!=rest:return None
+        return typ
+
+    def word_store(self,path):
+        """An object that is one array of integers (`struct kmalloc_object {u64 words[24];}`), addressable by
+        byte offset: (array path, element type, element bytes, element count, object type), or None.
+
+        `path` is the object itself (`argument:ctx->kmalloc_object`) or a pointer field's value whose
+        declared object type a pointer_objects contract gives (`...->cpu_slab->freelist`)."""
+        typ=None;array_path=None
+        direct=self.entry_path_type(path) if re.fullmatch(r'argument:ctx->[A-Za-z_]\w*',path) else None
+        if direct is not None and self.record_declaration(direct) is not None:typ=direct;separator='.'
+        else:
+            member=re.fullmatch(r'(.+)(->|\.)([A-Za-z_]\w*)',path)
+            if member is None:return None
+            owner=self.entry_path_type(member[1])
+            if owner is None:return None
+            if member[2]=='->':
+                if not owner.endswith('*'):return None
+                owner=owner[:-1].strip()
+            contract=self.pointer_objects.get((re.sub(r'^(?:const |volatile )+','',owner),member[3]))
+            if contract is None:return None
+            typ=contract['object_type'];separator='->'
+        record=self.record_declaration(typ)
+        if record is None or record.get('tagUsed')=='union':return None
+        fields=self.flat_fields(record)
+        if len(fields)!=1 or fields[0][1].count('[')!=1:return None
+        array=fixed_array(fields[0][1])
+        if array is None:return None
+        element=array[1].strip();size=self.SCALAR_BYTES.get(self.named_type(element)[0])
+        if size is None:return None
+        return path+separator+fields[0][0],element,size,int(array[2]),typ
+
+    def allocation_token(self,name,node,stack):
+        """The summarized object an allocator call returns: one per call site, owned by the root frame
+        (the allocation outlives the allocating call; kfree ends its use)."""
+        contract=self.allocations[name];owner=(stack[0],) if stack else ()
+        key='allocation:'+str(node.get('id'))
+        token=self._auto_objects.get((owner,key))
+        if token is None:
+            token='auto:%d'%len(self._auto_objects);self._auto_objects[(owner,key)]=token
+            self._auto_info[token]=dict(owner=owner,declaration=key,initialized=False,allocation=contract,
+                summary=dict(element_type=contract['element_type'],elements=contract['elements']))
+        return token
+
+    def integer_address(self,node,env,stack,depth=0):
+        """[(object path, low, high)] for an integer that is an object's address plus a proven byte offset:
+        `(unsigned long)p + off`, through casts and single reaching definitions of integer locals."""
+        if depth>8:return None
+        while node.get('kind')=='ParenExpr' or node.get('kind') in ('ImplicitCastExpr','CStyleCastExpr') and node.get('castKind') in ('NoOp','LValueToRValue','IntegralCast') and type_of(node) in POINTER_WIDTH_INTEGERS:
+            if not children(node):return None
+            node=children(node)[0]
+        kind=node.get('kind');terms=children(node)
+        if kind in ('ImplicitCastExpr','CStyleCastExpr') and node.get('castKind')=='PointerToIntegral' and terms and type_of(node) in POINTER_WIDTH_INTEGERS:
+            inner=terms[0]
+            while inner.get('kind')=='ParenExpr' or inner.get('kind') in ('ImplicitCastExpr','CStyleCastExpr') and inner.get('castKind') in ('NoOp','BitCast') and children(inner):inner=children(inner)[0]
+            if inner.get('kind') in ('ImplicitCastExpr','CStyleCastExpr') and inner.get('castKind')=='IntegralToPointer' and children(inner):
+                return self.integer_address(children(inner)[0],env,stack,depth+1)
+            self.quiet+=1
+            try:values=self.resolve(terms[0],env,stack)-{INFEASIBLE}
+            finally:self.quiet-=1
+            if not values or any(self.word_store(v) is None and not self._auto_info.get(v,{}).get('allocation') for v in values):return None
+            return [(v,0,0) for v in sorted(values)]
+        if kind=='BinaryOperator' and node.get('opcode')=='+' and len(terms)==2:
+            for base,offset in (terms,terms[::-1]):
+                found=self.integer_address(base,env,stack,depth+1)
+                if found is None:continue
+                self.quiet+=1
+                try:bounds,_=self.fallback_index_bounds(offset,stack)
+                finally:self.quiet-=1
+                if bounds is None or bounds[0]<0:return None
+                return [(p,low+bounds[0],high+bounds[1]) for p,low,high in found]
+            return None
+        if kind=='DeclRefExpr' and stack and stack[-1] in self.functions:
+            declaration=node.get('referencedDecl',{});facts=self.values.facts_for(stack[-1])
+            if declaration.get('kind')!='VarDecl' or declaration.get('id') in self.globals or declaration.get('id') in facts.escaped or not facts.contains(node):return None
+            definition=facts.reaching(node,declaration['id'])
+            return self.integer_address(definition,env,stack,depth+1) if definition is not None else None
+        return None
+
+    def allocation_bytes(self,allocation):
+        _,_,size,count,_=self.word_store(allocation['object'].rsplit('.',1)[0]) or (None,None,0,0,None)
+        return size*count
+
+    def word_store_pointer(self,cast,env,stack):
+        """Bounded pointers for `(T *)integer` whose integer is a word-store object's address plus a proven offset."""
+        if not children(cast):return None
+        found=self.integer_address(children(cast)[0],env,stack)
+        access=self.type_bytes(type_of(cast).strip()[:-1]) if type_of(cast).strip().endswith('*') else None
+        if not found or access is None:return None
+        result=set()
+        for path,low,high in found:
+            allocation=self._auto_info.get(path,{}).get('allocation')
+            if allocation is not None:
+                # SLUB's free pointer, stored into the object kfree releases: freed memory the call no longer
+                # reads (kernel memory safety: no use after free), so the store has no tracked effect.
+                if high+access>self.allocation_bytes(allocation):
+                    self.issue('array_bounds',cast,stack,'byte offset reaches outside its allocation');return set()
+                self.allocation_uses.append(dict(kind='allocation_byte_offset',function=stack[-1],call_path=stack,location=self.location(cast),
+                    allocation=allocation['function'],byte_offsets=[low,high],access_bytes=access,assumption='the allocation is not read after kfree stores its free pointer'))
+                result.add(path);continue
+            array,element,size,count,_=self.word_store(path)
+            if high+access>size*count:
+                self.issue('array_bounds',cast,stack,'byte offset reaches outside its object');return set()
+            origin=dict(identity='word-store:'+array,path=array,extent=count,element_type=element,owner=(),scope=(),immutable_global=None,array_type_evidence=None)
+            # Every element an access of `access` bytes at an offset in [low, high] can touch.
+            for k in range(low//size,(high+access-1)//size+1):result.add(self.bounded_pointer(origin,k,cast,stack))
+            self.derived_proofs.append(dict(kind='word_store_byte_offset',function=stack[-1],call_path=stack,location=self.location(cast),
+                object=path,array=array,byte_offsets=[low,high],access_bytes=access,elements=[low//size,(high+access-1)//size]))
+        return result
+
     def bounded_pointer(self,origin,offset,node,stack):
         """Intern pointer values separately from lvalue object-path strings."""
         key=(origin['identity'],origin['path'],origin['extent'],origin['element_type'],origin['owner'],origin['scope'],offset)
@@ -1899,7 +2614,12 @@ class Analyzer:
         if count is None and completion is not None:
             completed=declared_array_shape(completion['type'])
             if completed is not None:element,(count,)=completed
-        if count is None or count<=0 or (self.numeric_element_type(element,base.get('_translation_unit')) is None and not object_pointer_element(element) and record_type_key(element) is None):return None
+        # Elements may be records spelled by a typedef (pud_t, a page table's descriptor).
+        typedef_record=(base.get('_translation_unit'),element.removeprefix('const ').strip()) in self.record_typedefs
+        if count is None or count<=0 or (self.numeric_element_type(element,base.get('_translation_unit')) is None and not object_pointer_element(element) and record_type_key(element) is None and not typedef_record):return None
+        if base.get('kind')=='DeclRefExpr' and self.summary_array(key) is not None:
+            token=self.summary_origin(key,node,stack)
+            if token is not None:return {token}
         global_array=key in self.globals
         automatic=key in self.automatic_arrays
         compound=base.get('kind')=='CompoundLiteralExpr' and base.get('id') in self.automatic_compound_literals
@@ -1926,6 +2646,38 @@ class Analyzer:
             result.add(self.bounded_pointer(origin,0,node,stack))
         return self.bounded_aliases(result,node,stack)
 
+    def automatic_view(self,pointer,paths,node,stack):
+        """Read-only scalar elements of stack objects through a const pointer view (jhash2's `const u32 *k`).
+
+        Every value must be a stack object (`auto:N`, or a member of one) or an address derived from
+        one by arithmetic. The const pointee forbids writes through the view, so stored pointer values
+        the analysis tracks are unchanged; reads, at any offset, touch only stack memory and are no
+        entry state. The paths stay rooted at their objects, so access() checks the owning call.
+        """
+        pointee=type_of(pointer).strip()
+        if not paths or not pointee.endswith('*') or not re.match(r'const\b',pointee) or not arithmetic_scalar(re.sub(r'^const\s+','',type_of(node).strip())):return None
+        stack_object=r'auto:\d+(?:(?:->|\.)[A-Za-z_]\w*)*'
+        origins=[]
+        for path in paths:
+            origin=self._derived_pointers.get(path,{}).get('path') if path in self._derived_pointers and self._derived_pointers[path].get('kind')=='object' else path
+            if origin is None or not re.fullmatch(stack_object,origin):return None
+            origins.append(origin)
+        self.automatic_views.append(dict(function=stack[-1],call_path=stack,location=self.location(node),element_type=type_of(node),
+            objects=sorted(set(origins)),access='read through a const pointer view'))
+        return {'*('+o+')' for o in origins}
+
+    def automatic_scalar_paths(self,pointer,paths):
+        """Paths that are whole automatic objects (auto:N) declared with the pointer's pointee type, not arrays."""
+        pointee=re.sub(r'\b(?:const|volatile)\b','',type_of(pointer)).replace('*','',1).strip() if '*' in type_of(pointer) else None
+        if pointee is None or not paths:return False
+        clean=lambda t:re.sub(r'\s+',' ',re.sub(r'\b(?:const|volatile)\b','',t)).strip()
+        for path in paths:
+            info=self._auto_info.get(path) if re.fullmatch(r'auto:\d+',path) else None
+            if info is None or info.get('summary'):return False
+            owner=info['owner'];declaration=next((n for n in self.values.facts_for(owner[-1]).order if n.get('id')==info['declaration']),None) if owner and owner[-1] in self.functions else None
+            if declaration is None or fixed_array(type_of(declaration)) or clean(type_of(declaration))!=clean(pointee):return False
+        return True
+
     def scalar_object_paths(self,pointer,paths):
         """Paths that are scalar fields taken by address, viewed through a pointer to the same type."""
         pointee=re.sub(r'\b(?:const|volatile)\b','',type_of(pointer)).replace('*','',1).strip() if '*' in type_of(pointer) else None
@@ -1945,6 +2697,8 @@ class Analyzer:
         if target.get('kind')!='DeclRefExpr':return None
         key=target.get('referencedDecl',{}).get('id');declaration=self.automatic_scalars.get(key)
         if declaration is None:return None
+        # A root's parameters are its arguments (entry state), not a frame of this analysis.
+        if declaration.get('kind')=='ParmVarDecl' and len(stack)<2:return None
         scope=self.pointer_scopes(stack[-1]).get(key)
         if scope is None:return None
         path='local:'+declaration['name']
@@ -2010,7 +2764,11 @@ class Analyzer:
         all_origins=origins[0]+origins[1];origin=all_origins[0]
         identity=lambda o:(o['identity'],o['path'],o['extent'],o['element_type'],o['owner'],o['scope'])
         storage=r'(?:global|local):(?:tu[0-9]+:)?[A-Za-z_]\w*(?:\.[A-Za-z_]\w*|\[[0-9]+\])*'
-        if not re.fullmatch(storage,origin['path']) or any(identity(o)!=identity(origin) or not 0<=o['offset']<=o['extent'] for o in all_origins):return None
+        # An array a pointer member of entry state holds (a pointer_extents contract) is one array as long as the
+        # call never stores that member: both operands then index the same loaded base (checked against the
+        # final write set, see analyze()).
+        reached=origin['identity'][0]=='extent' and re.fullmatch(r'argument:ctx->[A-Za-z_]\w*(?:\.[A-Za-z_]\w*|\[[0-9]+\])*',origin['path'])
+        if not (re.fullmatch(storage,origin['path']) or reached) or any(identity(o)!=identity(origin) or not 0<=o['offset']<=o['extent'] for o in all_origins):return None
         owner=origin['owner']
         if owner:
             if tuple(stack[:len(owner)])!=owner:return None
@@ -2078,7 +2836,7 @@ class Analyzer:
         target=unwrap(children(node)[0]) if children(node) else {}
         if target.get('kind')!='DeclRefExpr' or target.get('referencedDecl',{}).get('id') in self.globals:return False
         value=self.mutation_expression(node)
-        return value is not None and (self.offset_pointers(value,env,stack) is not None or self.derived_pointers(value,env,stack) is not None)
+        return value is not None and (self.summary_arithmetic(value,env,stack) is not None or self.offset_pointers(value,env,stack) is not None or self.derived_pointers(value,env,stack) is not None)
 
     def escaped_pointer_step(self,node,env,stack):
         """The value an escaped pointer local holds after `p++`, `p += n` and the like.
@@ -2086,6 +2844,9 @@ class Analyzer:
         Its value lives in the automatic-object store, which does not follow the counted-loop
         cursor proofs: a step that can repeat (in a loop, or with labels) is an unresolved value.
         """
+        value=self.mutation_expression(node)
+        stepped=self.summary_arithmetic(value,env,stack) if value is not None else None
+        if stepped is not None:return stepped
         facts=self.function_facts(node,stack)
         if facts is None or facts.has_labels:return {'unresolved:pointer-mutation'}
         parent=facts.parent.get(id(node))
@@ -2124,9 +2885,41 @@ class Analyzer:
             if index>=len(inner)-1 or '*' not in type_of(inner[1+index]):
                 self.issue('boundary_memory_effect',node,stack,'checked span does not name a pointer argument');continue
             values=self.resolve(inner[1+index],env,stack)-{INFEASIBLE}
+            # An argument naming an automatic pointer object's storage (`p[i]` over `&object`) passes its value.
+            for value in [v for v in values if re.fullmatch(r'\*\(auto:\d+\)',v)]:
+                token=value[2:-1]
+                if self.auto_record(token) is None:values=(values-{value})|self.auto_read(token,'*',node,stack)
             listed={};rejected=set();unknown=False
             for value in values:
+                # Stack storage of this call chain (`automatic`): no entry state. Its tracked pointer fields take
+                # the written bytes: null for a zero fill (memset), unresolved for data.
+                stack_object=re.match(r'^(auto:\d+)((?:(?:->|\.)[A-Za-z_]\w*)*)$',self._derived_pointers.get(value,{}).get('path',value) if value in self._derived_pointers and self._derived_pointers[value].get('kind')=='object' else value)
+                if stack_object and 'automatic' in span['objects'] and not self._auto_info.get(stack_object[1],{}).get('allocation'):
+                    if span['access']=='write':
+                        token=stack_object[1];prefix=re.sub(r'->|\.','.',stack_object[2]).strip('.')
+                        written={'null'} if span.get('fill')=='zero' else {'unresolved:span-write'}
+                        overwritten=self.overwritten_after(node,token,prefix,env,stack) if span.get('fill')=='zero' else set()
+                        for (t,field) in list(self._auto_store):
+                            if t==token and (not prefix or field==prefix or field.startswith(prefix+'.')) and field not in overwritten:self.auto_write(token,field,written,node,stack,strong=False)
+                    self.span_proofs.append(dict(kind='automatic_storage_span',function=stack[-1],call_path=stack,location=self.location(node),object=stack_object[0],access=span['access'],fill=span.get('fill','data')))
+                    continue
+                # Null or a constant address lies in no listed object: the checked span fails there.
+                if value=='null' or value.startswith(('const-address:','error-pointer')):rejected.add(value.split(':',1)[0]);continue
                 origin=self._derived_pointers.get(value)
+                # An allocation backed by a listed object: fresh memory of this call, no entry state.
+                allocation=self._auto_info.get(origin['path'] if origin is not None and origin.get('kind')=='object' else value,{}).get('allocation')
+                if allocation is not None and allocation['object'] in span['objects']:
+                    self.allocation_uses.append(dict(kind='allocation_checked_span',function=stack[-1],call_path=stack,location=self.location(node),
+                        allocation=allocation['function'],object=allocation['object'],access=span['access']));continue
+                # A word-store object (or an address derived from one) whose array is a listed object, by type and member.
+                stored=self.word_store(origin['path'] if origin is not None and origin.get('kind')=='object' else value) if origin is None or origin.get('kind')=='object' else None
+                if stored is not None:
+                    array,element,size,count,typ=stored;member=array.rsplit('.',1)[-1].rsplit('>',1)[-1]
+                    match=next((o for o in span['objects'] if '.' in o and o.rsplit('.',1)[1]==member and (self.word_store(o.rsplit('.',1)[0]) or (None,)*5)[4]==typ),None)
+                    if match is not None:
+                        listed.setdefault(match,dict(kind='array',path=array,extent=count,element_type=element,owner=[],immutable_global=None,word_store=True))
+                        if listed[match]['path']!=array:listed[match+'#'+array]=dict(kind='array',path=array,extent=count,element_type=element,owner=[],immutable_global=None,word_store=True)
+                        continue
                 if origin is None and value in self._bounded_pointers:
                     o=self._bounded_pointers[value];origin=dict(kind='array',path=o['path'],extent=o['extent'],element_type=o['element_type'],owner=list(o['owner']),immutable_global=o['immutable_global'])
                 if origin is None or origin.get('kind') in ('unresolved','object'):unknown=True;continue
@@ -2136,7 +2929,7 @@ class Analyzer:
                 if origin['owner'] and tuple(stack[:len(origin['owner'])])!=tuple(origin['owner']):
                     self.issue('boundary_memory_effect',node,stack,'checked span pointer outlives its automatic array');continue
                 listed[normalized]=origin
-            if unknown and set(listed)!=set(span['objects']):
+            if unknown and {k.split('#',1)[0] for k in listed}!=set(span['objects'])-{'automatic'}:
                 # An unknown address may name any listed object; each must be materialized from a known pointer.
                 self.issue('boundary_memory_effect',node,stack,'checked span pointer of unknown origin: every listed object must be reachable');continue
             for normalized,origin in sorted(listed.items()):
@@ -2167,6 +2960,12 @@ class Analyzer:
         if not re.fullmatch(r'(?:(?:const|volatile)\s+)*(?:(?:signed|unsigned)\s+)?(?:char|void)\s*\*',type_of(terms[0]).strip()):return None
         suffix=''.join('.'+f for f in designator['fields']);result=set();origins=[]
         values=self.resolve(terms[0],env,stack)
+        from entry_state_lists import head as list_head,sentinel as list_sentinel
+        if values and self.empty_list_heads and all(list_head(self.empty_list_heads,v) for v in values):
+            # The first entry of an empty list is no object: the walk cursor names only the head (entry_state_lists).
+            self.list_proofs.append(dict(kind='empty_list_cursor',function=stack[-1],call_path=stack,location=self.location(node),
+                record=designator['record'],member='.'.join(designator['fields']),heads=sorted({re.sub(r'\[\d+\]','[]',v) for v in values})))
+            return {list_sentinel(v,'.'.join(designator['fields'])) for v in values}
         if values=={INFEASIBLE}:
             # The only value is null and a dominating guard excludes it: this arm never runs.
             self.container_proofs.append(dict(kind='container_of_unreachable',function=stack[-1],call_path=stack,location=self.location(node),
@@ -2189,7 +2988,12 @@ class Analyzer:
         terms=children(node)
         if node.get('kind')!='BinaryOperator' or node.get('opcode')!='-' or len(terms)!=2 or not all('*' in type_of(c) for c in terms):return False
         sides=[self.resolve(c,env,stack) for c in terms]
-        if not all(sides) or not any(self.derived_values(side) for side in sides):return False
+        if not all(sides):return False
+        # Both sides one and the same object: an object is an array of one element, and p - p is 0.
+        if len(sides[0])==1 and sides[0]==sides[1] and not re.search(r'(?:^|\*\()(?:unresolved:|local:|bounded-pointer:|null$|const-address:|error-pointer|user:)',next(iter(sides[0]))):
+            self.derived_proofs.append(dict(kind='same_object_pointer_difference',function=stack[-1],call_path=stack,location=self.location(node),object=next(iter(sides[0])),value=0))
+            return True
+        if not any(self.derived_values(side) for side in sides):return False
         if any(re.search(r'(?:^|\*\()(?:unresolved:|local:)',p) for side in sides for p in side):return False
         self.derived_proofs.append(dict(kind='derived_pointer_difference',function=stack[-1],call_path=stack,location=self.location(node),value='unknown integer'))
         return True
@@ -2261,7 +3065,9 @@ class Analyzer:
             function=stack[-1],call_path=stack,location=self.location(node),storage=origin['path'],
             elements=origin['extent'],element_type=origin['element_type'],left_offsets=offsets[0],right_offsets=offsets[1],
             all_may_alias_pairs_checked=True,result_range=[0,1],branch_pruning=False,index_bounds_inferred=False,
-            automatic_storage=bool(origin['owner']),owner_call_path=list(origin['owner']),one_past_allowed=True))
+            automatic_storage=bool(origin['owner']),owner_call_path=list(origin['owner']),one_past_allowed=True,
+            **({'base_pointer':origin['path'],'base_pointer_unwritten':True} if origin['path'].startswith('argument:') else {})))
+        if origin['path'].startswith('argument:'):self._stable_bases.setdefault(origin['path'],(node,list(stack)))
         return True
 
     def bounded_pointer_return(self,paths,node,stack):
@@ -2271,8 +3077,11 @@ class Analyzer:
         including borrowed caller storage, retain the existing escape blocker.
         Never accept just the known subset of a mixed may-alias return value.
         """
-        if len(stack)<2 or not paths or any(p not in self._bounded_pointers for p in paths):return False
-        origins=[self._bounded_pointers[p] for p in paths]
+        # Named global objects may join the array elements (try_get_folio's folio: the bound user folio or a
+        # page-cache pool element): they have static storage too, and every alternative is still kept.
+        named=r'global:(?:tu[0-9]+:)?[A-Za-z_]\w*(?:\.[A-Za-z_]\w*|\[[0-9]+\])*'
+        if len(stack)<2 or not paths or any(p not in self._bounded_pointers and not re.fullmatch(named,p) for p in paths):return False
+        origins=[self._bounded_pointers[p] for p in paths if p in self._bounded_pointers]
         if any(o['owner'] or not 0<=o['offset']<=o['extent'] for o in origins):return False
         self.pointer_returns.append(dict(kind='bounded_internal_array_return',
             function=stack[-1],call_path=stack,location=self.location(node),
@@ -2298,18 +3107,19 @@ class Analyzer:
             self.issue('array_bounds',node,stack,'pointer dereference reaches outside its array elements');return set()
         if high-low+1>self.max_range_elements:
             self.issue('range_limit',node,stack,'pointer access interval exceeds the configured element limit');return set()
-        result=set()
+        result=set();per_array={};where=self.location(node)
         for origin in origins:
             if origin['owner'] and tuple(stack[:len(origin['owner'])])!=origin['owner']:
                 self.issue('pointer_arithmetic',node,stack,'automatic array pointer is outside its owning call lifetime');return set()
             for offset in range(origin['offset']+low,origin['offset']+high+1):
                 path=origin['path'] if origin.get('storage_kind')=='automatic_scalar' else origin['path']+'['+str(offset)+']'
+                if path not in result:per_array[origin['path']]=per_array.get(origin['path'],0)+1
                 result.add(path)
                 self._pointer_access_types[id(node),path]=origin['element_type']
                 if origin['immutable_global'] is not None:self._pointer_access_constants[id(node),path]=origin['immutable_global']
             self.ranges.append(dict(paths=[origin['path']],elements=origin['extent'],index_bounds=[origin['offset']+low,origin['offset']+high],
                 selection='proven bounded pointer interval',element_type=origin['element_type'],access_form='bounded_pointer',
-                bound_source='configured numeric array with propagated element offset',function=stack[-1],call_path=stack,location=self.location(node),
+                bound_source='configured numeric array with propagated element offset',function=stack[-1],call_path=stack,location=where,
                 pointer_provenance=dict(kind='object_relative_array_pointer',storage=origin['path'],extent=origin['extent'],element_offset=origin['offset'],automatic_lifetime_owner=list(origin['owner']))))
             if origin.get('storage_kind')=='automatic_scalar':
                 self.ranges[-1]['bound_source']='configured automatic numeric scalar treated as one element'
@@ -2317,13 +3127,15 @@ class Analyzer:
             if proof is not None:self.ranges[-1]['index_proof']=proof
             if origin['array_type_evidence'] is not None:self.ranges[-1]['array_type_evidence']=origin['array_type_evidence']
             # The element limit applies to each array; the alias limit bounds how many arrays.
-            if len({p for p in result if p==origin['path'] or p.startswith(origin['path']+'[')})>self.max_range_elements:
+            if per_array.get(origin['path'],0)>self.max_range_elements:
                 self.issue('range_limit',node,stack,'pointer access selection exceeds the configured element limit');return set()
         return result|{'*('+p+')' for p in ordinary}
 
     def access(self,paths,node,stack,write=False):
         if not paths:
             self.issue('unresolved_memory',node,stack,'memory address could not be resolved to an object path');return
+        if any('list-head:' in p for p in paths):
+            self.issue('unresolved_pointer_origin',node,stack,'an empty list walk cursor is not an object');return
         if '_Atomic' in type_of(node):
             self.issue('architecture_or_ordering',node,stack,'atomic memory access needs a target/state model')
         autos=[p for p in paths if re.match(r'^(?:\*\()*auto:\d+',p)]
@@ -2389,6 +3201,11 @@ class Analyzer:
             if not write and 'immutable_global' not in item and arithmetic_scalar(type_of(node)):
                 record=self.constant_record_for(path,type_of(node))
                 if record is not None:item['immutable_global']=record
+            if not write and 'immutable_global' not in item and re.fullmatch(r'global:(?:tu[0-9]+:)?[A-Za-z_]\w*',path) and type_of(node).startswith('const ') and record_type_key(type_of(node)) is not None:
+                found=self.const_graph.definition(path[len('global:'):],syntax=False)
+                if found is not None and type_of(found[0])==type_of(node):
+                    item['immutable_global']=dict(kind='defined_const_record',object=path[len('global:'):],type=type_of(node),
+                        initializer_sha256=digest(json.dumps(found[1],sort_keys=True,default=str).encode()),declaration_location=self.location(found[0]))
             if not write and 'immutable_global' not in item and path.startswith('global:'):
                 leaf=self.const_graph.leaf(path,type_of(node))
                 if leaf is not None:
@@ -2425,6 +3242,7 @@ class Analyzer:
     def bounded_aliases(self,paths,node,stack):
         if len(paths)>self.max_alias_paths:
             self.alias_path_limit_observed=True
+            if self.quiet:self._quiet_limits.append((node,list(stack)))
             self.issue('alias_limit',node,stack,'pointer alias path count exceeds configured limit of '+str(self.max_alias_paths))
             return {ALIAS_LIMIT_ORIGIN}
         # Unknown is absorbing, including after field/dereference projection.
@@ -3049,6 +3867,8 @@ class Analyzer:
                 if values and all(self.user_tag(v) for v in values):return {self.user_tag(v) for v in values}
             recovered=self.tagged_recovery(original,env,stack)
             if recovered is not None:return recovered
+            stored=self.word_store_pointer(original,env,stack)
+            if stored is not None:return stored
             masked=self.masked_pointer(original,stack)
             if masked is not None:
                 self.masked_pointer_proofs.append(dict(kind='index_mask_pointer',function=stack[-1],call_path=stack,location=self.location(original),
@@ -3074,7 +3894,9 @@ class Analyzer:
             if any(p in self._bounded_pointers for p in values) and qualifier_only_conversion(original,children(original)[0]):
                 return values
             # A void * view keeps the object; offsets on it and casts back from it stay rejected.
-            if values and all(p in self._bounded_pointers for p in values) and void_view(original):
+            # The same holds when some alternatives are named objects (a global, or a member of one) instead of
+            # array elements: page_folio's folio is a page-cache pool element or the bound user folio.
+            if values and all(p in self._bounded_pointers or re.fullmatch(r'(?:global:(?:tu[0-9]+:)?|argument:ctx->)[A-Za-z_]\w*(?:\.[A-Za-z_]\w*|\[[0-9]+\])*',p) for p in values) and void_view(original):
                 return values
             if any(p in self._bounded_pointers for p in values):
                 self.issue('pointer_arithmetic',original,stack,'pointer conversions do not retain array element provenance')
@@ -3115,12 +3937,24 @@ class Analyzer:
                     if self.nonnull(node,match_variable(key),declaration.get('name'),stack):return values-{'null'} or {INFEASIBLE}
                 return values
             if key in env:
+                # A pointer local's flow value (its stores in visit order) is exact where it is known.
+                # The closure keeps every value it ever held (and the derived-pointer proofs); the flow
+                # value removes the constant classes (null, ERR_PTR codes, sentinels) absent at this point.
+                local=self.pointer_local_key(node,stack)
+                flowed=self.flow_value(local) if local is not None and not self._flow_masks else None
                 values=env[key]
+                if flowed is not None and flowed[0]=='p' and flowed[1] and set(flowed[1])<=set(values):values=set(flowed[1])
+                values=self.guard_classes(node,key,values,env,stack)
+                if 'null' in env[key] and 'null' not in values:
+                    # Flow narrowing still owes the same auditable guard evidence as alias narrowing.
+                    from entry_state_values import match_variable
+                    self.nonnull(node,match_variable(key),declaration.get('name'),stack)
                 if 'null' in values:
                     from entry_state_values import match_variable
                     if self.nonnull(node,match_variable(key),declaration.get('name'),stack):return values-{'null'} or {INFEASIBLE}
                     if self.correlated_nonnull(node,key,env,stack):return values-{'null'} or {INFEASIBLE}
                     if self.null_replaced(node,key,env,stack):return values-{'null'} or {INFEASIBLE}
+                    if self.return_correlated_nonnull(node,key,env,stack):return values-{'null'} or {INFEASIBLE}
                 return values
             if key in self.globals:
                 self._referenced_globals.add(declaration['name'])
@@ -3150,6 +3984,17 @@ class Analyzer:
             else:paths={re.sub(r'->\.','->',base+('->' if node.get('isArrow') else '.')+node['name']) for base in bases}
             # Members of const globals are spelled by their canonical object path.
             paths={self.const_graph.canonical(p) if p.startswith('global:') else p for p in paths}
+            if self.empty_list_heads:
+                # `&sentinel->m` of an empty list's walk cursor is the head itself (entry_state_lists).
+                from entry_state_lists import member as list_member,link as list_link
+                paths={list_member(p) for p in paths}
+                if self._auto_storage!=id(node) and '*' in type_of(node):
+                    linked={p:list_link(self.empty_list_heads,p) for p in paths}
+                    if any(linked.values()):
+                        # The link of an empty head is the head: next and prev both point at it.
+                        self.list_proofs.append(dict(kind='empty_list_link',function=stack[-1],call_path=stack,location=self.location(node),
+                            heads=sorted({re.sub(r'\[\d+\]','[]',h) for h in linked.values() if h}),links=sum(1 for h in linked.values() if h)))
+                        return {h if h else p for p,h in linked.items()}
             if self._auto_storage==id(node) or '*' not in type_of(node):return paths
             # A pointer member of a const global with a constant initializer holds that value.
             loaded=[self.const_graph.load(p) for p in paths]
@@ -3201,7 +4046,16 @@ class Analyzer:
                              base.get('referencedDecl',{}).get('id') in self.automatic_arrays)
             compound_array=(base.get('kind')=='CompoundLiteralExpr' and base.get('id') in self.automatic_compound_literals)
             nested_array=base.get('kind')=='ArraySubscriptExpr'
+            if automatic_array and direct and self.summary_array(base['referencedDecl']['id']) is not None:
+                token=self.summary_origin(base['referencedDecl']['id'],node,stack)
+                # The element's storage when that is asked for (or it is a record); otherwise a pointer element's
+                # value: what the summarized stores put there (`local[0]->index` reads through it).
+                if token is not None:
+                    if self._auto_storage==id(node) or '*' not in type_of(node) or self.auto_record(token) is not None:return {'*('+token+')'}
+                    return self.auto_read(token,'*',node,stack)
             if not array or not direct or not (base.get('kind')=='MemberExpr' or nested_array or global_array or automatic_array or compound_array):
+                summary=None if direct else self.summary_paths(self.resolve(inner[0],env,stack))
+                if summary is not None:return {'*('+p+')' for p in summary}
                 bounds,proof=self.index_bounds_for(index,stack)
                 if bounds is None and node.get('id') in self.loop_index_sites:
                     certified=self.loop_index_sites[node['id']];bounds=certified['bounds'];proof=certified['proof']
@@ -3213,6 +4067,8 @@ class Analyzer:
                     return {p+'[*]' for p in base_paths}
                 selected=self.pointer_access(base_paths,node,stack,bounds,proof)
                 if selected is not None:return selected
+                view=self.automatic_view(inner[0],base_paths,node,stack)
+                if view is not None:return view
                 extent=self.extent_contract(inner[0])
                 if extent is not None and bounds is not None and base_paths and not any(re.search(r'(?:^|\*\()(?:null|unresolved:)|bounded-pointer:',p) for p in base_paths):
                     low,high=bounds
@@ -3226,6 +4082,12 @@ class Analyzer:
                         function=stack[-1],call_path=stack,location=self.location(node),**({'index_proof':proof} if proof else {})))
                     self.extent_assumptions.append(extent['state_range'])
                     return {p+'['+str(i)+']' for p in base_paths for i in range(low,high+1)}
+                if bounds is not None and tuple(bounds)==(0,0) and self.automatic_scalar_paths(inner[0],base_paths):
+                    # p[0] where p holds the address of an automatic non-array object of p's pointee type
+                    # (slab_post_alloc_hook's p[i] over &object, i < size == 1): that object itself.
+                    self.ranges.append(dict(paths=sorted(base_paths),elements=1,index_bounds=[0,0],selection='automatic object as one-element array',
+                        element_type=type_of(node),bound_source='address of an automatic object of the pointee type',function=stack[-1],call_path=stack,location=self.location(node),**({'index_proof':proof} if proof else {})))
+                    return {'*('+p+')' for p in base_paths}
                 if bounds is not None and tuple(bounds)==(0,0) and self.scalar_object_paths(inner[0],base_paths):
                     self.ranges.append(dict(paths=sorted(base_paths),elements=1,index_bounds=[0,0],selection='scalar object as one-element array',
                         element_type=type_of(node),bound_source='address of a numeric scalar field',function=stack[-1],call_path=stack,location=self.location(node)))
@@ -3295,6 +4157,13 @@ class Analyzer:
             if node['opcode']=='*':
                 selected=self.pointer_access(base,node,stack)
                 if selected is not None:return selected
+                # A load through the address of an escaped pointer local (`*vp` with vp == &v), or of
+                # an element of a summarized pointer array, reads the stored pointer values.
+                if '*' in type_of(node) and '(' not in type_of(node) and self._auto_storage!=id(node) and base and all(
+                        b in self._auto_info and self.auto_record(b) is None for b in base):
+                    values=set()
+                    for b in base:values|=self.auto_read(b,'*',node,stack)
+                    return values
             return base if node['opcode']=='&' else {'*('+value+')' for value in base}
         if kind=='UnaryOperator' and node.get('opcode') in ('++','--') and '*' in type_of(node):
             update=self.pointer_update(node,env,stack)
@@ -3307,6 +4176,12 @@ class Analyzer:
                 return self.resolve(stepped,env,stack) if node.get('isPostfix') is False else self.resolve(inner[0],env,stack)
             return {'unresolved:pointer-mutation'}
         if kind=='CallExpr':
+            # This pass's visit-time result at this call, or (optimistically) the previous pass's.
+            recent=self._recent_return.get((id(node),tuple(stack)))
+            if recent is None and self._optimistic:recent=self._prior_returns.get((id(node),tuple(stack)))
+            # Only constants and values rooted at stack objects, whose stores the visit tracks: a value
+            # naming a global's or an entry path's contents may miss a store the closure would see.
+            if recent and all(re.fullmatch(r'auto:\d+(?:(?:->|\.)[\w\[\]>.-]*)?|const-address:-?\d+|null|error-pointer',v) and 'unresolved:' not in v for v in recent):return set(recent)
             result=set()
             for name in self.targets(node,env,stack) or ():
                 policy=self.boundary(name) or {}
@@ -3336,11 +4211,20 @@ class Analyzer:
                         kept=[(e,st) for e,st in returns if self.prior_reachable(st,name,stack+[name])]
                         returns=kept
                         for expression,statement in returns:
-                            values=self.integer_values(expression,local,stack+[name]) if type_of(node) in POINTER_WIDTH_INTEGERS else self.resolve(expression,local,stack+[name])
+                            # Values only: the callee's own accesses are checked where its body is visited.
+                            self.quiet+=1
+                            try:values=self.integer_values(expression,local,stack+[name]) if type_of(node) in POINTER_WIDTH_INTEGERS else self.resolve(expression,local,stack+[name])
+                            finally:self.quiet-=1
                             own=self.bounded_aliases(own|values,statement,stack+[name])
                     finally:self.flow_unmask(mask)
                     self._inline_cache[cache_key]=frozenset(own)
                     result=self.bounded_aliases(result|own,node,stack+[name])
+            allocators=[n for n in (self.targets(node,env,stack) or ()) if n.split(':',1)[-1] in self.allocations]
+            if allocators and '*' in type_of(node):
+                # Constants (null, ZERO_SIZE_PTR, ERR_PTR) stay; every object the allocator can return is the
+                # allocation, fresh memory written before it is read (the allocator body is analyzed separately).
+                kept={v for v in result if v=='null' or v.startswith(('const-address:','error-pointer',INFEASIBLE))}
+                result=kept|{self.allocation_token(allocators[0].split(':',1)[-1],node,stack)}
             if not result and '*' in type_of(node):return {'unresolved:call'}
             return result
         if kind=='BinaryConditionalOperator':
@@ -3356,6 +4240,8 @@ class Analyzer:
         if pointer_arithmetic_detail(node):
             user=self.user_arithmetic(node,env,stack)
             if user is not None:return user
+            summary=self.summary_arithmetic(node,env,stack)
+            if summary is not None:return summary
             if self.pointer_difference(node,env,stack):return set()
             container=self.container_of(node,env,stack)
             if container is not None:return container
@@ -3401,17 +4287,30 @@ class Analyzer:
         if stack and stack[-1] in self.functions and self._prior_unreachable:
             before=len(assignments)
             assignments=tuple((key,expression) for key,expression in assignments if self.prior_reachable(expression,stack[-1],stack))
+        def sweep():
+            changed=False
+            for key,expression in assignments:
+                if isinstance(key,tuple):
+                    changed=self.assign_record(key[1],expression,env,stack) or changed;continue
+                paths=self.resolve(expression,env,stack) or {'unresolved:alias'}
+                previous=env.get(key,empty)
+                combined=self.bounded_aliases(previous|paths,expression,stack)
+                if combined!=previous:env[key]=combined;changed=True
+            return changed
         def settle():
+            # A limit met in a quiet sweep is absorbed there, so the reporting sweep would not meet it.
+            mark=len(self._quiet_limits)
             for _ in range(32):
-                changed=False
-                for key,expression in assignments:
-                    if isinstance(key,tuple):
-                        changed=self.assign_record(key[1],expression,env,stack) or changed;continue
-                    paths=self.resolve(expression,env,stack) or {'unresolved:alias'}
-                    previous=env.get(key,empty)
-                    combined=self.bounded_aliases(previous|paths,expression,stack)
-                    if combined!=previous:env[key]=combined;changed=True
-                if not changed:return
+                # Before the fixpoint the closure is partial (an assignment may be read before the
+                # one that binds its variable): only the sweep over the fixpoint reports issues.
+                self.quiet+=1
+                try:changed=sweep()
+                finally:self.quiet-=1
+                if not changed:
+                    sweep()
+                    for node,at in self._quiet_limits[mark:]:self.issue('alias_limit',node,at,'pointer alias path count exceeds configured limit of '+str(self.max_alias_paths))
+                    del self._quiet_limits[mark:];return
+            del self._quiet_limits[mark:]
             self.issue('alias_limit',body,stack,'pointer alias fixpoint did not converge within 32 iterations')
         settle()
         eligible=set(proofs)-set(reached)
@@ -3538,6 +4437,8 @@ class Analyzer:
             if ref.get('kind')!='DeclRefExpr' or ref.get('referencedDecl',{}).get('id')!=key:continue
             ref,parent=up(ref)
             if parent is None:return False
+            # sizeof/_Alignof operands are not evaluated.
+            if parent.get('kind')=='UnaryExprOrTypeTraitExpr':continue
             if parent.get('kind')=='BinaryOperator' and parent.get('opcode')=='=' and children(parent)[0] is ref:continue
             if parent.get('kind')=='ImplicitCastExpr' and parent.get('castKind')=='LValueToRValue':
                 read,outer=up(parent)
@@ -3662,7 +4563,7 @@ class Analyzer:
         if kind in ('GCCAsmStmt','MSAsmStmt','AtomicExpr') and not self.trap_asm(node,stack) and not self.ordering_asm(node,stack):
             self.issue('architecture_or_ordering',node,stack,'assembly or atomic operation needs a target/state model')
         detail=pointer_arithmetic_detail(node)
-        if (detail and self.user_arithmetic(node,env,stack) is None and not self.pointer_difference(node,env,stack) and self.container_of(node,env,stack) is None and self.offset_pointers(node,env,stack) is None and
+        if (detail and self.user_arithmetic(node,env,stack) is None and self.summary_arithmetic(node,env,stack) is None and not self.pointer_difference(node,env,stack) and self.container_of(node,env,stack) is None and self.offset_pointers(node,env,stack) is None and
                 self.derived_pointers(node,env,stack) is None and not self.pointer_difference_value(node,env,stack)):self.issue('pointer_arithmetic',node,stack,detail)
         if kind=='InitListExpr' and any(p in self._bounded_pointers or p in self._derived_pointers for c in inner if '*' in type_of(c) for p in self.resolve(c,env,stack)):
             self.issue('pointer_arithmetic',node,stack,'bounded pointer aggregate storage needs an escape and reconstruction model')
@@ -3679,11 +4580,16 @@ class Analyzer:
             original=unwrap(inner[0]);target=self.array_lvalue(original)
             if target.get('kind')=='DeclRefExpr' and target.get('referencedDecl',{}).get('id') not in self.globals:
                 self.local_qualified_access(target,stack)
+            # A call in the address (`f(x)->field`) runs before the load: visit it first, so the
+            # access sees what it returned here.
+            called=any(n.get('kind')=='CallExpr' for n in walk(target))
+            if called:self.visit(target,env,stack)
             if self.tracked_member(target,env,stack) is not None:pass # automatic record storage
             elif target.get('kind') in ('MemberExpr','UnaryOperator') and self.auto_storage(self.storage_paths(target,env,stack)):pass # stack object storage
             elif target.get('kind') in ('MemberExpr','ArraySubscriptExpr','CompoundLiteralExpr') or target.get('kind')=='UnaryOperator' and target.get('opcode')=='*' or target.get('kind')=='DeclRefExpr' and target.get('referencedDecl',{}).get('id') in self.globals:
                 pointer_member=target.get('kind')=='MemberExpr' and '*' in type_of(target)
                 self.access(self.storage_paths(target,env,stack) if pointer_member else self.resolve(target,env,stack),target,stack)
+            if called:return
             if target is not original:
                 self.visit(target,env,stack);return
         if kind=='UnaryExprOrTypeTraitExpr':return # sizeof/alignof do not evaluate ordinary operands
@@ -3700,6 +4606,8 @@ class Analyzer:
                 return
         if kind=='ReturnStmt':
             for child in inner:self.visit(child,env,stack)
+            if self._return_values and self._flow_live and inner and '*' in type_of(inner[0]):
+                self._return_values[-1].append(self.resolve(inner[0],env,stack))
             if self._flow_returns:
                 partition=self.recent_partition(inner[0],stack) if inner and self._flow_live else None
                 if partition is not None:
@@ -3741,13 +4649,29 @@ class Analyzer:
             reachable=self.referenced_tokens(env)
             carried={t for t in self.flow_tokens(stack) if (self._auto_info[t]['owner']==tuple(stack) and self._auto_info[t]['declaration'] not in fresh) or
                 (self._auto_info[t]['owner']!=tuple(stack) and t in reachable)}
+            # A loop that cannot write stack objects keeps their values: its stores are to plain unescaped locals,
+            # and no call in it receives a pointer to a stack object (hrtimer_active's seqcount retry loop).
+            if carried and self.loop_writes_no_stack_objects(node,env,stack):carried=set()
             assigned={variable_key for n in walk(node) for variable_key in [self.assigned_local(n)] if variable_key is not None}
-            dropped=lambda k:k[0] in carried or k[0] in ('L','RP') and k[1]==tuple(stack) and k[2] in assigned
+            # A tag field changes only by a whole-record store: one nothing in the loop makes keeps its value.
+            stable=set()
+            for t in carried:
+                record=self.auto_record(t)
+                if record is not None and self.tag_fields(record) and not self.stores_record(node,record.get('tagUsed','struct')+' '+(record.get('name') or '')):
+                    stable|={(t,f) for f in self.tag_fields(record)}
+            # A pointer local the loop only steps (p++, p += k) and that points into summarized arrays
+            # stays in them: its entry value holds for the whole loop.
+            steps=set()
+            for k,v in self._flow.items():
+                if k[0]=='PL' and k[1]==tuple(stack) and k[2] in assigned and v[0]=='p' and v[1] and all(self.summary_token(x) for x in v[1]):
+                    writes=[n for n in walk(node) if self.assigned_local(n)==k[2]]
+                    if all(n.get('kind')=='UnaryOperator' or n.get('kind')=='CompoundAssignOperator' and n.get('opcode') in ('+=','-=') for n in writes):steps.add(k)
+            dropped=lambda k:(k[0] in carried and k not in stable) or k[0] in ('L','RP','PL') and k[1]==tuple(stack) and k[2] in assigned and k not in steps
             self._flow={k:v for k,v in self._flow.items() if not dropped(k)}
-            self._flow_carried.append(carried)
+            self._flow_carried.append(carried);self._flow_stable.append(stable)
             try:
                 for child in inner:self.visit(child,env,stack)
-            finally:self._flow_carried.pop()
+            finally:self._flow_carried.pop();self._flow_stable.pop()
             self._flow={k:v for k,v in self._flow.items() if not dropped(k)};self._flow_live=True
             return
         if kind in ('WhileStmt','ForStmt'):
@@ -3814,6 +4738,8 @@ class Analyzer:
             if inner and not arithmetic_scalar(type_of(node)):
                 initial=self.resolve(inner[-1],env,stack)
                 env[node['id']]=self.bounded_aliases(env.get(node['id'],set())|initial,node,stack)
+                if '*' in type_of(node) and stack and stack[-1] in self.functions and node['id'] not in self.values.facts_for(stack[-1]).escaped:
+                    self.pointer_local_write(('PL',tuple(stack),node['id']),initial)
                 if '*' in type_of(node) and stack and stack[-1] in self.functions and node['id'] in self.values.facts_for(stack[-1]).escaped:
                     token=self.auto_origin(node['id'],stack)
                     if token is not None:self.auto_write(token,'*',initial or {'unresolved:alias'},node,stack,strong=True)
@@ -3834,6 +4760,9 @@ class Analyzer:
                 self.issue('pointer_arithmetic',node,stack,'pointer mutation needs an offset/provenance model')
             self.visit(right,env,stack)
             storage=self.storage_paths(left,env,stack) if left.get('kind') in ('MemberExpr','UnaryOperator','DeclRefExpr') else set()
+            # A pointer local whose address is never taken is its own storage: `p = q` rebinds p. Its
+            # resolved values name what p points to, which a store to p never writes.
+            if left.get('kind')=='DeclRefExpr' and self.pointer_local_key(left,stack) is not None:storage=set()
             if self.auto_storage(storage):
                 declaration=self.record_declaration(type_of(left))
                 if declaration is not None and kind=='BinaryOperator':
@@ -3843,15 +4772,24 @@ class Analyzer:
                     from entry_state_values import integer_type
                     scalar_fields=[f[0] for f in self.flat_fields(declaration) if integer_type(f[1])]
                     scalars=self.scalar_initializer(declaration,right,stack) or {}
+                    union=self.union_fields(declaration)
+                    tag=frozenset((f,scalars[f][0]) for f in self.tag_fields(declaration) if isinstance(scalars.get(f),tuple) and scalars[f][0]==scalars[f][1])
                     for path in storage:
                         token=re.match(r'^(?:\*\()*(auto:\d+)',path)[1]
-                        for field in fields:self.auto_write(token,field,(initial or {}).get(field,{'unresolved:auto-field'}) if initial is not None else {'unresolved:auto-field'},node,stack,strong=len(storage)==1)
+                        for field in fields:
+                            written=(initial or {}).get(field,{'unresolved:auto-field'}) if initial is not None else {'unresolved:auto-field'}
+                            if field in union:self.tag_union_values(token,field,written,tag)
+                            self.auto_write(token,field,written,node,stack,strong=len(storage)==1)
                         for field in scalar_fields:self.auto_scalar_write(token,field,scalars.get(field),node,stack,strong=len(storage)==1)
                 elif '*' in type_of(left):
                     values=self.resolve(right,env,stack) or {'unresolved:auto-field'}
                     for path in storage:
                         key=self.auto_key(path)
-                        if key is not None:self.auto_write(key[0],key[1],values,node,stack,strong=len(storage)==1)
+                        if key is None:continue
+                        record=self.auto_record(key[0])
+                        if record is not None and key[1] in self.union_fields(record):
+                            self.tag_union_values(key[0],key[1],values,self.current_tag(key[0],record))
+                        self.auto_write(key[0],key[1],values,node,stack,strong=len(storage)==1)
                 else:
                     # An integer field: its value here, or unknown for compound updates and wider records.
                     from entry_state_values import integer_type
@@ -3884,6 +4822,7 @@ class Analyzer:
                 value=self.mutation_expression(node) if kind=='CompoundAssignOperator' and '*' in type_of(left) else right
                 assigned=self.resolve(value,env,stack) if value is not None else {'unresolved:pointer-mutation'}
                 env[key]=self.bounded_aliases(env.get(key,set())|assigned,node,stack)
+                if '*' in type_of(left):self.pointer_local_write(self.pointer_local_key(left,stack),assigned)
                 if self.integer_local(left,stack) is not None:
                     self.local_flow_write(stack,key,self.flow_interval(right,env,stack) if kind=='BinaryOperator' else None)
                 self.partition_store(key,right if kind=='BinaryOperator' else None,stack)
@@ -3907,6 +4846,9 @@ class Analyzer:
             if local_integer and self.integer_local(target,stack) is not None:
                 self.local_flow_write(stack,target['referencedDecl']['id'],None)
             if target.get('kind')=='DeclRefExpr':self._flow.pop(('RP',tuple(stack),target.get('referencedDecl',{}).get('id')),None)
+            if '*' in type_of(target):
+                local=self.pointer_local_key(target,stack);stepped=self.mutation_expression(node)
+                if local is not None:self.pointer_local_write(local,self.resolve(stepped,env,stack) if stepped is not None else set())
             token=self.escaped_pointer_local(target,stack) if '*' in type_of(target) else None
             if token is not None:self.auto_write(token,'*',self.escaped_pointer_step(node,env,stack),node,stack,strong=True)
             if not local_integer:
@@ -3939,7 +4881,7 @@ class Analyzer:
             if not names:
                 self.calls.append({'caller':stack[-1],'callee':None,'call_path':stack,'location':self.location(node),'boundary':None})
                 self.issue('indirect_call',node,stack,'callback target set is unresolved');return
-            base=None;outcomes=[]
+            base=None;outcomes=[];returned=[]
             for name in sorted(names):
                 policy=self.boundary(name)
                 if (name not in self.functions or policy) and (not policy or policy.get('kind') not in ('ordering_model','value_model')):
@@ -3947,12 +4889,16 @@ class Analyzer:
                     # except declared memory models, whose writes are listed.
                     for index,argument in enumerate(inner[1:]):
                         if policy and policy.get('kind')=='memory_model' and index not in policy.get('writes',[]):continue
+                        # A declared user-value write stores exactly a user address (boundary_user_value), not unknown data.
+                        if policy and policy.get('kind')=='memory_model' and index in policy.get('user_values',[]):continue
                         for value in self.resolve(argument,env,stack) if '*' in type_of(argument) else ():
                             match=re.match(r'^(auto:\d+)$',value)
                             if match is None:continue
                             info=self._auto_info[match[1]];owner=info['owner']
                             declaration=next((n for n in self.values.facts_for(owner[-1]).order if n.get('id')==info['declaration']),None)
-                            record=self.record_declaration(type_of(declaration)) if declaration is not None else None
+                            record=self.auto_record(match[1])
+                            if info.get('summary') and record is None:
+                                self.auto_write(match[1],'*',{'unresolved:auto-escape'});continue
                             for field in [f[0] for f in self.flat_fields(record) if '*' in f[1] and '(' not in f[1]]:
                                 self.auto_write(match[1],field,{'unresolved:auto-escape'})
                             for field in [f[0] for f in self.flat_fields(record) if '*' not in f[1]]:
@@ -3994,6 +4940,7 @@ class Analyzer:
                             dereference={'kind':'UnaryOperator','opcode':'*','type':{'qualType':pointee},'valueCategory':'lvalue',
                                 'range':node.get('range',{}),'inner':[argument],'id':(node.get('id') or '')+'#arg'+str(index)}
                             self.access(self.resolve(dereference,env,stack),dereference,stack,write)
+                            if write and index in policy.get('user_values',[]):self.boundary_user_value(name,argument,node,env,stack)
                     continue
                 if name not in self.functions:
                     eliminated=self.build_eliminated_call(node,name)
@@ -4010,11 +4957,21 @@ class Analyzer:
                 else:self.flow_restore(base)
                 try:self.function(name,stack,bindings,records)
                 finally:self._call_nodes.pop()
+                # A reviewed model that always fails its fault assertion rejects the run: nothing after the call is
+                # on an accepted (equivalent) path, so the state there is dead.
+                if self.always_rejects(name):
+                    self._flow_live=False
+                    self.allocation_uses.append(dict(kind='rejecting_model_call',function=stack[-1],callee=name,call_path=stack,location=self.location(node)))
                 outcomes.append((self.flow_snapshot(),self._last_partition))
+                returned.append(self._last_return_values)
             if len(outcomes)>1 or outcomes and len(names)>1:
                 # Any one of several targets runs: their states join (a skipped one leaves the call's state).
                 self.flow_join([state for state,_ in outcomes]+([base] if len(outcomes)<len(names) else []))
             self._recent_partition=(id(node),tuple(stack),outcomes[0][1]) if len(outcomes)==1 and len(names)==1 and outcomes[0][1] is not None else None
+            # A pointer call whose every target body ran here returns what those bodies returned.
+            key=(id(node),tuple(stack))
+            if '*' in type_of(node) and returned and len(returned)==len(names):self._recent_return[key]=frozenset().union(*returned)
+            else:self._recent_return.pop(key,None)
             return
         for child in inner:self.visit(child,env,stack)
 
@@ -4033,6 +4990,15 @@ class Analyzer:
             if not stack and (name.split(':',1)[-1],parameter.get('name')) in self.user_addresses and '*' in type_of(parameter):
                 env[parameter['id']]={'user:'+parameter['name']}
             env[parameter['id']]=self.bounded_aliases(env[parameter['id']],parameter,stack+[name])
+            release=self.deallocators.get(name.split(':',1)[-1])
+            if release is not None and release['parameter']==parameter.get('name'):
+                # Releasing automatic storage is undefined (kfree takes kmalloc'd memory or NULL): a stack object
+                # among the argument's values never reaches the deallocator.
+                stack_objects={v for v in env[parameter['id']] if re.fullmatch(r'auto:\d+',v) and not self._auto_info.get(v,{}).get('allocation')}
+                if stack_objects:
+                    env[parameter['id']]=(env[parameter['id']]-stack_objects) or {INFEASIBLE}
+                    self.allocation_uses.append(dict(kind='deallocator_excludes_automatic_storage',function=name,call_path=stack+[name],argument=parameter['name'],
+                        excluded=len(stack_objects),reason=release['reason']))
             if records is not None and index<len(records) and records[index] is not None:
                 for field,paths in records[index].items():
                     if field==LINKS:
@@ -4063,22 +5029,31 @@ class Analyzer:
                 if kind=='GotoStmt' and (not term.get('targetLabelDeclId') or term['targetLabelDeclId'] not in labels):
                     self.issue('unsupported_construct',term,stack+[name],'direct jump target is outside the available function body')
         # Aliases are computed before the body runs: flow values hold only if it writes no memory.
+        frame=tuple(stack+[name])
+        self._flow={k:v for k,v in self._flow.items() if not (k[0]=='PL' and k[1]==frame)}
+        bound={p['id']:set(env.get(p['id'],())) for p in parameters if '*' in type_of(p) and '(' not in type_of(p)}
         mask=self.flow_mask(name)
         try:self.pointer_aliases(body,env,stack+[name])
         finally:self.flow_unmask(mask)
+        escaped=self.values.facts_for(name).escaped
+        for pid,values in bound.items():
+            if pid not in escaped:self.pointer_local_write(('PL',frame,pid),values)
         if not stack:self.root_aliases=dict(env)
         facts=self.values.facts_for(name);ranges=self.context_ranges(stack+[name])
         from entry_state_values import integer_type
         for parameter in parameters:
             if integer_type(type_of(parameter)) and parameter['id'] in facts.mutations and parameter['id'] not in facts.escaped:
                 self.local_flow_write(stack+[name],parameter['id'],ranges.get(parameter['id']) if hasattr(ranges,'get') else None)
-        self._flow_returns.append([]);self._flow_return_classes.append([])
+        self._flow_returns.append([]);self._flow_return_classes.append([]);self._return_values.append([])
         try:self.visit(body,env,stack+[name])
-        finally:returns=self._flow_returns.pop();classes=self._flow_return_classes.pop()
+        finally:returns=self._flow_returns.pop();classes=self._flow_return_classes.pop();values=self._return_values.pop()
+        # The values its live returns produced in this context (a function never returning yields none).
+        self._last_return_values=set().union(*values) if values else set()
         if self._flow_live:returns.append(self.flow_snapshot());classes.append(self.ALL_SIGNS)
         if returns:self.flow_join(returns)
         else:self._flow={};self._flow_live=True
         self._last_partition=self.partition_of(returns,classes,tuple(stack)) if returns else None
+        self._flow={k:v for k,v in self._flow.items() if not (k[0]=='PL' and k[1]==frame)}
 
     def analyze(self,root):
         """Analyze a root by iterating whole-root passes to a fixpoint.
@@ -4091,20 +5066,31 @@ class Analyzer:
         """
         if root not in self.functions:raise ValueError('root has no available configured body: '+root)
         for optimistic,passes in ((True,10),(False,5)):
-            store={};sites={};scalars={};unreachable=frozenset();goto_states=None;converged=False
+            store={};sites={};scalars={};unreachable=frozenset();goto_states=None;returns=None;converged=False;objects={};infos={}
             for attempt in range(passes):
                 run=self if optimistic and not attempt else self.fresh()
                 run._optimistic=optimistic
                 if attempt:
+                    # The carried store is keyed by stack-object tokens: each (owner stack, declaration) keeps its
+                    # token across passes, whatever order this pass meets the objects in.
+                    run._auto_objects=dict(objects);run._auto_info={k:dict(v) for k,v in infos.items()}
                     run._auto_store={k:set(v) for k,v in store.items()};run._auto_sites={k:list(v) for k,v in sites.items()};run._auto_scalars=dict(scalars)
                     run._prior_unreachable=unreachable if optimistic else frozenset();run._prior_goto_states=goto_states if optimistic else None
+                    run._prior_returns=returns if optimistic and returns is not None else {}
                 report=run.analyze_once(root)
                 regions=frozenset(run._unreachable)
-                if optimistic:converged=not run._auto_late and attempt>0 and regions==unreachable and run._goto_states==goto_states
+                # The stack-object store this pass wrote must be the one it started from: a value only an
+                # earlier pass wrote (code that pass still visited) would otherwise survive the fixpoint.
+                same_store=attempt>0 and {k:set(v) for k,v in run._auto_written.items() if v}=={k:set(v) for k,v in store.items() if v}
+                if optimistic:converged=not run._auto_late and attempt>0 and regions==unreachable and run._goto_states==goto_states and run._recent_return==returns and same_store
                 else:converged=not run._auto_late
                 if converged:break
                 # Carry only this pass's writes: earlier passes may have visited code now unreachable.
-                store=run._auto_written;sites=run._auto_sites;scalars=run._auto_scalar_written;unreachable=regions;goto_states=dict(run._goto_states)
+                # Values written while more code was reachable can sustain themselves through the carried store
+                # (a field read and written back); when reachability changes, the store restarts empty.
+                restart=regions!=unreachable
+                store={} if restart else run._auto_written;sites={} if restart else run._auto_sites;scalars={} if restart else run._auto_scalar_written
+                unreachable=regions;goto_states=dict(run._goto_states);returns=dict(run._recent_return);objects=dict(run._auto_objects);infos={k:{f:x for f,x in v.items() if f!='summary' or v.get('allocation')} for k,v in run._auto_info.items()}
             if converged:break
         if not converged:
             report['blockers'].append({'kind':'analysis_limit','function':root,'call_path':[root],'detail':'stack-object field values did not converge in 5 passes','location':{}})
@@ -4113,7 +5099,13 @@ class Analyzer:
         return report
 
     def analyze_once(self,root):
-        self._flow={};self._flow_live=True;self._flow_off=0;self._flow_masks=[];self._flow_carried=[];self._flow_returns=[];self._flow_return_classes=[];self._last_partition=None;self._recent_partition=None;self._flow_weak=0
+        self._flow={};self._flow_live=True;self._flow_off=0;self._flow_masks=[];self._flow_carried=[];self._flow_stable=[];self._flow_returns=[];self._flow_return_classes=[];self._return_values=[];self._last_return_values=None;self._recent_return={};self._last_partition=None;self._recent_partition=None;self._flow_weak=0
+        # Root parameters with a boundary-enforced range start in it; each range a proof reads is reported.
+        ranges=RootRanges(self)
+        for parameter in self.parameters(self.functions[root]):
+            contract=self.argument_ranges.get((root.split(':',1)[-1],parameter.get('name')))
+            if contract is not None:ranges.contracts[parameter['id']]=contract
+        if ranges.contracts:self._context_calls[(root,)]=ranges
         self.function(root,[])
         def unique(items):
             result=[];seen=set()
@@ -4121,6 +5113,17 @@ class Analyzer:
                 key=json.dumps(item,sort_keys=True)
                 if key not in seen:seen.add(key);result.append(item)
             return result
+        # The empty-list contract holds only if the call stores to no such head (or the object holding one).
+        if self.empty_list_heads and self.list_proofs:
+            from entry_state_lists import normalized as list_path
+            for w in self.writes:
+                n=list_path(w.get('path',''))
+                if any(n==h or n.startswith(h+'.') or h.startswith(n+'.') for h in self.empty_list_heads):
+                    self.blockers.append(dict(kind='pointer_arithmetic',function=w['function'],call_path=w['call_path'],detail='an empty list head is stored during the call',location=w['location']))
+        # A comparison within an array reached through a pointer member needs that member unwritten by the call.
+        for base,(node,stack) in sorted(self._stable_bases.items()):
+            if any(w.get('path')==base or base.startswith(w.get('path','')+'.') for w in self.writes):
+                self.issue('pointer_arithmetic',node,stack,'array comparison base pointer is stored during the call')
         reads=unique(self.reads);writes=unique(self.writes);blockers=unique(self.blockers)
         report={'root':root,'classification':'requires_review' if blockers else 'candidate_with_models' if self.boundaries or self.argument_objects else 'candidate',
             'analysis_limits':{'max_alias_paths':self.max_alias_paths,'alias_path_limit_observed':self.alias_path_limit_observed},
@@ -4132,10 +5135,18 @@ class Analyzer:
         if self.pointer_returns:report['pointer_return_proofs']=unique(self.pointer_returns)
         if self.pointer_stores:report['pointer_store_proofs']=unique(self.pointer_stores)
         if self.user_address_proofs:report['user_address_proofs']=unique(self.user_address_proofs)
+        if self.array_summaries:report['automatic_array_summaries']=unique(self.array_summaries)
+        if self.automatic_views:report['automatic_views']=unique(self.automatic_views)
+        if self.assertion_uses:
+            report['fault_assertion_guards']=unique(self.assertion_uses)
+            report['fault_assertion_contracts']=[dict(a) for a in self.fault_assertion_items if any(u['assertion']==a['function'].split(':',1)[-1] for u in self.assertion_uses)]
         if self.pointer_differences:report['pointer_difference_proofs']=unique(self.pointer_differences)
         if self.pointer_comparisons:report['pointer_comparison_proofs']=unique(self.pointer_comparisons)
         if self.pointer_updates:report['pointer_update_proofs']=unique(self.pointer_updates)
         if self.container_proofs:report['container_proofs']=unique(self.container_proofs)
+        if self.list_proofs:
+            report['empty_list_proofs']=unique(self.list_proofs)
+            report['empty_list_contracts']=self.empty_list_items
         if self.derived_proofs:report['derived_pointer_proofs']=unique(self.derived_proofs)
         if self.span_proofs:report['checked_span_proofs']=unique(self.span_proofs)
         if self.branch_proofs:report['decided_branch_proofs']=unique(self.branch_proofs)
@@ -4151,9 +5162,14 @@ class Analyzer:
         if self.callback_uses:report['callback_contract_uses']=unique(self.callback_uses)
         if self.masked_pointer_proofs:report['masked_pointer_proofs']=unique(self.masked_pointer_proofs)
         if self.external_accesses:report['external_memory_accesses']=unique(self.external_accesses)
-        used=unique([s for v in self.index_values for s in v['proof'].get('state_ranges',[])])
-        assumptions=[dict(self.state_ranges[(s['record'],s['field'])]) for s in used]+self.extent_assumptions
+        used=unique([(s['record'],s['field']) for v in self.index_values for s in v['proof'].get('state_ranges',[])]+sorted(self.range_uses))
+        assumptions=[dict(self.state_ranges[s]) for s in used]+self.extent_assumptions
         if assumptions:report['state_range_assumptions']=unique(assumptions)
+        if self.argument_range_uses:report['argument_range_assumptions']=[dict(self.argument_ranges[k]) for k in sorted(self.argument_range_uses)]
+        if self.allocation_uses or any(i.get('allocation') for i in self._auto_info.values()):
+            report['allocation_summaries']=unique([dict(function=i['allocation']['function'],element_type=i['allocation']['element_type'],elements=i['allocation']['elements'],
+                object=i['allocation']['object'],validated_by=i['allocation']['validated_by'],assumptions=['the allocation is written before it is read','it is not read after kfree'])
+                for i in self._auto_info.values() if i.get('allocation')])+unique(self.allocation_uses)
         if self.prune_written:
             from entry_state_dominance import MustStore
             body=next(c for c in children(self.functions[root]) if c.get('kind')=='CompoundStmt')
@@ -4302,7 +5318,8 @@ def main():
         boundaries=document['boundaries'];boundary_hash=digest(args.boundaries.read_bytes())
         argument_objects=document.get('argument_objects',{});state_ranges=document.get('state_ranges',[]);volatile_fields=document.get('volatile_fields',[])
         contracts=dict(operand_free_asm=document.get('operand_free_asm'),volatile_accesses=document.get('volatile_accesses'),pointer_extents=document.get('pointer_extents',[]),callback_targets=document.get('callback_targets',[]),
-            pointer_values=document.get('pointer_values',[]),pointer_identity=document.get('pointer_identity'),user_addresses=document.get('user_addresses',[]))
+            pointer_values=document.get('pointer_values',[]),pointer_identity=document.get('pointer_identity'),user_addresses=document.get('user_addresses',[]),
+            fault_assertions=document.get('fault_assertions',[]),argument_ranges=document.get('argument_ranges',[]),allocations=document.get('allocations',[]),pointer_objects=document.get('pointer_objects',[]),deallocators=document.get('deallocators',[]),empty_lists=document.get('empty_lists',[]))
     program=None
     if args.closure_source or args.all_sources:
         from entry_state_program import load_program

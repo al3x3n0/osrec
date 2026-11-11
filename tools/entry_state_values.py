@@ -37,6 +37,8 @@ ENTRIES=('LabelStmt','CaseStmt','DefaultStmt')
 MUTATIONS={'=','+=','-=','*=','/=','%=','<<=','>>=','&=','|=','^='}
 TRANSPARENT_CASTS=('LValueToRValue','NoOp','PointerToBoolean','IntegralToBoolean','BitCast','NullToPointer')
 MAX_DEPTH=12;MAX_NODES=8192
+# __builtin_clz is undefined for 0; its operand widths (unsigned int, long, long long on LP64).
+CLZ={'__builtin_clz':32,'__builtin_clzl':64,'__builtin_clzll':64}
 # No object lies in the first or the last page of the address space (Linux reserves
 # both: the null page and the ERR_PTR range); object addresses are within OBJECT.
 OBJECT=(4096,(1<<64)-4097);TOP_ALIGNMENT=1<<63;SPAN_LIMIT=1<<20
@@ -44,6 +46,9 @@ OBJECT=(4096,(1<<64)-4097);TOP_ALIGNMENT=1<<63;SPAN_LIMIT=1<<20
 # above hold on both; an integer view of a pointer is evaluated under each model separately.
 MODELS={bits:({**WIDE,'long':(-(1<<bits-1),(1<<bits-1)-1),'unsigned long':(0,(1<<bits)-1)},
               {**NARROW,'long':(-(1<<bits-1),(1<<bits-1)-1),'unsigned long':(0,(1<<bits)-1)}) for bits in (32,64)}
+
+# Overflow-checking builtins whose result argument a local may be defined by: the exact operation on its operands.
+OVERFLOW_BUILTINS={'__builtin_mul_overflow':lambda x,y:x*y,'__builtin_add_overflow':lambda x,y:x+y}
 
 class Unproven(Exception):
     """A value depends on volatile or possibly uninitialized automatic storage."""
@@ -162,7 +167,9 @@ def canonical(node):
 
 class FunctionFacts:
     """Immutable per-body indexes: parents, preorder spans, mutations and escapes."""
-    def __init__(self,function):
+    def __init__(self,function,assertions=None):
+        # Rejecting assertions: name -> argument index of a condition that is false on every accepted run.
+        self.assertions=assertions or {}
         self.function=function;self.gotos={};self._facts={};self.parent={};self.effects=[];self.span={};self.order=[];self.mutations={};self.escaped=set();self.has_labels=False
         def index(node,parent):
             start=len(self.order);self.order.append(node)
@@ -265,6 +272,11 @@ class FunctionFacts:
                 for statement in reversed(siblings):
                     # A label or case between a guard and the use lets control bypass the guard.
                     if statement.get('kind') in ENTRIES or self.entered(statement):break
+                    if statement.get('kind')=='CallExpr' and callee(statement) in self.assertions:
+                        # `assert_fails(c)` as a statement: a run where c holds is rejected, so after it c is false.
+                        arguments=children(statement)[1:];index=self.assertions[callee(statement)]
+                        if index<len(arguments) and self.stable(arguments[index],self.span[id(arguments[index])][0],high):result.append((arguments[index],False,statement))
+                        continue
                     if statement.get('kind')!='IfStmt':continue
                     parts=children(statement)
                     if len(parts)<2:continue
@@ -284,20 +296,41 @@ class FunctionFacts:
             elif kind in ('FunctionDecl',):break
             child=node;node=self.parent.get(id(node))
         return result
+    def compound_value(self,node):
+        """The synthetic `x op e` a compound assignment stores (cached: identity keys analysis caches)."""
+        key=id(node);cache=self.__dict__.setdefault('_compound',{})
+        if key not in cache:
+            left,right=children(node)
+            load={'kind':'ImplicitCastExpr','castKind':'LValueToRValue','type':left.get('type'),'inner':[left],'id':str(node.get('id'))+'#load'}
+            cache[key]=(node,{'kind':'BinaryOperator','opcode':node['opcode'][:-1],'type':node.get('type'),'inner':[load,right],'id':str(node.get('id'))+'#value'})
+        return cache[key][1]
     def initialized(self,use,key):
         """A declaration initializer runs before every use in scope unless a jump skips it."""
         declaration=next((n for n in self.order if n.get('kind')=='VarDecl' and n.get('id')==key),None)
         if declaration is None or not children(declaration) or self.has_labels:return False
         low,high=self.span[id(declaration)]
         return not low<=self.span[id(use)][0]<=high
-    def dominates(self,first,second):
+    def dominates(self,first,second,visiting=frozenset()):
+        # A top-level proof is a pure function of the two nodes in this function's (immutable) AST.
+        if not visiting:
+            # The entry keeps both nodes alive, so their ids cannot be reused by another tree.
+            memo=self.__dict__.setdefault('_dominates_memo',{});key=(id(first),id(second))
+            if key not in memo:memo[key]=(first,second,self._dominates(first,second,visiting))
+            return memo[key][2]
+        return self._dominates(first,second,visiting)
+    def entries_in(self,statement):
+        """The label, case and default statements in `statement` (cached per statement)."""
+        cache=self.__dict__.setdefault('_entries_in',{})
+        if id(statement) not in cache:cache[id(statement)]=(statement,[n for n in walk(statement) if n.get('kind') in ENTRIES])
+        return cache[id(statement)][1]
+    def _dominates(self,first,second,visiting=frozenset()):
         """Does `first` run, unconditionally, before every evaluation of `second`?
 
         Both must lie in this function. `first` must sit in a statement that precedes
         the statement holding `second` in a common block, reached from that statement
         without a branch, loop or short-circuit, and no label or case may enter between.
         """
-        if not self.contains(first) or not self.contains(second) or self.has_labels:return False
+        if not self.contains(first) or not self.contains(second):return False
         chain=[];node=second
         while node is not None:chain.append(node);node=self.parent.get(id(node))
         seen={id(n) for n in chain};node=first;top=None
@@ -306,12 +339,35 @@ class FunctionFacts:
             if parent is None:return False
             if parent.get('kind')=='CompoundStmt':top=node
             elif parent.get('kind') in ('IfStmt','ForStmt','WhileStmt','DoStmt','SwitchStmt','ConditionalOperator','BinaryConditionalOperator') or parent.get('kind')=='BinaryOperator' and parent.get('opcode') in ('&&','||'):
-                if top is None:return False
+                # Parts evaluated whenever the construct is reached: a condition (if, while, switch, ?:),
+                # a for's initializer and first test, a do body (it runs at least once), the left of && and ||.
+                kids=children(parent);kind=parent.get('kind')
+                always={'IfStmt':kids[:1],'WhileStmt':kids[-2:-1],'SwitchStmt':kids[:1],'ConditionalOperator':kids[:1],'BinaryConditionalOperator':kids[:1],
+                        'DoStmt':kids[:1],'ForStmt':[k for k in (kids[0],kids[2]) if k.get('kind')] if len(kids)==5 else [],'BinaryOperator':kids[:1]}[kind]
+                if not any(node is k for k in always) and top is None:return False
             node=parent
         if node is None or node.get('kind')!='CompoundStmt' or top is None:return False
         terms=children(node);index={id(t):i for i,t in enumerate(terms)}
         later=next((c for c in chain if id(c) in index),None)
-        return later is not None and index[id(top)]<index[id(later)]
+        if later is None or index[id(top)]>=index[id(later)]:return False
+        # A label or case after `first` and up to `second` lets control enter past `first`, unless every
+        # entry it has also follows `first`: each goto to the label is itself dominated by `first` (a label
+        # this proof is already inside adds no new entry), and a case's switch lies in the same range.
+        if self.has_labels:
+            span=terms[index[id(top)]+1:index[id(later)]+1];inside=None
+            for t in span:
+                for n in self.entries_in(t):
+                    kind=n.get('kind')
+                    if kind in ('CaseStmt','DefaultStmt'):
+                        switch=self.parent.get(id(n))
+                        while switch is not None and switch.get('kind')!='SwitchStmt':switch=self.parent.get(id(switch))
+                        if inside is None:inside={id(x) for t2 in span for x in walk(t2)}
+                        if switch is None or id(switch) not in inside:return False
+                    elif kind=='LabelStmt':
+                        if id(n) in visiting:continue
+                        if not all(self.dominates(first,jump,visiting|{id(n)}) for jump in self.gotos.get(n.get('declId'),())):return False
+                    else:return False
+        return True
     def defined_before_use(self,key):
         """Does every read of `key` have a unique reaching assignment?"""
         if key in self.escaped:return False
@@ -328,7 +384,19 @@ class FunctionFacts:
         while statement.get('kind')=='LabelStmt' and len(children(statement))==1:statement=children(statement)[0]
         plain=parens(statement)
         if plain.get('kind')=='BinaryOperator' and plain.get('opcode')=='=' and variable(children(plain)[0])==key:return True
+        # Both arms of an if/else, or a block without labels or cases (no entry past its assignment).
+        if statement.get('kind')=='IfStmt' and len(children(statement))==3:
+            return FunctionFacts.defines(children(statement)[1],key) and FunctionFacts.defines(children(statement)[2],key)
+        if statement.get('kind')=='CompoundStmt' and not any(n.get('kind') in ENTRIES for n in walk(statement)):
+            return any(FunctionFacts.defines(t,key) for t in children(statement))
         return statement.get('kind')=='DeclStmt' and any(d.get('id')==key and children(d) for d in children(statement))
+    @staticmethod
+    def continues(statement):
+        """Does `statement` hold a `continue` of the loop around it (not one of a loop nested inside it)?"""
+        def visit(node):
+            if node.get('kind')=='ContinueStmt':return True
+            return node.get('kind') not in LOOPS and any(visit(c) for c in children(node))
+        return visit(statement)
     def dominated(self,use,key,visiting=frozenset()):
         """Is `key` assigned before `use` on every path, jumps included?
 
@@ -344,6 +412,13 @@ class FunctionFacts:
             if kind in ('CaseStmt','DefaultStmt') and not self.switch_dominated(node,key,visiting):return False
             if kind=='LabelStmt' and not self.jumps_dominated(node,key,visiting):return False
             if kind=='ForStmt' and len(terms)==5 and child is not terms[0] and terms[0].get('kind') and self.defines(terms[0],key):return True
+            # A do-while condition runs after the body's statements, or after a `continue` among them: the
+            # body's leading statements dominate it up to the first one that may continue or be jumped into
+            # (gup_fast_pgd_range's `next`, assigned first in the body, read in the condition).
+            if kind=='DoStmt' and len(terms)==2 and child is terms[1] and terms[0].get('kind')=='CompoundStmt':
+                for statement in children(terms[0]):
+                    if self.entries_in(statement) or self.continues(statement):break
+                    if self.defines(statement,key):return True
             if kind=='CompoundStmt':
                 index=next(i for i,t in enumerate(terms) if t is child)
                 for statement in reversed(terms[:index]):
@@ -356,6 +431,9 @@ class FunctionFacts:
                         if not self.switch_dominated(inner,key,visiting):return False
                         while inner.get('kind') in ('CaseStmt','DefaultStmt') and children(inner):inner=children(inner)[-1]
                     if self.entered(inner):return False
+                    # A return or goto never falls through: what follows it is entered only at the labels
+                    # this walk has already checked (uaddr_faulted after futex_lock_pi's return).
+                    if inner.get('kind') in ('ReturnStmt','GotoStmt'):return True
             child=node;node=self.parent.get(id(node))
         return False
     def switch_dominated(self,label,key,visiting):
@@ -402,6 +480,9 @@ class FunctionFacts:
                     value=None
                     plain=parens(statement)
                     if plain.get('kind')=='BinaryOperator' and plain.get('opcode')=='=' and variable(children(plain)[0])==key:value=children(plain)[1]
+                    elif plain.get('kind')=='CompoundAssignOperator' and plain.get('opcode') in ('+=','-=','|=','&=','<<=','>>=') and variable(children(plain)[0])==key and len(children(plain))==2:
+                        # `x op= e` in straight-line code: x's previous value (what reaches the left operand) op e.
+                        value=self.compound_value(plain)
                     elif statement.get('kind')=='DeclStmt':
                         for declaration in children(statement):
                             if declaration.get('id')==key and declaration.get('kind')=='VarDecl' and children(declaration):value=children(declaration)[-1]
@@ -458,7 +539,7 @@ class Values:
         self.W=WIDE;self.N=NARROW;self.model=None;self.viewed=False
     def facts_for(self,name):
         cache=self.analyzer._function_facts
-        if name not in cache:cache[name]=FunctionFacts(self.analyzer.functions[name])
+        if name not in cache:cache[name]=FunctionFacts(self.analyzer.functions[name],self.analyzer.fault_assertions)
         return cache[name]
     def interval(self,node,name,parameters=None):
         """Return ((low, high), proof) or (None, None); spans beyond SPAN_LIMIT are not reported."""
@@ -495,7 +576,11 @@ class Values:
         for k in ('state_ranges','guards','definitions','calls','parameters'):
             unique=[];[unique.append(v) for v in proof[k] if v not in unique];proof[k]=unique
         return result,proof
-    def note(self,kind,value):self.proof[kind].append(value)
+    def note(self,kind,value):
+        self.proof[kind].append(value)
+        # Any result may rest on a declared range, whether or not its caller keeps the proof:
+        # every range used is an assumption the live state must satisfy.
+        if kind=='state_ranges':self.analyzer.range_uses.add((value['record'],value['field']))
     def pointer_view(self,node):
         """(low, high, alignment) of a pointer's integer value over its alias values, or None.
 
@@ -528,6 +613,8 @@ class Values:
             elif value=='error-pointer':views.append((top-4095,top-1,1))
             elif re.search(r'const-address:|error-pointer',value):return None
             elif value in analyzer._bounded_pointers or value.startswith('function:'):views.append((OBJECT[0],top-4097,1))
+            # The address of automatic storage (a stack record, array or member) is an object address.
+            elif re.fullmatch(r'auto:\d+(?:(?:->|\.)[A-Za-z_][\w.>-]*)?',value):views.append((OBJECT[0],top-4097,1))
             elif re.search(r'(?:^|\*\()(?:unresolved:|local:|user:)|derived-pointer:|tagged:|auto:',value):return None
             else:
                 alignment=next((a for f,a in analyzer.pointer_values.items() if re.search(r'(?:\.|->)'+re.escape(f)+'$',value)),1)
@@ -565,6 +652,12 @@ class Values:
             # With a fixed width, conversion to an unsigned type is reduction modulo 2^n.
             size=self.W[t][1]+1
             if high-low<size and low%size<=high%size:return (low%size,high%size)
+        if self.model is not None and self.W[t][0]<0:
+            # ... and to a signed type, two's complement: the reduced value, less 2^n from the top half.
+            size=self.W[t][1]-self.W[t][0]+1;half=self.W[t][1]+1
+            if high-low<size and low%size<=high%size:
+                low,high=low%size,high%size
+                if (low>=half)==(high>=half):return (low-size,high-size) if low>=half else (low,high)
         return self.W[t]
     def base(self,node,name,facts,parameters,depth):
         kind=node.get('kind');terms=children(node);typ=integer_type(type_of(node))
@@ -577,7 +670,16 @@ class Values:
                     key=declaration['id']
                     if 'volatile' in type_of(read) or key in facts.escaped or (facts.reaching(read,key) is None and not facts.initialized(read,key)):
                         raise Unproven('constant bound over an indeterminate automatic variable')
+            # The operands can be tighter than the mask (a field with a declared range): both
+            # bounds hold, so their intersection does.
+            try:inner=self.operands(node,name,facts,parameters,depth)
+            except Unproven:inner=None
+            if inner is not None and max(inner[0],bounds[0])<=min(inner[1],bounds[1]):return (max(inner[0],bounds[0]),min(inner[1],bounds[1]))
             return tuple(bounds)
+        return self.operands(node,name,facts,parameters,depth)
+    def operands(self,node,name,facts,parameters,depth):
+        """The interval of `node` computed from its operands."""
+        kind=node.get('kind');terms=children(node);typ=integer_type(type_of(node))
         if kind in ('IntegerLiteral','CharacterLiteral'):
             try:value=int(node.get('value'))
             except (TypeError,ValueError):return self.wide(node)
@@ -620,6 +722,14 @@ class Values:
             if any(a is None for a in arms):return self.W[typ]
             return (min(a[0] for a in arms),max(a[1] for a in arms))
         if kind=='CallExpr':return self.call(node,name,facts,parameters,depth)
+        if kind=='UnaryExprOrTypeTraitExpr' and node.get('name')=='sizeof':
+            # sizeof of a record (kzalloc(sizeof(*pi_state))): the AArch64 layout of the slice's own record
+            # type. Array, scalar and pointer sizes are not evaluated: a loop bound over an array must be the
+            # reviewed ARRAY_SIZE idiom, not a quotient that happens to match on this target.
+            operand=node.get('argType',{}) if 'argType' in node else (children(node)[0].get('type',{}) if children(node) else {})
+            spelled=operand.get('desugaredQualType',operand.get('qualType')) or ''
+            layout=self.analyzer.type_layout(spelled) if re.fullmatch(r'(?:const |volatile )*(?:struct|union) [A-Za-z_]\w*',spelled) else None
+            if layout is not None:return (layout[0],layout[0])
         return self.W[typ]
     def load(self,target,name,facts,parameters,depth):
         target=parens(target)
@@ -637,6 +747,8 @@ class Values:
             if 'volatile' in type_of(target):raise Unproven('volatile')
             local=declaration.get('kind')=='VarDecl'
             if key in facts.escaped:
+                product=self.overflow_product(target,key,name,facts,parameters,depth) if local else None
+                if product is not None:return product
                 if local:raise Unproven('escaped automatic variable')
                 return self.W[typ]
             if key in self.assumed:return self.assumed[key]
@@ -656,7 +768,7 @@ class Values:
                 self.note('parameters',dict(function=name,parameter=declaration.get('name'),bounds=list(parameters[key])))
                 return parameters[key]
             if local and not facts.initialized(target,key) and not facts.loop_initialized(target,key) and not facts.dominated(target,key):
-                raise Unproven('automatic variable may be read before initialization')
+                raise Unproven('automatic variable may be read before initialization: %s in %s'%(declaration.get('name'),name))
             union=self.definitions(target,key,name,facts,parameters,depth)
             return self.fit(*union,target) if union is not None else self.W[typ]
         if target.get('kind')=='MemberExpr' and children(target) and self.pointer_env:
@@ -675,10 +787,60 @@ class Values:
                     return self.fit(min(v[0] for v in found),max(v[1] for v in found),target) or self.W[typ]
         if target.get('kind')=='MemberExpr' and children(target):
             contract=self.analyzer.state_range(target)
-            if contract is not None:
+            if contract is not None and not contract.get('elements'):
                 self.note('state_ranges',dict(record=contract['record'],field=contract['field'],bounds=[contract['min'],contract['max']]))
                 return (contract['min'],contract['max'])
+        if target.get('kind')=='ArraySubscriptExpr' and len(children(target))==2:
+            # An element of a const global array with a constant initializer (hrtimer_clock_to_base_table): the
+            # elements the index interval can select.
+            table=self.analyzer.const_table(children(target)[0])
+            if table is not None:
+                index=self.value(children(target)[1],name,facts,parameters,depth+1)
+                if index is not None and index[0]>=0:
+                    picked=table[index[0]:min(index[1],len(table)-1)+1]
+                    if picked and None not in picked and index[1]<len(table):
+                        self.note('definitions',dict(kind='const_table_elements',bounds=[min(picked),max(picked)],indexes=list(index)))
+                        return self.fit(min(picked),max(picked),target) or self.W[typ]
+        if target.get('kind')=='ArraySubscriptExpr' and len(children(target))==2:
+            # An element of an array field with a declared range (kmalloc_size_index[i]): the range
+            # is declared for every element, and its consumer validates each live element.
+            array=parens(children(target)[0])
+            while array.get('kind')=='ImplicitCastExpr' and array.get('castKind')=='ArrayToPointerDecay' and len(children(array))==1:array=parens(children(array)[0])
+            contract=self.analyzer.state_range(array) if array.get('kind')=='MemberExpr' and children(array) else None
+            if contract is not None and contract.get('elements'):
+                low,high=contract['min'],contract['max']
+                if contract.get('element_ranges'):
+                    index=self.value(children(target)[1],name,facts,parameters,depth+1)
+                    for r in contract['element_ranges']:
+                        if index is not None and r['indices'][0]<=index[0]<=index[1]<=r['indices'][1]:low,high=r['min'],r['max'];break
+                self.note('state_ranges',dict(record=contract['record'],field=contract['field'],bounds=[low,high],elements=True))
+                return self.fit(low,high,target) or self.W[typ]
         return self.W[typ]
+    def overflow_product(self,target,key,name,facts,parameters,depth):
+        """A local written only as __builtin_mul_overflow(a, b, &local) (check_mul_overflow) or
+        __builtin_add_overflow (check_add_overflow): a * b or a + b, when the result's interval fits the local's
+        type, so the builtin stores it exactly. Every use of its address must be such a result argument of one
+        builtin, and nothing else may assign it."""
+        typ=integer_type(type_of(target));calls=[]
+        for n in facts.order:
+            terms=children(n)
+            if n.get('kind')=='UnaryOperator' and n.get('opcode')=='&' and terms and variable(terms[0])==key:
+                call=facts.parent.get(id(n))
+                while call is not None and call.get('kind') in ('ImplicitCastExpr','ParenExpr','CStyleCastExpr'):call=facts.parent.get(id(call))
+                arguments=children(call)[1:] if call is not None and call.get('kind')=='CallExpr' else []
+                if callee(call or {}) not in OVERFLOW_BUILTINS or len(arguments)!=3 or not any(n is a or any(m is n for m in walk(a)) for a in arguments[2:]):return None
+                calls.append(call)
+            if (n.get('kind')=='BinaryOperator' and n.get('opcode')=='=' or n.get('kind')=='CompoundAssignOperator' or n.get('kind')=='UnaryOperator' and n.get('opcode') in ('++','--')) and terms and variable(terms[0])==key:return None
+        if not calls or typ is None or len({callee(c) for c in calls})!=1:return None
+        found=[];operation=OVERFLOW_BUILTINS[callee(calls[0])]
+        for call in calls:
+            a,b=(self.value(t,name,facts,parameters,depth+1) for t in children(call)[1:3])
+            if a is None or b is None:return None
+            products=[operation(x,y) for x in a for y in b]
+            if not self.N[typ][0]<=min(products)<=max(products)<=self.N[typ][1]:return None
+            found.append((min(products),max(products)))
+        self.note('definitions',dict(kind='checked_multiplication_result' if callee(calls[0])=='__builtin_mul_overflow' else 'checked_addition_result',variable=target.get('referencedDecl',{}).get('name'),bounds=[min(f[0] for f in found),max(f[1] for f in found)]))
+        return (min(f[0] for f in found),max(f[1] for f in found))
     def definitions(self,target,key,name,facts,parameters,depth):
         """Every value an initialized local (or mutated parameter) can hold: the union over its assignments.
 
@@ -777,7 +939,17 @@ class Values:
             return (1,1) if 1 in (x,y) else (0,0) if x==y==0 else (0,1)
         if op==',':return self.value(right,name,facts,parameters,depth)
         if op in MUTATIONS:return self.W[typ]
-        a=self.value(left,name,facts,parameters,depth);b=self.value(right,name,facts,parameters,depth)
+        if op=='&':
+            def bounded(n):
+                try:return self.value(n,name,facts,parameters,depth)
+                except Unproven:return None
+            a=bounded(left);b=bounded(right)
+        else:a=self.value(left,name,facts,parameters,depth);b=self.value(right,name,facts,parameters,depth)
+        if op=='&' and (a is None or b is None):
+            # x & m lies in [0, m] for any x when m is nonnegative (two's complement): futex_hash's
+            # hash & (hashsize - 1) over an unbounded hash.
+            known=[v for v in (a,b) if v is not None and v[0]>=0]
+            if known:return (0,min(v[1] for v in known))
         if a is None or b is None:return self.W[typ]
         if op=='+':return self.fit(a[0]+b[0],a[1]+b[1],node)
         if op=='-':return self.fit(a[0]-b[1],a[1]-b[0],node)
@@ -795,6 +967,10 @@ class Values:
                 view=self.operand_view(pointer,name,facts,parameters,depth) if mask[0]==mask[1]>=0 else None
                 if view is not None and '*' in type_of(widening(pointer)) or view is not None and widening(pointer).get('castKind')=='PointerToIntegral':
                     if mask[0]<view[2] and view[0]%view[2]==0:return (0,0)
+        if op=='&':
+            # A low-bit mask 2^k - 1 keeps every value it covers.
+            for value,mask in ((a,b),(b,a)):
+                if mask[0]==mask[1]>0 and mask[0]&(mask[0]+1)==0 and 0<=value[0] and value[1]<=mask[0]:return value
         if op=='&' and a[0]>=0 and b[0]>=0:
             masked=self.masked_index(node,name,facts,parameters,depth)
             if masked is not None:return masked
@@ -805,6 +981,12 @@ class Values:
     def call(self,node,name,facts,parameters,depth):
         target=callee(node);typ=integer_type(type_of(node))
         if target=='__builtin_expect' and len(children(node))==3:return self.value(children(node)[1],name,facts,parameters,depth+1)
+        if target in CLZ and len(children(node))==2:
+            # Leading zeros of a nonzero w-bit value v: w - bitlen(v), decreasing in v (fls, ilog2).
+            width=CLZ[target];arg=self.value(children(node)[1],name,facts,parameters,depth+1)
+            if arg is None or arg[0]<1 or arg[1]>=1<<width:return self.W[typ]
+            self.note('definitions',dict(kind='count_leading_zeros',builtin=target,argument=list(arg)))
+            return (width-arg[1].bit_length(),width-arg[0].bit_length())
         function=self.analyzer.functions.get(target)
         if function is None or self.analyzer.boundary(target) or depth>=MAX_DEPTH:return self.W[typ]
         callee_facts=self.facts_for(target)
@@ -824,7 +1006,21 @@ class Values:
             for parameter,argument in zip([c for c in children(function) if c.get('kind')=='ParmVarDecl'],arguments):
                 if '*' in type_of(parameter):callee_env[parameter['id']]=self.analyzer.resolve(argument,env,stack)
             self.pointer_env.append(callee_env);self.call_stack.append(stack+[target]);entered=True
-        try:values=[self.value(children(r)[0],target,callee_facts,bound,depth+1) for r in returns]
+        try:
+            # A return whose dominating condition the bound arguments decide the other way is not reached
+            # (__kmalloc_index(88): every `if (size <= N) return K;` before the kmalloc-96 one is false).
+            def reached(r):
+                for cond,truth,_ in callee_facts.facts(r):
+                    try:v=self.value(cond,target,callee_facts,bound,depth+1)
+                    except Unproven:continue
+                    if v is None:continue
+                    if truth and v==(0,0):return False
+                    if not truth and (v[0]>0 or v[1]<0):return False
+                return True
+            live=[r for r in returns if reached(r)] if bound else returns
+            if live and len(live)<len(returns):
+                self.note('calls',dict(kind='decided_returns',callee=target,returns=len(returns),reached=len(live)));returns=live
+            values=[self.value(children(r)[0],target,callee_facts,bound,depth+1) for r in returns]
         finally:
             if entered:self.pointer_env.pop();self.call_stack.pop()
         if any(v is None for v in values):return self.W[typ]
@@ -855,8 +1051,14 @@ class Values:
                 elif op=='>':low=max(low,-((b-bound[0]-1)//a))
                 elif op=='>=':low=max(low,-((b-bound[0])//a))
                 elif op=='==':low=max(low,-((b-bound[0])//a));high=min(high,(bound[1]-b)//a)
+                elif op=='!=' and bound[0]==bound[1] and a==1:
+                    # x != c removes c where it is an end of the interval.
+                    if low==bound[0]-b:low+=1
+                    elif high==bound[0]-b:high-=1
+                    else:continue
                 else:continue
                 self.note('guards',self.analyzer.location(guard))
+                if guard.get('kind')=='CallExpr':self.analyzer.assertion_uses.append(dict(function=name,assertion=callee(guard),location=self.analyzer.location(guard)))
         if low>high and empty is not None:empty[0]=True
         return (low,high) if low<=high else base
     def comparisons(self,cond,truth):
@@ -869,6 +1071,10 @@ class Values:
             # Comparison operands are converted to a common type; keep only
             # value-preserving conversions so the relation holds for the originals.
             if all(integer_type(type_of(widening(t))) for t in terms):return [(cond,truth)]
+        # A bare integer `x` is the test `x != 0`.
+        if kind in ('DeclRefExpr','ImplicitCastExpr','MemberExpr') and integer_type(type_of(widening(cond))):
+            zero={'kind':'IntegerLiteral','value':'0','type':{'qualType':type_of(widening(cond))},'id':(cond.get('id') or '')+'#zero'}
+            return [({'kind':'BinaryOperator','opcode':'!=','type':{'qualType':'int'},'inner':[cond,zero],'id':(cond.get('id') or '')+'#nonzero'},truth)]
         return []
     def mask_definition(self,node,name,facts):
         """A variable whose reaching definition calls f(i, n) returning all-ones when i < n (or i <= n), else zero.

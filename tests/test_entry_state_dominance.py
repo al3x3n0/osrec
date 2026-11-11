@@ -99,7 +99,13 @@ class DominanceTests(unittest.TestCase):
             for root in ('conditional','ambiguous','loop','loop_load','through_helper','external_barrier','change_pointer','compound','unsequenced','range','partial'):
                 with self.subTest(root=root):
                     plan=Analyzer(tree,POLICY,prune_written=True).analyze(root)
-                    self.assertIn('current()->value' if root!='range' else 'current()->array[2]',{r['path'] for r in plan['entry_reads']})
+                    expected=('current()->parent->value' if root=='change_pointer' else
+                              'current()->array[2]' if root=='range' else 'current()->value')
+                    self.assertIn(expected,{r['path'] for r in plan['entry_reads']})
+                    if root=='change_pointer':
+                        # The final read follows the reassigned pointer, not the overwritten original object.
+                        self.assertEqual({r['path'] for r in plan['entry_reads']},
+                                         {'current()->parent','current()->parent->value'})
             for contract in ('stable_identity','exclusive_state','preserves_entry_state'):
                 policy={'current':{k:v for k,v in POLICY['current'].items() if k!=contract}}
                 plan=Analyzer(tree,policy,prune_written=True).analyze('overwrite')

@@ -1290,22 +1290,16 @@ ftruncate's stack-object values do not converge in 5 passes (`analysis_limit`).
 Its count is the conservative fallback's: `shmem_undo_range` and the folio
 batch loops of truncation.
 
-Both footprints pass the reduced replay's blocker check (observations
-`observe-pread` and `observe-pwrite`). Both then stop at the binding check:
-discovered reads that `live-binding.json` does not supply. pread64 has 46 and
-pwrite64 has 48:
-- inode timestamps, ids, state, lock and version;
-- `user_ns` id maps;
-- superblock flags and time limits;
-- `tk_core`, the clock read for timestamps;
-- the ops classes (`fop_pool`, `aops_pool`, `iop_pool`, `super_ops`);
-- mount flags;
-- the inode's writeback structure;
-- for pwrite64, also the dirty-throttling state (`bdp_ratelimits`,
-  `ratelimit_pages`, `task.nr_dirtied`).
-
-The timestamp update (`touch_atime`, `file_update_time`,
-`inode_update_time`, `__mark_inode_dirty`) and the page cache reach them.
+Both footprints pass the reduced replay's blocker check. They first stopped at
+the binding check: pread64 read 46 schema fields and pwrite64 48 that
+`live-binding.json` did not supply. The timestamp update and the page cache
+reach them. They are now bound, held by live-checked preconditions or declared
+model state, and all six `pread64`/`pwrite64` boundaries replay as equivalent;
+see [binding the page-cache footprint](svc-boundary-replay.md#binding-the-page-cache-footprint-2026-11-03).
+Two analysis changes came with it. A constant mask's static bound no longer
+hides an operand's declared range: the two intervals are intersected. Every
+declared range the value analysis uses is reported in
+`state_range_assumptions`; before, only index proofs recorded theirs.
 
 fcntl's six are the raw-descriptor `close_on_exec` bitmap index.
 
@@ -1321,13 +1315,268 @@ that must stay blocked:
 - user addresses, boundary writes into locals and discarded volatile
   scalars;
 - sign tests on returned values, loop-body objects and null-replacing
-  stores.
+  stores;
+- a declared range that tightens a constant mask, reported as an assumption.
 
 Updated expectations now assert the more precise result:
 - `goto` dead code, conditions false on loop entry, and a guard decided on a
   null-only pointer are pruned;
 - address-independent comparisons are admitted;
 - reconstructed-object comparisons need the identity contract.
+
+### fcntl and ftruncate (2026-11-03)
+
+**Rejecting assertions.** The `fault_assertions` contract names a function
+whose condition argument rejects the run when it holds. Each entry has
+`function`, `condition_argument`, `reason` and `validated_by`. `fd-control`
+names `osrec_kernel_linux_assert`: a reviewed model sets the sticky
+`model_fault` flag when it sees a broken kernel invariant, and the reduced
+replay never accepts a faulted run.
+
+After such a call statement the value analysis takes the condition as false.
+It is a guard, like an earlier `if (c) return;`. The condition must stay stable
+up to the use, and nothing may enter the block in between. The plan lists each
+guard used in `fault_assertion_guards` and the contracts behind them in
+`fault_assertion_contracts`.
+
+`close_on_exec` and the model's `__set_close_on_exec` and
+`__clear_close_on_exec` assert `fd < max_fds`. With the `max_fds <= 64` range,
+`close_on_exec[fd / 64]` is the one word: `fcntl` goes from 6 blockers to 0.
+
+**Recursive walks.** `ftruncate` used to stop with `analysis_limit`. Its
+stack-object values never converged. The `xa_state` cursor of
+`find_lock_entries` and `find_get_entries` gained one `->parent` step per pass:
+`xas_find` walks up the tree, so each pass stored
+`const-address:1->parent->…->parent`, one level longer than the last.
+
+A stored value that repeats one dereference step three times in a row now
+widens to `unresolved:recursive-chain`. That value is absorbing, so a read of
+it still blocks wherever it is reachable. `ftruncate` now converges in the
+optimistic passes, and its blockers fall from 360 to 200.
+
+**Low-bit masks.** `x & (2^k - 1)` is `x` when `0 <= x <= 2^k - 1`. The
+interval rule for `&` used to give `[0, mask]`.
+
+The 200 remaining `ftruncate` blockers have three sources:
+- **The xarray walk.** A call's returned pointer is resolved from the callee's
+  `return` expressions without that context's decided branches or null guards.
+  `xas_reload`'s `node->slots[…]` then appears for the `XAS_BOUNDS` sentinel
+  and for null. The node values it yields feed `xas_descend` and `xas_find`'s
+  loop.
+- **Folio batches.** The bound `nr <= PAGEVEC_SIZE` of the stack
+  `struct folio_batch` is not tracked, so `fbatch->folios[i]` with
+  `i < fbatch->nr` is unbounded.
+- **`zero_user_segments`.** It calls `memset`, which has no boundary model.
+
+### writev (2026-11-04)
+
+`writev` imports a user `iovec` array into the stack array `iovstack[UIO_FASTIOV]`
+and drives it through `iov_iter`. Its footprint is now blocker-free, as are
+`write`, `pread64` and `pwrite64`. Six mechanisms got it there:
+
+- **Summarized automatic arrays.** A pointer-carrying stack array becomes one
+  `auto:N` object with a `summary`; stores into it are weak. The plan lists each
+  one in `automatic_array_summaries`. Two assumptions stand behind it: accesses
+  are in bounds, and an element is defined before it is read. The reduced
+  replay checks the second at run time by building with
+  `-ftrivial-auto-var-init=pattern`.
+- **Flow-sensitive pointer locals.** A pointer local holds its current value
+  while that value is plain, meaning no unresolved, derived or bounded tokens.
+  Its entries are dropped at loops (unless only stepped over a summary) and at
+  frame entry and exit.
+- **Call results across passes.** A call's visit-time return value is recorded.
+  The next optimistic pass reuses it where the alias closure would otherwise
+  re-resolve the callee's `return` expressions flow-insensitively. The passes
+  converge only when these recorded results stop changing.
+  - A recorded result is used only when every value is a constant, null, an
+    error pointer, or rooted at a stack object, whose stores the visit tracks.
+  - A value naming a global's or an entry path's contents falls back to the
+    closure. The visit-time read can miss a store the closure sees, as in
+    `global = p; return global;`.
+  - Without it, `iovec_from_user`'s allocation path, a model that returns NULL,
+    reached `__import_iovec`'s `iov[seg]` after the `IS_ERR` guard.
+- **Tagged unions.** Integer fields written only by whole-record stores are tags.
+  `iov_iter.iter_type` is one. A union pointer read is filtered by the tag values
+  it was stored under, and tag tests at conditions narrow the tag. This applies
+  through called helpers such as `iter_is_ubuf`.
+- **Dominating guards.** An `IS_ERR` guard removes the error constants from a
+  pointer's value classes. A null test whose operand cannot be null kills that
+  arm.
+- **Boundary user values.** A boundary that writes through its first argument
+  can declare `user_values`: a pointer it stores (`__get_user` of
+  `iov_base`) is a user address, not a kernel object.
+
+`tests/test_entry_state_flow.py` covers the summary shapes, the cross-pass call
+results (in the `import_iovec` shape, which blocks without them) and the user
+values.
+
+Two fixes came out of the suite:
+- **Alias-limit reporting.** An alias set over `max_alias_paths` met during a
+  quiet closure sweep was absorbed there, so the reporting sweep never reported
+  it. Limits met in quiet sweeps are now reported after the fixpoint.
+- **A stale test expectation.** With flow-sensitive pointer locals, `p = arg;
+  *p++ = 7;` is the store `*arg = 7`, which is not a blocker. The test now also
+  stores at `*p`, past `arg`, and that store still needs review.
+
+The `ftruncate` blockers fall from 200 to 168.
+
+### futex (2026-11-05)
+
+The `futex` root started with 53 blockers and now has none. Four rules got it
+there. `tests/test_entry_state_flow.py` (`FutexShapeTests`) covers each one and
+its rejections.
+
+- **Nested member ranges.** A state range may name a member of a member
+  (`struct futex_hash_bucket` `waiters.counter`). It applies when the inner
+  record is reached as that member: `(&hb->waiters)->counter`, `hb->waiters.counter`.
+  An `atomic_t` counter elsewhere is not affected.
+- **Masks over unbounded values.** `x & m` lies in [0, m] whenever `m` is
+  nonnegative, even if `x` is unknown (two's complement). `futex_hash`'s
+  `hash & (futex_hashsize - 1)` is then in [0, 255].
+  - The bucket subscript uses the `queues` pointer extent over 256 elements.
+  - Replay footprints therefore run with `--max-range-elements 256`.
+- **Read-only views of stack objects.** `jhash2` reads the key through
+  `const u32 *k` and steps it with `k += 3`. A subscript through a
+  const-qualified scalar view is accepted when every base value is a stack
+  object or an address derived from one. Such a read touches only stack
+  memory, and the const pointee rules out writes that could change pointer
+  values the analysis tracks. The plan lists each view under `automatic_views`.
+- **Copies of const records.** `struct futex_q q = futex_q_init;` reads a whole
+  const global. A file-scope initializer is a constant expression, so a const
+  object defined once is fixed program data. The read carries
+  `defined_const_record` evidence, and `fixed_global_read` accepts it unless
+  the object is written. The copied values are not trusted: an indirect call
+  through a copied callback still blocks.
+
+### SLUB kmalloc and kfree under writev (2026-11-05)
+
+With SLUB's original allocation and free fast paths in the slice (see
+[Kernel binary replay](kernel-binary-replay.md#slab-allocation-writev-with-9-segments-2026-11-05)),
+the `writev` root started with 43 blockers. It now has none, and so does the
+previous port's `writev` root under the same analyzer. Unit tests for these
+rules are not written yet; the `writev` roots of both ports exercise them.
+
+**Fixpoint fixes.** Three changes correct the analysis itself and apply to
+every root:
+
+- **Stable stack-object tokens.** A stack object (`auto:N`) is numbered when a
+  pass first meets it, and the store carried into the next pass is keyed by
+  that number. Each (owner stack, declaration) now keeps its token across
+  passes. Before, a pass that met objects in another order read values written
+  for a different object.
+- **Restart on changed reachability.** A value can sustain itself through the
+  carried store: `iterate_iovec` reads `iter->__iov` and writes it back. A pass
+  whose unreachable regions differ from the previous pass's now starts from an
+  empty store. Convergence also requires the store a pass writes to equal the
+  one it started from.
+- **Pointer-local reassignment.** `p = q` for a pointer local whose address is
+  never taken rebinds `p`. It was handled as a store into the object `p`
+  pointed to, so `iov = kmalloc_array(...)` never changed `iov`.
+
+**Precision fixes** found along the way:
+
+- **Exact user-value writes.** A memory model that declares `user_values` for
+  an argument (`linux_get_user`) no longer also havocs it.
+- **Always-evaluated parts.** Dominance accepts a write in an `if` or `switch`
+  condition, a `do` body, a `for` initializer or first test, or the left of
+  `&&`/`||`. Each of these runs whenever its statement does.
+- **Copies.** A guard on `object` narrows a local copied from it
+  (`void *x = (void *)object;`, neither assigned again).
+- **Null arithmetic.** Arithmetic on null is undefined (C11 6.5.6p8). A null
+  alternative of a pointer into a summarized array yields no result.
+
+**New rules and contracts** (`analysis-contracts.json`):
+
+- **Element ranges.** A state range with `"elements": true` bounds every
+  element of an array field. Optional `element_ranges` tighten an index
+  interval: `kmalloc_size_index` entries are kmalloc cache indexes, and
+  entries 16–23 (129–192 bytes) are 2. The replay checks each live element.
+- **Interval rules.**
+  - `__builtin_clz` on a nonzero interval, which gives `fls`.
+  - `sizeof` by the AArch64 LP64 layout of scalars, pointers, arrays and
+    records, with typedefs and anonymous members resolved.
+  - A local written only as `__builtin_mul_overflow`'s result
+    (`check_mul_overflow`) is the product when the product cannot overflow.
+- **`argument_ranges`.** Bounds a root parameter: `writev`'s `vlen` ≤ 12,
+  which the binding's `max_segments` enforces. The replay checks the observed
+  argument.
+- **`pointer_objects` and word stores.**
+  - `pointer_objects` declares the object type behind a pointer field:
+    `kmem_cache_cpu.freelist` points to `struct kmalloc_object`.
+  - A record that is one integer array is a word store, addressable by byte
+    offset.
+  - `(T *)((unsigned long)object + s->offset)` selects every element an access
+    of `sizeof(T)` can touch, given `struct kmem_cache` `offset` ∈ [0, 184].
+    The analyzer checks the offset plus the access size against the object's
+    size.
+- **`allocations`.**
+  - `kmalloc_array_noprof`'s result is a summarized array of 12
+    `struct iovec`, backed by `kmalloc_object.words`. The call writes it
+    before reading it, as for `iovstack`.
+  - The allocator body is still analyzed, so its freelist, cache and
+    free-pointer reads stay entry reads.
+  - The free pointer that kfree stores into the released object has no
+    tracked effect, because the memory is not read after kfree.
+- **`deallocators`.** `kfree`'s `object` cannot be stack storage. Automatic
+  objects are dropped from it with a proof.
+- **Checked spans.** A span may name an allocation by its backing object, or a
+  word store matched by type and member. Null and constant pointers are
+  rejected at run time.
+
+Plans report `argument_range_assumptions` and `allocation_summaries`.
+
+### futex scenarios (2026-11-06)
+
+The `futex` root grew from the wake and wait paths to requeue, wake-op, the
+uncontended PI paths, the shared-key path, the hrtimer setup of a timeout and
+the first `pi_state`'s kmalloc-96 allocation. It analyzes with 0 blockers in
+about 70 seconds. The rules added on the way:
+
+- **Empty list walks** (`tools/entry_state_lists.py`, contract `empty_lists`).
+  A contract names list heads that are empty at every replayed boundary (the
+  futex hash chains: the slice queues no waiter, and the binding requires
+  each live chain to be self-linked). For those heads:
+  - a load of `H.next`, `H->next` or the `prev` forms is `H` itself;
+  - `container_of(H, T, m)` is a sentinel `list-head:H#m`, not an object:
+    `&sentinel->m` is `H`, and any other access through it blocks;
+  - a `for` loop is decided never to run when its condition is
+    `!(&pos->m == HEAD)` and its initializer sets `pos` from `HEAD->next`
+    for the same side-effect-free `HEAD`;
+  - a store to such a head, or to the object holding it, is a blocker.
+
+  `plist_for_each_entry` and `plist_for_each_entry_safe` stay the kernel's own
+  macros. Plans list `empty_list_proofs` (links, cursors, walks).
+- **Labels and gotos in dominance proofs.**
+  - `dominated` (is `x` assigned before this use?) stops at a statement that
+    never completes normally, a `return` or `goto`: what follows it is entered
+    only through labels the walk already checked (`futex_lock_pi`'s
+    `uaddr_faulted:` after its final `return`).
+  - `dominates` (does this store run before that read?) accepts a label
+    between the two when every goto to it is itself dominated by the store,
+    and a case whose switch lies in the same range.
+  - Both are memoized per function; the memo keeps its nodes alive so ids are
+    not reused.
+- **Comparisons within a pointer-extent array.** `double_lock_hb`'s
+  `hb1 > hb2` compares two elements of the array `__futex_data.queues`
+  points to. Such a comparison is admitted as one array's when the call
+  never stores that pointer member, checked against the final write set.
+- **`void *` views over mixed values.** A conversion to `void *` keeps its
+  objects when they are array elements or named objects (`page_folio`'s folio
+  is a page-cache pool element or the bound user folio).
+- **Decided returns.** When a call's arguments decide a return's dominating
+  condition the other way, that return is not reached: `__kmalloc_index(88)`
+  is 1 (kmalloc-96) and `kmalloc_type(GFP_KERNEL | __GFP_ZERO)` is
+  `KMALLOC_NORMAL`. Plans note `decided_returns`.
+- **Layouts of named members of anonymous records.** `type_layout` sizes a
+  member declared as `struct {...} shared;` from the record declared just
+  before it, so `sizeof(*pi_state)` is 88.
+- **Two bounded element counts.** `pointer_access` counts selected elements
+  per array as it goes, instead of rebuilding a set per origin, which was
+  quadratic over the 256 buckets.
+
+The replay maps an analysis path to a schema field with the observed state's
+bound targets when the policy admits several (`kmalloc_caches[0][1]` names
+`kmalloc96_cache`, `[0][2]` names `kmalloc_cache`).
 
 ## Run the live pipeline
 

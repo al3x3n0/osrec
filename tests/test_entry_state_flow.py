@@ -88,6 +88,39 @@ class FlowTests(Base):
                     'unsigned root(int k){struct St st;void (*f)(struct St *)=k?good:bad;f(&st);return st.node->a;}')
         self.assertIn('unresolved_pointer_origin',{b['kind'] for b in p['blockers']})
 
+    def test_a_declared_range_tightens_a_mask_and_is_an_assumption(self):
+        # The static `& 1` bound is [0, 1]; the declared range of the masked field makes it 0.
+        ranges=[dict(record='struct Obj',field='a',min=0,max=0,reason='r',validated_by='live state field obj.a')]
+        text='unsigned root(void){struct Obj *o=current();if(!(o->a&1u))return 0;return o->b;}'
+        p=self.clean(text,{'current()->a'},state_ranges=ranges)
+        self.assertEqual([(a['record'],a['field']) for a in p['state_range_assumptions']],[('struct Obj','a')])
+        self.assertEqual(self.reads(self.plan(text)),{'current()->a','current()->b'})
+        # A range the mask already implies still decides nothing more.
+        p=self.plan(text,state_ranges=[dict(ranges[0],max=3)]);self.assertEqual(self.reads(p),{'current()->a','current()->b'})
+
+    def test_a_rejecting_assertion_bounds_what_follows_it(self):
+        # check(c) flags a fault the replay rejects: after it, c is false, so i < 4 bounds the index.
+        text='int fault;int check(int failure){if(failure)fault=1;return failure;}\nunsigned root(unsigned i){check(i>=4);return current()->arr[i];}'
+        contract=[dict(function='check',condition_argument=0,reason='r',validated_by='v')]
+        p=self.clean(text,{'current()->arr[0]','current()->arr[1]','current()->arr[2]','current()->arr[3]'},fault_assertions=contract)
+        self.assertEqual([g['assertion'] for g in p['fault_assertion_guards']],['check']);self.assertEqual(p['fault_assertion_contracts'],contract)
+        # Without the contract, before the call, or with the bound changed in between, the index stays unproven.
+        for body,options in ((text,{}),(text.replace('check(i>=4);return current()->arr[i];','unsigned v=current()->arr[i];check(i>=4);return v;'),{'fault_assertions':contract}),
+                             (text.replace('check(i>=4);','check(i>=4);i+=4;'),{'fault_assertions':contract})):
+            with self.subTest(body=body):self.assertTrue(self.plan(body,**options)['blockers'])
+        with self.assertRaises(ValueError):Analyzer({'kind':'TranslationUnitDecl','inner':[]},basic.POLICY,fault_assertions=[dict(contract[0],condition_argument='0')])
+
+    def test_a_recursive_walk_widens_and_a_low_bit_mask_keeps_its_values(self):
+        # s.node climbs ->parent in a loop: the stored value would gain a step every pass.
+        policy={**basic.POLICY,'top':{'kind':'object_provider','reason':'r','implementation':'i','snapshot_safe':True}}
+        text='struct N{struct N *parent;unsigned a;};struct N *top(void);struct S{struct N *node;};\n'
+        p=self.plan(text+'unsigned root(int k){struct S s;struct S *q=&s;q->node=top();while(k--)q->node=q->node->parent;return q->node->a;}',policy=policy)
+        kinds={b['kind'] for b in p['blockers']}
+        self.assertNotIn('analysis_limit',kinds);self.assertIn('unresolved_pointer_origin',kinds)
+        # v in [1, 3]: v & 3 is v, never 0.
+        self.clean('unsigned root(void){unsigned v=current()->a%3+1;if((v&3)==0)return current()->b;return v;}',{'current()->a'})
+        self.assertEqual(self.reads(self.plan('unsigned root(void){unsigned v=current()->a%5;if((v&3)==0)return current()->b;return v;}')),{'current()->a','current()->b'})
+
 USER_POLICY={**basic.POLICY,'get_byte':{'kind':'memory_model','writes':[1],'reason':'reads one user byte','implementation':'fixture'}}
 USER=[{'function':'root','parameter':'buf','reason':'user buffer','validated_by':'fixture'}]
 USER_MODEL='int get_byte(const void *p,char *value);\n'
@@ -135,5 +168,111 @@ unsigned root(int k){unsigned sum=0;do{struct Obj *page;long status=begin(&page,
             with self.subTest(body=bad):
                 p=self.plan('unsigned root(int k){'+bad+'}')
                 self.assertIn('unresolved_pointer_origin',{b['kind'] for b in p['blockers']})
+
+ARRAY='''struct V{struct Obj *base;unsigned long len;};
+static int fill(struct V *v,unsigned n){do{v->base=current();v->len=1;v++;}while(--n);return 0;}
+static struct V *from(unsigned n,struct V *fast){if(n>8)return (struct V *)-22;if(fill(fast,n))return (struct V *)-14;return fast;}
+'''
+
+class ArraySummaryTests(Base):
+    def test_a_pointer_carrying_automatic_array_is_one_summarized_object(self):
+        for body in ('unsigned root(unsigned n){struct V st[8];struct V *v=st;if(!n||n>8)return 0;fill(v,n);return v[n-1].base->a;}',
+                     # through the address of an escaped pointer local, and through a record that holds the cursor
+                     'static void imp(struct V **vp,unsigned n){fill(*vp,n);}\nunsigned root(unsigned n){struct V st[8];struct V *v=st;if(!n||n>8)return 0;imp(&v,n);return v->base->a;}',
+                     'struct I{const struct V *iov;};static void init(struct I *i,const struct V *v){i->iov=v;}\nunsigned root(unsigned n){struct V st[8];struct I it;if(!n||n>8)return 0;fill(st,n);init(&it,st);const struct V *p=it.iov;return p->base->a;}',
+                     # a dominating IS_ERR guard removes the error constants
+                     'unsigned root(unsigned n){struct V st[8];struct V *v=from(n,st);if(is_err(v))return 0;return v->base->a;}'):
+            with self.subTest(body=body):
+                p=self.clean(ARRAY+body,{'current()->a'})
+                self.assertEqual({a['array'] for a in p['automatic_array_summaries']},{'st'})
+        for bad in ('unsigned root(void){struct V st[8];return st[0].base->a;}',                                    # never stored
+                    'unsigned root(unsigned n){struct V st[8];fill(st,1);st[1].base=0;return st[0].base->a;}',     # one element null
+                    'void sink(struct V *);unsigned root(void){struct V st[8];fill(st,1);sink(st);return st[0].base->a;}',  # escapes to unknown code
+                    'unsigned root(unsigned n){struct V st[8];struct V *v=from(n,st);return v->base->a;}'):       # no error guard
+            with self.subTest(body=bad):self.assertTrue(self.plan(ARRAY+bad)['blockers'])
+
+    def test_call_results_carried_from_the_previous_pass_reach_the_alias_closure(self):
+        # The import_iovec shape: the allocation path returns null or an error, so after the IS_ERR
+        # guard the cursor is the summarized array. The closure re-resolving the call flow-
+        # insensitively would see the null; the previous pass's visit-time result does not.
+        lib=r"""static struct V *nomem(unsigned long n,unsigned long sz){(void)n;(void)sz;return 0;}
+static void release(const void *p){(void)p;}
+static struct V *from3(unsigned long n,unsigned long fast_n,struct V *fast){struct V *v=fast;int ret;if(n==0)return v;if(n>1024)return (struct V *)-22;
+ if(n>fast_n){v=nomem(n,sizeof(struct V));if(!v)return (struct V *)-12;}ret=fill(v,n);if(ret){if(v!=fast)release(v);return (struct V *)(long)ret;}return v;}
+struct I{const struct V *iov;unsigned long n;};
+static void init(struct I *i,const struct V *v,unsigned long n){i->iov=v;i->n=n;}
+static long imp(unsigned n,struct V **iovp,struct I *i){struct V *v;unsigned long seg;long t=0;v=from3(n,8,*iovp);if(is_err(v)){*iovp=0;return (long)v;}
+ for(seg=0;seg<n;seg++){long len=(long)v[seg].len;if(!len){if(v!=*iovp)release(v);*iovp=0;return -14;}if(len>100-t){len=100-t;v[seg].len=len;}t+=len;}
+ init(i,v,n);if(v==*iovp)*iovp=0;else *iovp=v;return t;}
+"""
+        body='unsigned root(unsigned n){struct V st[8];struct V *iov=st;struct I it;if(n<2)return 0;long r=imp(n,&iov,&it);if(r<0)return 0;return it.iov->base->a;}'
+        p=self.clean(ARRAY+lib+body,{'current()->a'})
+        self.assertEqual({a['array'] for a in p['automatic_array_summaries']},{'st'})
+        # Without the error guard the null (and error) results reach the subscript.
+        self.assertTrue(self.plan(ARRAY+lib.replace('if(is_err(v)){*iovp=0;return (long)v;}','')+body)['blockers'])
+
+    def test_a_boundary_loaded_pointer_is_a_user_address(self):
+        policy={**basic.POLICY,'load':{'kind':'memory_model','writes':[0],'user_values':[0],'reason':'r','implementation':'i'},
+                'copy':{'kind':'memory_model','writes':[0],'reason':'r','implementation':'i'}}
+        model='int load(unsigned char *out,const void *p);int copy(void *to,const void *from);\n'
+        body='unsigned root(const void *vec){void *buf;if(load((unsigned char *)&buf,vec))return 0;char c;copy(&c,(const char *)buf+1);return 0;}'
+        user=[dict(function='root',parameter='vec',reason='r',validated_by='v')]
+        self.clean(model+body,set(),policy=policy,user_addresses=user)
+        bad=body.replace('char c;copy(&c,(const char *)buf+1);return 0;','return *(const char *)buf;')
+        self.assertTrue(self.plan(model+bad,policy=policy,user_addresses=user)['blockers'])
+        with self.assertRaises(ValueError):self.plan(model+body,policy={**policy,'load':{**policy['load'],'user_values':[1]}},user_addresses=user)
+
+HASH='''typedef struct {int counter;} cnt_t;struct H{cnt_t w;cnt_t other;unsigned long n;unsigned arr[4];};struct H *hcur(void);
+'''
+HASH_POLICY={**basic.POLICY,'hcur':dict(basic.POLICY['current'])}
+
+class FutexShapeTests(Base):
+    """Shapes of futex_hash, futex_hb_waiters_pending, jhash2 and futex_q_init."""
+    def test_a_nested_member_range_applies_through_its_outer_record_only(self):
+        ranges=[dict(record='struct H',field='w.counter',min=0,max=3,reason='r',validated_by='v')]
+        for body in ('unsigned root(void){struct H *h=hcur();return h->arr[(&h->w)->counter];}',
+                     'unsigned root(void){struct H *h=hcur();return h->arr[h->w.counter];}'):
+            with self.subTest(body=body):
+                p=self.plan(HASH+body,policy=HASH_POLICY,state_ranges=ranges);self.assertFalse(p['blockers'],p['blockers'])
+                self.assertEqual([(a['record'],a['field']) for a in p['state_range_assumptions']],[('struct H','w.counter')])
+        # The same counter type under another member, or with no range, stays unbounded.
+        for body,options in (('unsigned root(void){struct H *h=hcur();return h->arr[h->other.counter];}',dict(state_ranges=ranges)),
+                             ('unsigned root(void){struct H *h=hcur();return h->arr[h->w.counter];}',{})):
+            with self.subTest(body=body):self.assertTrue(self.plan(HASH+body,policy=HASH_POLICY,**options)['blockers'])
+
+    def test_a_mask_bounds_an_unbounded_operand(self):
+        ranges=[dict(record='struct H',field='n',min=4,max=4,reason='r',validated_by='v')]
+        self.assertFalse(self.plan(HASH+'unsigned root(unsigned x){struct H *h=hcur();return h->arr[x & (h->n - 1)];}',policy=HASH_POLICY,state_ranges=ranges)['blockers'])
+        for body in ('unsigned root(unsigned x){struct H *h=hcur();return h->arr[x | (h->n - 1)];}',
+                     'unsigned root(unsigned x){struct H *h=hcur();return h->arr[x & h->n];}'):
+            with self.subTest(body=body):self.assertTrue(self.plan(HASH+body,policy=HASH_POLICY,state_ranges=ranges)['blockers'])
+
+    def test_a_const_view_reads_scalars_of_a_stack_object(self):
+        view=HASH+"""union K{struct {void *p;unsigned long a;unsigned o;} x;struct {unsigned long w0,w1;unsigned o;} y;};
+static unsigned sum(const unsigned *k,unsigned n){unsigned s=0;while(n>3){s+=k[0]+k[1]+k[2];n-=3;k+=3;}
+ switch(n){case 3:s+=k[2];case 2:s+=k[1];case 1:s+=k[0];break;default:break;}return s;}
+"""
+        p=self.plan(view+'unsigned root(void){union K key={0};key.x.p=hcur();key.x.o=3;return sum((const unsigned *)&key,4);}',policy=HASH_POLICY)
+        self.assertFalse(p['blockers'],p['blockers']);self.assertTrue(p['automatic_views'])
+        self.assertFalse([r for r in p['entry_reads'] if not r['path'].startswith('argument:')])
+        for body in ('unsigned root(void){return sum((const unsigned *)&hcur()->n,4);}',                                        # not a stack object
+                     'unsigned root(void){union K key={0};unsigned *k=(unsigned *)&key;k[1]=2;key.x.p=hcur();return ((struct H *)key.x.p)->arr[0];}'):  # a writable view
+            with self.subTest(body=body):self.assertTrue(self.plan(view+body,policy=HASH_POLICY)['blockers'])
+
+    def test_a_const_record_copy_is_program_data(self):
+        record="""static void cb(void){}
+union U{unsigned long u;void *p;};
+struct Q{void (*f)(void);unsigned b;union U k;};
+"""
+        from entry_state import fixed_global_read
+        p=self.plan(record+'static const struct Q init={.f=cb,.b=7,.k=(union U){.u=0}};\nunsigned root(void){struct Q q=init;return q.b+current()->a;}')
+        self.assertFalse(p['blockers'],p['blockers'])
+        copied=[r for r in p['entry_reads'] if r['path']=='global:init']
+        self.assertEqual([r['immutable_global']['kind'] for r in copied],['defined_const_record']);self.assertTrue(fixed_global_read(copied[0],p))
+        # The copy proves only that the read is no entry state: a callback copied out is still unresolved.
+        self.assertIn('indirect_call',{b['kind'] for b in self.plan(record+'static const struct Q init={.f=cb,.b=7};\nunsigned root(void){struct Q q=init;q.f();return q.b;}')['blockers']})
+        # A mutable record is entry state.
+        p=self.plan(record+'static struct Q init={.f=cb,.b=7};\nunsigned root(void){struct Q q=init;return q.b;}')
+        self.assertFalse([r for r in p['entry_reads'] if r['path']=='global:init' and 'immutable_global' in r])
 
 if __name__=='__main__':unittest.main()

@@ -55,7 +55,6 @@ unsigned sum=0;for(unsigned i=0;i<4;i++)sum+=p[i];return sum;}''',{'current()->'
     def test_initialization_does_not_discard_unknown_null_or_invalid_values(self):
         texts=(
             MODEL+'unsigned root(unsigned n){unsigned*p;if(n)p=current()->a;else p=0;return *p;}',
-            MODEL+'unsigned root(unsigned*unknown,unsigned n){unsigned*p;if(n)p=current()->a;else p=unknown;return *p;}',
             MODEL+'unsigned root(unsigned n){unsigned*p;if(n)p=current()->a;else p=current()->b+4;return *p;}',
             MODEL+'void mutate(unsigned**p){*p=0;}unsigned root(void){unsigned*p;p=current()->a;mutate(&p);return *p;}',
         )
@@ -63,6 +62,12 @@ unsigned sum=0;for(unsigned i=0;i<4;i++)sum+=p[i];return sum;}''',{'current()->'
             with self.subTest(text=text):
                 p=self.plan(text);self.assertTrue(p['blockers'],p)
                 with self.assertRaises(ValueError):capture_header([p])
+        # A definitely assigned root argument remains visible in the footprint. Its pointee
+        # still has no snapshot binding, so automatic capture must reject the mixed origins.
+        p=self.plan(MODEL+'unsigned root(unsigned*unknown,unsigned n){unsigned*p;if(n)p=current()->a;else p=unknown;return *p;}')
+        self.assertEqual({r['path'] for r in p['entry_reads']},
+                         {'current()->a[0]','*(argument:unknown)'})
+        with self.assertRaisesRegex(ValueError,'provider field paths'):capture_header([p])
     def test_automatic_scope_and_external_effects_remain_blocked(self):
         texts=(
             'unsigned root(unsigned n){unsigned*p;{unsigned a[4];p=a;}return *p;}',

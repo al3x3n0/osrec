@@ -39,9 +39,11 @@ class AssignedVolatileTests(unittest.TestCase):
             p=self.plan('unsigned root(void){volatile unsigned y;'+body+'}')
             self.assertTrue(p['blockers']);self.assertNotIn('local_volatile_storage_proofs',p)
     def test_loop_body_assignment_does_not_initialize_after_the_loop(self):
-        for body in ('while(n){y=3;n--;}return y;','for(unsigned i=0;i<n;i++)y=3;return y;','do{y=3;}while(n);return y;'):
+        for body in ('while(n){y=3;n--;}return y;','for(unsigned i=0;i<n;i++)y=3;return y;'):
             p=self.plan('unsigned root(unsigned n){volatile unsigned y;'+body+'}')
             self.assertTrue(p['blockers']);self.assertNotIn('local_volatile_storage_proofs',p)
+        # A do body runs at least once: its assignment does initialize the variable after the loop.
+        self.proof(self.positive('unsigned root(unsigned n){volatile unsigned y;do{y=3;}while(n);return y;}'))
         p=self.positive('unsigned root(unsigned n){volatile unsigned y;unsigned result=0;while(n){y=n;result+=y;n--;}return result;}')
         self.proof(p)
     def test_address_escape_and_bypassed_initialization_remain_blocked(self):

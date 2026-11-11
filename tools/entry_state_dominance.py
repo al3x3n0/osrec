@@ -342,8 +342,11 @@ def definite_local_initialization(body,keys,initialized_declarations=False,scala
             statement(terms[4],condition);expression(terms[3],condition)
             return condition,live
         if kind=='DoStmt' and len(terms)==2:
-            statement(terms[0],state);expression(terms[1],state)
-            return state,True
+            # The body runs before the first test; later iterations start with at least its stores. (A break or
+            # continue in the body is an unsupported statement, so the body's end state reaches the test.)
+            after,live=statement(terms[0],state)
+            condition=expression(terms[1],after if live else state)
+            return condition,live
         if kind=='NullStmt':return state,True
         if kind.endswith('Stmt'):
             unsupported=True;return state,True

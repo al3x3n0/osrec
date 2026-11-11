@@ -6,7 +6,7 @@
 
 Provide one halted AArch64 little-endian CPU in EL0t, normal RAM covering every ELF PT_LOAD memory extent, and accessible FP/SIMD. Configure address mappings, memory attributes, higher-EL trap controls and other CPU implementation settings outside the delivered executable. GDB memory addresses must refer to the same address space as the ELF load addresses. The model should remain stopped when a debugger disconnects; disconnect behavior belongs to the model.
 
-The stub must support target XML (`qXfer:features:read`), register reads for PC, CPSR/PSTATE and X0, memory reads, hardware breakpoints (`Z1`/`z1`), and all-stop continue/interrupt. Loading additionally requires memory writes and a writable PC register. Inline and included XML features are supported; register numbers come from the descriptions. The runner never writes PSTATE or higher-EL controls and does not substitute a software breakpoint if hardware breakpoints are unavailable.
+The stub must support target XML (`qXfer:features:read`), register reads for PC, CPSR/PSTATE and X0, memory reads, hardware breakpoints (`Z1`/`z1`), and all-stop continue/interrupt. Loading additionally requires memory writes and a writable PC register. Inline and included XML features are supported; register numbers come from the descriptions. The runner never writes PSTATE or higher-EL controls and does not substitute a software breakpoint if hardware breakpoints are unavailable. Advertised packet capacities above the runner's limits are accepted; memory transfers remain bounded to 64 KiB.
 
 ## Load and run
 
@@ -32,7 +32,7 @@ The CLI reports initialization progress to stderr every 64 MiB and prints its fi
 
 ## Acceptance and evidence
 
-The hardware completion breakpoint is armed only after initialization is checked. A successful run requires the expected completion PC, observed EL0 state, zero X0 return, the complete 320-byte result ABI version 2, passing embedded checks, no first mismatch, and no missing code target. An unexpected stop, timeout, malformed result, unsupported operation or failed debugger cleanup produces a failed report. On execution timeout, the runner requests an interrupt before closing the connection.
+The hardware completion breakpoint is armed only after initialization is checked. A successful run requires the expected completion PC, observed EL0 state, zero X0 return, the complete 320-byte result ABI version 2, passing embedded checks, no first mismatch, and no missing code target. An unexpected stop, timeout, malformed result, unsupported operation or failed debugger cleanup produces a failed report. On execution timeout, the runner requests an interrupt before closing the connection. A stop reply that already establishes a halted or exited target avoids another interrupt; breakpoint removal is attempted only while the target still exists. Stop replies and the last known execution state are retained in the report, following the [GDB stop reply contract](https://sourceware.org/gdb/current/onlinedocs/gdb.html/Stop-Reply-Packets.html).
 
 The evidence directory contains:
 
@@ -43,11 +43,13 @@ The evidence directory contains:
 
 The runner issues no detach or continue after reading completion. The evidence describes the stopped observation; it does not guarantee how a stub behaves after the connection closes.
 
+`terminal_exit_executed_before_observation` is false once the expected completion boundary has been observed. It remains unset when a failure prevents that observation, including premature target termination.
+
 The execution interval covers startup, transformed computation, adapters and validation. Its reported host wall time is not a processor cycle count. The runner observes listed CPU fields and debugger-visible memory; it does not attest all platform controls, RAM attributes, cache/TLB state, or every intermediate exception level. `rtl_execution_verified` and `cycles_verified` remain false, and instruction/cycle counts remain unset. A model-specific integration must establish those additional claims.
 
 ## Functional GDB reference
 
-QEMU user mode supplies an EL0 functional GDB reference without an EL1 bootstrap. The optional integration exercises GDB loading of a small protocol fixture and exact initial-memory/completion checking of a real standalone executor:
+QEMU user mode supplies an EL0 functional GDB reference without an EL1 bootstrap. The optional integration exercises GDB loading of a small protocol fixture, rejection of an invalid instruction, premature exit and failed embedded result, and exact initial-memory/completion checking of a real standalone executor:
 
 ```sh
 OSREC_EL0_MODEL_IMAGE=/absolute/path/to/program \

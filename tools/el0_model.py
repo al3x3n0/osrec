@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import math
 from pathlib import Path
 import struct
 import sys
@@ -110,7 +111,8 @@ def decode_result(raw):
 def run(image,out,port,host='127.0.0.1',preloaded=False,memory_check='bytes',timeout=120,
         label='GDB target',max_memory_bytes=4<<30,target_factory=GdbTarget,progress=None):
     # Complete offline admission before connecting to or mutating a target.
-    if timeout<=0 or not 0<port<65536 or max_memory_bytes<=0:raise ValueError('invalid runner limits')
+    if not math.isfinite(timeout) or timeout<=0 or not 0<port<65536 or max_memory_bytes<=0:
+        raise ValueError('invalid runner limits')
     checked,plan,plan_hash=artifact(image,max_memory_bytes)
     image=Path(image).resolve();out=Path(out).resolve();out.mkdir(parents=True,exist_ok=False)
     started=time.monotonic();target=None;armed=running=False;stage='connect'
@@ -121,7 +123,7 @@ def run(image,out,port,host='127.0.0.1',preloaded=False,memory_check='bytes',tim
                 cpu_fields_checked=['PC','PSTATE.M','PSTATE.IL','PSTATE.SS','completion X0'],
                 platform_controls_verified=False,memory_type_verified=False,
                 execution_interval='ELF entry through completion; includes startup, adaptation and validation',
-                privileged_bootstrap=False,terminal_exit_executed_before_observation=False)
+                privileged_bootstrap=False,terminal_exit_executed_before_observation=None)
     write_json(out/'load-plan.json',plan)
     stop=int(plan['stop_before_optional_exit'],0)
     try:
@@ -144,6 +146,7 @@ def run(image,out,port,host='127.0.0.1',preloaded=False,memory_check='bytes',tim
         report['execution_wall_seconds']=round(time.monotonic()-then,6)
         if observed!=stop:raise ValueError('unexpected model stop at '+hex(observed))
         terminal=cpu_state(target,stop);write_json(out/'completion.json',terminal)
+        report['terminal_exit_executed_before_observation']=False
         raw=target.read(int(plan['result']['address'],0),320);(out/'result.bin').write_bytes(raw)
         stage='result';result=decode_result(raw)
         if terminal['x0']!=0:raise ValueError('executor returned a nonzero result')
@@ -155,11 +158,14 @@ def run(image,out,port,host='127.0.0.1',preloaded=False,memory_check='bytes',tim
         if target is not None:
             try:
                 target.timeout=min(2,getattr(target,'timeout',2))
-                if running:target.interrupt();running=False
-                if armed:target.breakpoint(stop,False)
+                if running and getattr(target,'execution_state',None) not in ('halted','exited'):
+                    target.interrupt();running=False
+                if armed and getattr(target,'execution_state',None)!='exited':target.breakpoint(stop,False)
             except Exception as error:
                 if report['verified']:report['failed_stage']='cleanup'
                 report['cleanup_error']=str(error);report['verified']=False
+            if hasattr(target,'last_stop_reply'):report['execution_stop_reply']=target.last_stop_reply
+            if hasattr(target,'execution_state'):report['target_execution_state']=target.execution_state
             try:target.close()
             except Exception as error:
                 if report['verified']:report['failed_stage']='cleanup'

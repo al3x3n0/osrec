@@ -15,6 +15,7 @@ class GdbTarget(Remote):
     packet_bytes=1024
 
     def __init__(self,port,host='127.0.0.1',timeout=60):
+        self.execution_state='unknown'
         try:
             super().__init__(port,host,timeout)
             self.numbers={};seen=set();number=0;architectures=set();used_numbers=set()
@@ -58,8 +59,10 @@ class GdbTarget(Remote):
         if packet.startswith('qSupported'):
             match=re.search(r'(?:^|;)PacketSize=([0-9a-fA-F]+)(?:;|$)',reply)
             if match:
-                self.packet_bytes=int(match[1],16)
-                if not 128<=self.packet_bytes<=1<<20:raise ValueError('unsupported GDB PacketSize')
+                capacity=int(match[1],16)
+                if capacity<128:raise ValueError('unsupported GDB PacketSize')
+                # PacketSize advertises capacity, not a required transfer size.
+                self.packet_bytes=min(capacity,1<<20)
         return reply
 
     def receive(self,timeout=None):
@@ -129,8 +132,23 @@ class GdbTarget(Remote):
             raise ValueError('target qCRC unavailable; use byte verification')
         return int(reply[1:],16)
 
+    def resume(self):
+        self.execution_state='running'
+        super().resume()
+
+    def wait(self,timeout=None):
+        reply=self.receive(timeout);self.last_stop_reply=reply
+        if re.fullmatch(r'[WX][0-9a-fA-F]{2}(?:;.*)?',reply):
+            self.execution_state='exited';raise Exited(reply)
+        if re.fullmatch(r'S[0-9a-fA-F]{2}|T[0-9a-fA-F]{2}.*',reply):
+            self.execution_state='halted'
+        else:raise ValueError('malformed execution stop: '+reply)
+        if reply[1:3]!='05':raise ValueError('unexpected stop: '+reply)
+        return self.register('pc')
+
     def interrupt(self):
         self.socket.sendall(b'\x03');reply=self.receive(2)
-        if not reply.startswith(('T02','S02','T05','S05')):raise ValueError('target did not halt after interrupt')
+        if not re.fullmatch(r'S(?:02|05)|T(?:02|05).*',reply):raise ValueError('target did not halt after interrupt')
+        self.execution_state='halted'
 
     def close(self):self.socket.close()

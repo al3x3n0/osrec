@@ -16,6 +16,8 @@ page faults and user continuation. Its standalone executable matches 2,272
 events, nine embedded timer inputs and 92 RAM-backed UART bytes. Its gateway
 preserves every guest GPR and FP/SIMD register; the image makes no host syscall
 before terminal exit. See the [current EL0 backend](docs/source-image-flow.md#complete-userkernel-checkpoint).
+The [simulator-neutral GDB runner](docs/el0-model-runner.md) loads or verifies its
+RAM, checks EL0 entry, and inspects the embedded result at completion before exit.
 RTL execution and timing validation remain pending. See the
 [RTL execution contract](docs/design.md#rtl-and-cycle-accurate-execution-target).
 

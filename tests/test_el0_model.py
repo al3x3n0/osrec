@@ -16,6 +16,7 @@ sys.path.insert(0,str(ROOT/'tools'))
 from audit_el0_image import audit
 from check_el0_program import load_plan
 from el0_gdb import GdbTarget
+from gdb_remote import Exited
 from el0_model import run,initial_blocks,rsp_crc,decode_result,MAX64
 
 LLVM=Path('/opt/homebrew/opt/llvm@16/bin')
@@ -124,6 +125,7 @@ class ModelTests(unittest.TestCase):
         self.assertTrue(memory['exact_byte_comparison']);self.assertEqual(self.target.resumes,1)
         self.assertEqual(self.target.pc_writes,[int(self.plan['entry'],0)])
         self.assertTrue(self.target.closed);self.assertFalse(report['rtl_execution_verified'])
+        self.assertFalse(report['terminal_exit_executed_before_observation'])
         self.assertEqual((self.root/'evidence/result.bin').stat().st_size,320)
 
     def test_preloaded_crc_mode_has_no_host_memory_or_register_writes(self):
@@ -185,6 +187,39 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(self.target.breaks[-1],(self.target.stop,False))
         self.assertEqual(json.loads((self.root/'evidence/verification.json').read_text())['failed_stage'],'execution')
 
+    def test_unexpected_signal_does_not_interrupt_an_already_halted_target(self):
+        def stopped(timeout):
+            self.target.execution_state='halted';self.target.last_stop_reply='S04'
+            raise ValueError('unexpected stop: S04')
+        self.target.wait=stopped
+        report=self.run_model(preloaded=True)
+        self.assertFalse(report['verified']);self.assertEqual(self.target.interrupts,0)
+        self.assertEqual(report['execution_stop_reply'],'S04')
+        self.assertEqual(self.target.breaks[-1],(self.target.stop,False))
+        self.assertNotIn('cleanup_error',report);self.assertTrue(self.target.closed)
+
+    def test_exit_does_not_interrupt_or_update_breakpoints_on_a_dead_target(self):
+        def exited(timeout):
+            self.target.execution_state='exited';self.target.last_stop_reply='W00'
+            raise Exited('W00')
+        self.target.wait=exited
+        report=self.run_model(preloaded=True)
+        self.assertFalse(report['verified']);self.assertEqual(self.target.interrupts,0)
+        self.assertEqual(self.target.breaks,[(self.target.stop,True)])
+        self.assertEqual(report['execution_stop_reply'],'W00');self.assertTrue(self.target.closed)
+        self.assertIsNone(report['terminal_exit_executed_before_observation'])
+
+    def test_cleanup_failure_revokes_success_and_closes_connection(self):
+        original=self.target.breakpoint
+        def breakpoint(address,insert=True):
+            if not insert:raise ValueError('cannot remove breakpoint')
+            original(address,insert)
+        self.target.breakpoint=breakpoint
+        report=self.run_model(preloaded=True)
+        self.assertFalse(report['verified']);self.assertEqual(report['failed_stage'],'cleanup')
+        self.assertIn('cannot remove',report['cleanup_error']);self.assertTrue(self.target.closed)
+        self.assertTrue((self.root/'evidence/result.bin').is_file())
+
     def test_failed_runtime_result_is_saved_and_rejected(self):
         self.target.result[2]=2
         report=self.run_model(preloaded=True)
@@ -204,6 +239,13 @@ class ModelTests(unittest.TestCase):
     def test_memory_budget_rejected_before_mutating_model(self):
         with self.assertRaisesRegex(ValueError,'memory budget'):self.run_model(max_memory_bytes=1)
         self.assertEqual(self.target.writes,[]);self.assertEqual(self.target.resumes,0)
+
+    def test_nonfinite_timeouts_rejected_before_connecting(self):
+        connect=Mock(side_effect=AssertionError('connected before preflight'))
+        for timeout in (float('nan'),float('inf'),-float('inf')):
+            with self.subTest(timeout=timeout),self.assertRaisesRegex(ValueError,'invalid runner limits'):
+                run(self.image,self.root/'evidence',12345,timeout=timeout,target_factory=connect)
+        connect.assert_not_called();self.assertFalse((self.root/'evidence').exists())
 
     def test_elf_changed_during_initialization_is_not_executed(self):
         read=self.target.read;changed=False
@@ -252,8 +294,8 @@ class ScriptedSocket:
 
 
 class TransportTests(unittest.TestCase):
-    def open_target(self,annexes):
-        peer=ScriptedSocket(annexes)
+    def open_target(self,annexes,packet_size='80'):
+        peer=ScriptedSocket(annexes,packet_size)
         with patch('gdb_remote.socket.create_connection',return_value=peer):target=GdbTarget(1234)
         return target,peer
 
@@ -284,6 +326,28 @@ class TransportTests(unittest.TestCase):
             <reg name="cpsr" bitsize="32"/></feature></target>'''})
         with self.assertRaisesRegex(ValueError,'did not accept ELF entry PC'):target.set_pc(0x40200000)
 
+    def test_large_advertised_packet_capacity_keeps_local_transfer_limit(self):
+        target,peer=self.open_target({'target.xml':'''<target><architecture>aarch64</architecture><feature>
+            <reg name="x0" bitsize="64" regnum="0"/><reg name="pc" bitsize="64" regnum="32"/>
+            <reg name="cpsr" bitsize="32"/></feature></target>'''},packet_size='10000000')
+        self.assertEqual(target.transfer_bytes,65536)
+        data=bytes(range(256))*600;target.write(0x1000,data)
+        self.assertEqual(target.read(0x1000,len(data)),data)
+        self.assertTrue(all(len(c)<1<<20 for c in peer.commands))
+
+    def test_stop_replies_record_execution_state_before_error_or_register_read(self):
+        for reply,state,error in [('S04','halted',ValueError),('T0bthread:1;','halted',ValueError),
+                                  ('W00','exited',Exited),('X0b;process:1','exited',Exited),
+                                  ('S05extra','running',ValueError),('OK','running',ValueError)]:
+            target=GdbTarget.__new__(GdbTarget);target.execution_state='running'
+            target.receive=Mock(return_value=reply);target.register=Mock()
+            with self.subTest(reply=reply),self.assertRaises(error):target.wait(1)
+            self.assertEqual(target.execution_state,state);self.assertEqual(target.last_stop_reply,reply)
+            target.register.assert_not_called()
+        target.receive=Mock(return_value='T05hwbreak:;');target.register=Mock(side_effect=ValueError('unreadable PC'))
+        with self.assertRaisesRegex(ValueError,'unreadable PC'):target.wait(1)
+        self.assertEqual(target.execution_state,'halted')
+
 
 @unittest.skipUnless(os.environ.get('OSREC_EL0_MODEL_IMAGE') and shutil.which('qemu-aarch64'),
                      'set OSREC_EL0_MODEL_IMAGE and install qemu-aarch64 for the functional GDB integration')
@@ -298,7 +362,7 @@ class QemuIntegration(unittest.TestCase):
         temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup)
         return Path(temp.name)
 
-    def execute(self,image,root,preloaded):
+    def execute(self,image,root,preloaded,expected_verified=True):
         with socket.socket() as probe:
             probe.bind(('127.0.0.1',0));port=probe.getsockname()[1]
         with (root/'qemu.log').open('wb') as log:
@@ -306,8 +370,9 @@ class QemuIntegration(unittest.TestCase):
                                      stdout=log,stderr=log)
             try:
                 report=run(image,root/'evidence',port,preloaded=preloaded,timeout=120,
-                           label='QEMU user-mode functional GDB stub')
-                self.assertTrue(report['verified'],report)
+                           label='QEMU user-mode functional GDB stub',
+                           progress=lambda done,total:print(f'Initial RAM checked: {done}/{total}',flush=True))
+                self.assertEqual(report['verified'],expected_verified,report)
                 self.assertFalse(report['rtl_execution_verified'])
                 self.assertTrue(report['initial_memory']['exact_byte_comparison'])
                 return report
@@ -321,12 +386,44 @@ class QemuIntegration(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which('clang-19'),'AArch64 clang-19 required')
     def test_load_small_protocol_fixture(self):
-        root=self.workspace();image=root/'image';image.mkdir();(root/'fixture.S').write_text(SOURCE)
+        root=self.workspace();image=self.fixture(root,SOURCE)
+        report=self.execute(image,root,False)
+        self.assertGreater(report['initial_memory']['written_bytes'],0)
+
+    def fixture(self,root,source):
+        image=root/'image';image.mkdir();(root/'fixture.S').write_text(source)
         subprocess.run(['clang-19','-nostdlib','-static','-fuse-ld=lld','-Wl,-e,_start',str(root/'fixture.S'),
                         '-o',str(image/'checkpoint')],check=True,capture_output=True)
         load_plan(image,audit(image/'checkpoint'))
-        report=self.execute(image,root,False)
-        self.assertGreater(report['initial_memory']['written_bytes'],0)
+        return image
+
+    @unittest.skipUnless(shutil.which('clang-19'),'AArch64 clang-19 required')
+    def test_invalid_instruction_stop_preserves_failure_without_cleanup_error(self):
+        root=self.workspace();image=self.fixture(root,SOURCE.replace('flat_completed:', '.inst 0\nflat_completed:'))
+        report=self.execute(image,root,False,expected_verified=False)
+        self.assertEqual(report['failed_stage'],'execution');self.assertEqual(report['target_execution_state'],'halted')
+        self.assertIn(report['execution_stop_reply'][:3],('S04','T04'))
+        self.assertIsNone(report['terminal_exit_executed_before_observation'])
+        self.assertNotIn('cleanup_error',report)
+
+    @unittest.skipUnless(shutil.which('clang-19'),'AArch64 clang-19 required')
+    def test_failed_embedded_result_is_rejected_over_gdb(self):
+        words=GOOD.copy();words[2]=2
+        root=self.workspace();image=self.fixture(root,SOURCE.replace(','.join(map(str,GOOD)),','.join(map(str,words))))
+        report=self.execute(image,root,False,expected_verified=False)
+        self.assertEqual(report['failed_stage'],'result');self.assertNotIn('cleanup_error',report)
+        self.assertFalse(report['terminal_exit_executed_before_observation'])
+        self.assertEqual(struct.unpack('<40Q',(root/'evidence/result.bin').read_bytes())[2],2)
+
+    @unittest.skipUnless(shutil.which('clang-19'),'AArch64 clang-19 required')
+    def test_terminal_exit_before_completion_is_rejected_without_dead_target_cleanup(self):
+        root=self.workspace()
+        # Execute the admitted exit instruction while bypassing its completion breakpoint.
+        image=self.fixture(root,SOURCE.replace('flat_completed:', 'mov x8,#93\nb flat_completed+4\nflat_completed:'))
+        report=self.execute(image,root,False,expected_verified=False)
+        self.assertEqual(report['failed_stage'],'execution');self.assertEqual(report['execution_stop_reply'],'W00')
+        self.assertEqual(report['target_execution_state'],'exited')
+        self.assertIsNone(report['terminal_exit_executed_before_observation']);self.assertNotIn('cleanup_error',report)
 
 
 if __name__=='__main__':unittest.main()

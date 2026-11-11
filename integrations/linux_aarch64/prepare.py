@@ -2446,7 +2446,10 @@ def upstream(root):
     root=Path(root);directory=root/'upstream';manifest=excerpt_manifest(root)
     if manifest is None:return directory
     stamp=_excerpt_digest(json.dumps(manifest['files'],sort_keys=True).encode())
-    if (directory/EXCERPT_STAMP).exists() and (directory/EXCERPT_STAMP).read_text()==stamp:return directory
+    # Switching from a revision that tracked upstream/ can delete source files while leaving
+    # the ignored stamp behind. A matching manifest alone does not make that cache complete.
+    if ((directory/EXCERPT_STAMP).exists() and (directory/EXCERPT_STAMP).read_text()==stamp and
+            all((directory/name).is_file() for name in manifest['files'])):return directory
     staging=root/('.upstream-%d'%__import__('os').getpid())
     shutil.rmtree(staging,ignore_errors=True)
     for name,sha in sorted(manifest['files'].items()):

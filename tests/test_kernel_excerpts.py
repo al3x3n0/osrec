@@ -44,6 +44,18 @@ class KernelExcerpts(unittest.TestCase):
                 self.assertEqual((prepare.upstream(destination) / 'kernel/sys.c').read_bytes(),
                                  b'updated source\n')
 
+    def test_matching_stamp_does_not_hide_files_removed_by_checkout(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            (root / 'upstream/kernel').mkdir(parents=True)
+            (root / 'upstream/kernel/sys.c').write_bytes(b'original source\n')
+            with patch.object(prepare, 'EXCERPT_STORE', root / 'store'):
+                prepare.ingest(root)
+                (root / 'upstream/kernel/sys.c').unlink()
+                self.assertTrue((root / 'upstream' / prepare.EXCERPT_STAMP).is_file())
+                self.assertEqual((prepare.upstream(root) / 'kernel/sys.c').read_bytes(),
+                                 b'original source\n')
+
     def test_corrupt_store_fails_before_materialization(self):
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)

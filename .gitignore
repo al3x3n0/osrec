@@ -10,6 +10,7 @@ docs/slides/.build/**/*.inspect.ndjson
 docs/slides/.build/**/slide-*.png
 docs/slides/.build/**/validation*.json
 docs/slides/.build/superseded-limitations.png
+docs/slides/.build/node_modules
 
 # Kernel source excerpts: materialized from integrations/linux_aarch64/excerpts by prepare.upstream()
 integrations/linux_aarch64/**/upstream/

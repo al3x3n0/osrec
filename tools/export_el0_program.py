@@ -245,9 +245,9 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None):
     (out/'counters.bin').write_bytes((oracle/'counters.bin').read_bytes());(out/'shadow.bin').write_bytes(p.shadow)
     (out/'initial.bin').write_bytes(p.data[80:872]+bytes(8))
     (out/'ranges.bin').write_bytes(p.ranges);(out/'origins.bin').write_bytes(p.origins)
-    mmio=list(struct.iter_unpack('<5Q',(oracle/'mmio.bin').read_bytes()));uart_va=min(a for pc,a,s,w,v in mmio)&~4095
+    mmio=list(struct.iter_unpack('<5Q',(oracle/'mmio.bin').read_bytes()));uart_va=(min(a for pc,a,s,w,v in mmio)&~4095) if mmio else 0
     uart=bytes(v&255 for pc,a,s,w,v in mmio if w and a==uart_va);(out/'uart.bin').write_bytes(uart)
-    maps=sorted(p.maps+[(uart_va,0x9000000,4096,(1<<10)|(1<<53)|(1<<54))])
+    maps=sorted(p.maps+([(uart_va,0x9000000,4096,(1<<10)|(1<<53)|(1<<54))] if mmio else []))
     (out/'maps.bin').write_bytes(b''.join(struct.pack('<4Q',*r) for r in maps))
     data='.section .data,"aw"\n'
     for name,file in [('flat_shadow','shadow.bin'),('flat_initial','initial.bin')]:data+='.balign 16\n.global %s\n%s:\n.incbin "%s"\n'%(name,name,file)

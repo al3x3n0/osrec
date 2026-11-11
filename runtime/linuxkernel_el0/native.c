@@ -59,6 +59,8 @@ struct lk_el0_native {
     volatile sig_atomic_t starting, handling, executing;
     struct lk_el0_counter *counters;
     uint64_t counter_count,counter_used;
+    unsigned record_counters,record_mmio;
+    uint64_t counter_base,counter_step,uart_va;
     struct lk_el0_mmio *mmio;
     uint64_t mmio_count,mmio_used;
     struct application_header app;
@@ -110,6 +112,12 @@ static void stop(uint64_t reason,uint64_t pc,uint64_t detail,uint64_t far)
 __attribute__((visibility("hidden"))) uint64_t lk_native_counter(uint64_t pc,unsigned key)
 {
     struct lk_el0_native *n=running;
+    if(n->record_counters) {
+        if(n->counter_used==n->counter_count || (key!=0xdf01 && key!=0xdf02))
+            stop(OSREC_STOP_UNSUPPORTED,pc,key,n->counter_used);
+        uint64_t value=n->counter_base+n->counter_step*n->counter_used;
+        n->counters[n->counter_used++]=(struct lk_el0_counter){pc,key,value};return value;
+    }
     if(n->counter_used==n->counter_count || n->counters[n->counter_used].pc!=pc ||
        n->counters[n->counter_used].encoding!=key)
         stop(OSREC_STOP_UNSUPPORTED,pc,key,n->counter_used);
@@ -124,7 +132,7 @@ enum lk_el0_status lk_el0_native_counters(struct lk_el0_native *n,const struct l
     struct lk_el0_counter *copy=count?metadata_alloc(count*sizeof *copy):NULL;
     if(count && !copy)return LK_EL0_FAULT;
     if(count)memcpy(copy,events,count*sizeof *copy);
-    metadata_free(n->counters);n->counters=copy;n->counter_count=count;n->counter_used=0;
+    metadata_free(n->counters);n->counters=copy;n->counter_count=count;n->counter_used=0;n->record_counters=0;
     return LK_EL0_OK;
 }
 uint64_t lk_el0_native_counters_consumed(struct lk_el0_native *n){return n?n->counter_used:0;}
@@ -137,7 +145,16 @@ enum lk_el0_status lk_el0_native_mmio(struct lk_el0_native *n,const struct lk_el
     struct lk_el0_mmio *copy=count?metadata_alloc(count*sizeof *copy):NULL;
     if(count && !copy)return LK_EL0_FAULT;
     if(count)memcpy(copy,events,count*sizeof *copy);
-    metadata_free(n->mmio);n->mmio=copy;n->mmio_count=count;n->mmio_used=0;return LK_EL0_OK;
+    metadata_free(n->mmio);n->mmio=copy;n->mmio_count=count;n->mmio_used=0;n->record_mmio=0;return LK_EL0_OK;
+}
+enum lk_el0_status lk_el0_native_record_inputs(struct lk_el0_native *n,uint64_t base,uint64_t step,uint64_t uart,
+                                              struct lk_el0_counter *c,uint64_t nc,struct lk_el0_mmio *m,uint64_t nm)
+{
+    if(!n || !c || !nc || nc>1000000 || !m || !nm || nm>1000000 || uart%PAGE)return LK_EL0_BAD_ARGUMENT;
+    if(n->executing)return LK_EL0_BUSY;
+    n->record_counters=n->record_mmio=1;n->counter_base=base;n->counter_step=step;n->uart_va=uart;
+    n->counters=c;n->counter_count=nc;n->counter_used=0;n->mmio=m;n->mmio_count=nm;n->mmio_used=0;
+    return LK_EL0_OK;
 }
 uint64_t lk_el0_native_mmio_consumed(struct lk_el0_native *n){return n?n->mmio_used:0;}
 enum lk_el0_status lk_el0_native_trace(struct lk_el0_native *n,struct lk_el0_event *events,uint64_t capacity)
@@ -453,15 +470,20 @@ static void validate_application(struct lk_el0_native *n)
 static int emulate_mmio(struct lk_el0_native *n,uint64_t far)
 {
     struct osrec_context *c=n->context;
-    if(n->mmio_used==n->mmio_count || n->mmio[n->mmio_used].pc!=c->pc ||
-       n->mmio[n->mmio_used].address!=far)return 0;
+    if(n->mmio_used==n->mmio_count)return 0;
     struct lk_el0_mmio *e=n->mmio+n->mmio_used;
+    if(!n->record_mmio && (e->pc!=c->pc || e->address!=far))return 0;
     uint32_t word=*(uint32_t *)(uintptr_t)c->pc;
     if((word&0x3b000000)!=0x39000000 || word&(1u<<26) || (word>>22&3)>1)
         stop(OSREC_STOP_UNSUPPORTED,c->pc,word,far);
     unsigned size=1u<<(word>>30),rn=word>>5&31,rt=word&31,write=!(word&(1u<<22));
     uint64_t address=(rn==31?c->sp:c->x[rn])+((word>>10&4095)*size);
     uint64_t mask=size==8?UINT64_MAX:(1ull<<(size*8))-1;
+    if(n->record_mmio) {
+        uint64_t offset=far-n->uart_va;
+        if(address!=far || size>4 || (!write && offset!=0x18) || (write && offset!=0 && offset!=0x38))return 0;
+        *e=(struct lk_el0_mmio){c->pc,far,size,write,write?(rt==31?0:c->x[rt]&mask):0x90};
+    }
     if(address!=far || e->size!=size || e->write!=write ||
        (write && (rt==31?0:c->x[rt]&mask)!=e->value))
         stop(OSREC_STOP_UNSUPPORTED,c->pc,n->mmio_used,far);
@@ -863,6 +885,43 @@ static int write_at(int fd,const void *bytes,uint64_t size,uint64_t offset)
     }
     return 0;
 }
+enum lk_el0_status lk_el0_native_memory(struct lk_el0_native *n,uint64_t address,void *bytes,uint64_t size,
+                                       int write,int kernel_space,struct lk_el0_diagnostic *d)
+{
+    if(!n || !d || (size && !bytes) || size>(1ull<<31) || address>UINT64_MAX-size ||
+       (write!=0 && write!=1) || (kernel_space!=0 && kernel_space!=1))return LK_EL0_BAD_ARGUMENT;
+    *d=(struct lk_el0_diagnostic){0};if(n->executing)return LK_EL0_BUSY;
+    for(unsigned pass=0;pass<2;pass++)for(uint64_t offset=0;offset<size;) {
+        uint64_t va=address+offset,attrs=0,pa=translate(n,va,(kernel_space?0:2)+write,&attrs);
+        uint64_t count=PAGE-(va&4095);if(count>size-offset)count=size-offset;
+        void *p=pa&1?NULL:physical(n,pa+(va&4095),count);
+        if(!p){*d=(struct lk_el0_diagnostic){OSREC_STOP_EXCEPTION,0,pa,va};return LK_EL0_FAULT;}
+        if(pass){if(write)memcpy(p,(unsigned char *)bytes+offset,count);else memcpy((unsigned char *)bytes+offset,p,count);}
+        offset+=count;
+    }
+    return LK_EL0_OK;
+}
+enum lk_el0_status lk_el0_native_snapshot(struct lk_el0_native *n,const struct osrec_context *context,int native_fd,int memory_fd)
+{
+    if(!n || !context || native_fd<0 || memory_fd<0 || native_fd==memory_fd || native_fd==n->fd || memory_fd==n->fd)
+        return LK_EL0_BAD_ARGUMENT;
+    if(n->executing)return LK_EL0_BUSY;
+    if(n->prepared || n->shadow.mode!=OSREC_USER || context->pc%4)return LK_EL0_UNSUPPORTED;
+    struct stat a,b;if(fstat(native_fd,&a) || fstat(memory_fd,&b) || a.st_size || b.st_size ||
+       (a.st_dev==b.st_dev && a.st_ino==b.st_ino))return LK_EL0_BAD_ARGUMENT;
+    uint64_t offset=0;
+#define SAVE(pointer,bytes) do {uint64_t amount=(bytes);if(write_at(native_fd,(pointer),amount,offset))return LK_EL0_FAULT;offset+=amount;} while(0)
+    SAVE(&n->h,sizeof n->h);SAVE(context,sizeof *context);SAVE(&n->fp,sizeof n->fp);SAVE(&n->shadow,sizeof n->shadow);
+    SAVE(n->lower.ranges,n->h.ranges*16);SAVE(n->sites,n->h.sites*16);SAVE(n->lower.origins,n->h.veneers*8);SAVE(n->maps,n->h.maps*32);
+#undef SAVE
+    if(ftruncate(memory_fd,(off_t)n->h.size))return LK_EL0_FAULT;
+    for(uint64_t at=0;at<n->h.size;at+=PAGE) {
+        const uint64_t *p=(const void *)((const unsigned char *)n->physical+at);unsigned nonzero=0;
+        for(unsigned i=0;i<PAGE/8;i++)if(p[i]){nonzero=1;break;}
+        if(nonzero && write_at(memory_fd,p,PAGE,at))return LK_EL0_FAULT;
+    }
+    return LK_EL0_OK;
+}
 static int open_asset(void *opaque,const char *name)
 {
     const struct lk_el0_image *image=opaque;
@@ -969,4 +1028,11 @@ enum lk_el0_status lk_el0_native_close(struct lk_el0_native *n){(void)n;return L
 struct lk_el0_kernel *lk_el0_native_kernel(struct lk_el0_native *n){(void)n;return NULL;}
 const struct osrec_context *lk_el0_native_initial(struct lk_el0_native *n){(void)n;return NULL;}
 struct lk_el0_fp *lk_el0_native_fp(struct lk_el0_native *n){(void)n;return NULL;}
+enum lk_el0_status lk_el0_native_memory(struct lk_el0_native *n,uint64_t a,void *b,uint64_t s,int w,int k,struct lk_el0_diagnostic *d)
+{(void)n;(void)a;(void)b;(void)s;(void)w;(void)k;(void)d;return LK_EL0_UNSUPPORTED;}
+enum lk_el0_status lk_el0_native_record_inputs(struct lk_el0_native *n,uint64_t b,uint64_t s,uint64_t u,
+                                              struct lk_el0_counter *c,uint64_t nc,struct lk_el0_mmio *m,uint64_t nm)
+{(void)n;(void)b;(void)s;(void)u;(void)c;(void)nc;(void)m;(void)nm;return LK_EL0_UNSUPPORTED;}
+enum lk_el0_status lk_el0_native_snapshot(struct lk_el0_native *n,const struct osrec_context *c,int a,int b)
+{(void)n;(void)c;(void)a;(void)b;return LK_EL0_UNSUPPORTED;}
 #endif

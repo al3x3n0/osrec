@@ -180,6 +180,8 @@ void osrec_emulate_site(struct osrec_shadow *s, struct osrec_context *c, uint32_
         else
 #endif
         if (crn == 8) osrec_platform_tlb_flush();
+        else if (op1 == 3 && crn == 7 && crm == 5 && op2 == 1) osrec_platform_icache_flush(); /* IC IVAU */
+        else if (op1 == 3 && crn == 7 && crm == 11 && op2 == 1) osrec_platform_dcache_clean_invalidate(reg(c, rt)); /* DC CVAU */
         else if (op1 == 0 && crn == 7 && (crm == 1 || crm == 5) && op2 == 0) osrec_platform_icache_flush();
         else if (crn == 7 && (crm == 6 || crm == 10 || crm == 14)) osrec_platform_dcache_clean_invalidate(reg(c, rt));
         else if (op1 == 0 && crn == 7 && crm == 8) {

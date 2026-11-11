@@ -47,6 +47,25 @@ const struct osrec_context *lk_el0_native_initial(struct lk_el0_native *native);
 /* In/out FP/SIMD context, persistent across calls. Set before explicit entry
  * when the checkpoint application has changed its FP/SIMD registers. */
 struct lk_el0_fp *lk_el0_native_fp(struct lk_el0_native *native);
+/* Construction tools only: prepare another process through the captured
+ * kernel's real mmap/memfd/execve paths. Call only between entries. Copies use
+ * captured translations and validate the entire range before changing bytes.
+ * kernel_space allows inspecting kernel objects. Host buffers must be valid. */
+enum lk_el0_status lk_el0_native_memory(struct lk_el0_native *,uint64_t address,
+                                       void *bytes,uint64_t size,int write,int kernel_space,
+                                       struct lk_el0_diagnostic *);
+/* Deterministic construction inputs: record counters base+step*index and PL011
+ * FR reads (0x90), DR/IMSC writes. Caller-owned bounded arrays must stay valid
+ * until reset/close. No host clock or device access; transcript setters select
+ * ordinary strict replay again. */
+enum lk_el0_status lk_el0_native_record_inputs(struct lk_el0_native *,uint64_t counter_base,
+                                              uint64_t counter_step,uint64_t uart_va,
+                                              struct lk_el0_counter *,uint64_t counter_capacity,
+                                              struct lk_el0_mmio *,uint64_t mmio_capacity);
+/* Save an unpatched USER checkpoint to distinct, empty caller-owned output
+ * files. The snapshot contains no native host context or mappings. */
+enum lk_el0_status lk_el0_native_snapshot(struct lk_el0_native *,const struct osrec_context *,
+                                         int native_fd,int memory_fd);
 /* Optional ordered external inputs, copied by the backend. Default: counter
  * reads stop explicitly. Each read must match both its original PC and register
  * encoding; missing/mismatched events stop and poison the kernel instance.

@@ -10,7 +10,7 @@ EDGEFLAGS += -mgeneral-regs-only -mbranch-protection=none
 endif
 OBJECTS := $(OUT)/entry.o $(OUT)/emulate.o $(OUT)/veneer.o $(OUT)/native.o $(OUT)/lower.o
 
-.PHONY: all check check-native check-standalone-host native-run checkpoint embedded-checkpoint standalone-checkpoint clean install
+.PHONY: all check check-native check-standalone-host native-run prepare-application checkpoint embedded-checkpoint standalone-checkpoint clean install
 all: $(OUT)/liblinuxkernel-el0.a $(OUT)/liblinuxkernel-el0.so
 
 $(OUT):
@@ -37,6 +37,9 @@ $(OUT)/checkpoint-shared: $(ROOT)/tests/linuxkernel_el0_host.c $(OUT)/liblinuxke
 $(OUT)/native-run: $(ROOT)/tools/linuxkernel_native_run.c $(OUT)/liblinuxkernel-el0.a
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(EDGEFLAGS) $< $(OUT)/liblinuxkernel-el0.a -o $@
 native-run: $(OUT)/native-run
+$(OUT)/prepare-application: $(ROOT)/tools/linuxkernel_prepare_application.c $(ROOT)/tools/linuxkernel_checkpoint_report.h $(OUT)/liblinuxkernel-el0.a
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(EDGEFLAGS) -I$(ROOT)/tools -static -Wl,-Ttext-segment=0x600000000000 $< $(OUT)/liblinuxkernel-el0.a -o $@
+prepare-application: $(OUT)/prepare-application
 $(OUT)/user-checkpoint: $(ROOT)/tools/linuxkernel_checkpoint.c $(ROOT)/tools/linuxkernel_checkpoint_report.h $(OUT)/liblinuxkernel-el0.a
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(EDGEFLAGS) $(ROOT)/tools/linuxkernel_checkpoint.c $(OUT)/liblinuxkernel-el0.a -o $@
 $(OUT)/user-checkpoint-shared: $(ROOT)/tools/linuxkernel_checkpoint.c $(ROOT)/tools/linuxkernel_checkpoint_report.h $(OUT)/liblinuxkernel-el0.so
@@ -90,5 +93,5 @@ install: all
 	install -m 644 $(ROOT)/include/osrec/linuxkernel_el0.h $(ROOT)/include/osrec/linuxkernel_el0_native.h $(ROOT)/runtime/el0/el0.h $(DESTDIR)$(PREFIX)/include/osrec/
 
 clean:
-	$(RM) $(OBJECTS) $(OUT)/liblinuxkernel-el0.a $(OUT)/liblinuxkernel-el0.so $(OUT)/checkpoint-archive $(OUT)/checkpoint-shared $(OUT)/native-run $(OUT)/native-check $(OUT)/native-check-shared $(OUT)/user-checkpoint $(OUT)/user-checkpoint-shared
+	$(RM) $(OBJECTS) $(OUT)/liblinuxkernel-el0.a $(OUT)/liblinuxkernel-el0.so $(OUT)/checkpoint-archive $(OUT)/checkpoint-shared $(OUT)/native-run $(OUT)/prepare-application $(OUT)/native-check $(OUT)/native-check-shared $(OUT)/user-checkpoint $(OUT)/user-checkpoint-shared
 	$(RM) $(STANDALONE_OBJECTS) $(STANDALONE)/host-check

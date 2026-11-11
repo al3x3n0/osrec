@@ -93,6 +93,10 @@ static void operations(void)
     reset(); osrec_emulate_site(&s,&c,0xd508871f); assert(tlbs==1);
     osrec_emulate_site(&s,&c,0xd508751f); assert(icaches==1);
     c.x[0]=0x2340; osrec_emulate_site(&s,&c,0xd50b7e20); assert(clean==0x2340);
+    c.x[3]=0x3450; osrec_emulate_site(&s,&c,0xd50b7b23); assert(clean==0x3450);
+    osrec_emulate_site(&s,&c,0xd50b7523); assert(icaches==2);
+    reset(); expect_stop(0xd50b7b40,OSREC_STOP_UNSUPPORTED); // neighboring SYS encoding is not CVAU
+    c.pc=0x1000;c.x[0]=0x2340;
     osrec_emulate_site(&s,&c,0xd5087820); assert(translated==0x2340 && at_op==1);
     osrec_emulate_site(&s,&c,MRS(KEY(3,0,7,4,0),1)); assert(c.x[1]==0x12345000);
     reset(); expect_stop(0xd5087880,OSREC_STOP_UNSUPPORTED); // unsupported AT variant

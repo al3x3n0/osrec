@@ -1,6 +1,6 @@
 # OSREC source-image flow and remaining work
 
-Nov 9, 2026 · @Alex
+Nov 11, 2026 · @Alex
 
 ## Goal
 
@@ -21,7 +21,28 @@ The primary application-to-library entry is a direct branch through a linked sys
 
 ## Current flow
 
-The host validation path uses a user-checkpoint launcher linked with the captured-kernel library. The independent validation pipeline runs in QEMU and is checked call by call against live Linux started from the same checkpoint. The default image runs kernel code at EL1 under a small EL2 stub. `--execution el0-minios` builds the alternative: the captured kernel and user program both execute at EL0, with an EL1 monitor handling the privileged architecture edge. The 48-bit address-lowering backend also passes the random workload; the arm64 Linux harness runs the restored user checkpoint and captured kernel together through branch-to-BRK syscall gateways. The host-independent monitor checkpoint exporter additionally embeds timer inputs and event checks and publishes results in RAM; actual RTL execution and cycle validation remain pending.
+The delivery backend is `runtime/el0_flat`: one native executable embeds user and captured-kernel code, initial RAM/registers, inputs and verification, all executing at EL0. The complete captured workload passes native AArch64 and QEMU application mode; see the [demo report](el0-native-demo.md). Model loading uses the generated `load-plan.json`; RTL execution and cycle validation remain pending.
+
+For a separately supplied static ELF, [the user-binary builder](el0-user-binary.md) takes a reusable libkernel capsule, runs the captured kernel's real `execveat` during construction, and snapshots the new process at its ELF entry. It records a native reference with deterministic RAM inputs, emits native code, expands explicitly missing kernel functions, and validates the resulting standalone executable. The new reference is not an independent live-Linux oracle. The original captured demo retains its live-Linux comparison.
+
+The optional `--linux-baseline` check additionally runs the original ELF on the Linux host and compares program exit status and stdout. It checks program-visible results in fresh host process state; it does not establish per-syscall or kernel-state equality with the capture.
+
+```
+libkernel capsule + static user ELF + arguments
+              │
+              ▼
+captured kernel execveat → new process checkpoint
+              │
+              ▼
+native reference and RAM inputs → EL0 code export and link
+              │
+              ▼
+static audit → native validation → QEMU APP → model load plan
+```
+
+### Capture and independent reference pipeline
+
+The capture/reference tools below remain construction harnesses. Their default image runs kernel code at EL1 under a small EL2 stub. `--execution el0-minios` runs user and captured kernel code at EL0 with an EL1 monitor handling privileged operations. The arm64 Linux reference harness uses host signals for the architecture edge. These harnesses are separate from the delivered EL0 executable.
 
 ```
 Kernel build ──▶ Checkpoint ──▶ State dump ──▶ Image build
@@ -70,7 +91,7 @@ Every compared event matches native Linux: about 100,000 syscalls and user excep
 | Captured init workload | 1 | 74 | all | ends at the program's own power-off; native PASS line printed |
 | Per-call source replays (earlier scheme) | — | 64 calls | 63 | 1,599 function checks identical to a fresh compile; futex wait-timeout diverges on the clock in the binary replay too |
 
-Committed on branch `source-image`: 2459b7f (image, recorder, workloads, verifier, closure, DWARF database), 125147e (RAM relocation), fc20cbc (signal delivery). Nothing is pushed; `main` is unchanged.
+The complete native EL0 demo was merged into `main` at `7ae751a` and pushed. Earlier capture/reference work includes `2459b7f` (image, recorder, workloads, verifier, closure, DWARF database), `125147e` (RAM relocation) and `fc20cbc` (signal delivery).
 
 ## Boundaries and limits
 
@@ -91,7 +112,7 @@ Known limits:
 - **Relocation completeness** rests on a rule (named records, pfn- and phys-typed statics, page tables), not on a full typed walk; two misses were found only by running.
 - **Source check:** the full compile audit covers 63,288 distinct function addresses and 96.6% of executable bytes; known relocation fields are masked during comparison. Uncovered ranges remain unverified.
 - **Comparison depth:** syscall results and user exceptions, plus optional `--memory` hashes of every EL0-accessible user page after each completed syscall. Kernel state and the exact order of memory writes are not compared.
-- **No interrupts or timer:** anything that waits on time ends at the idle boundary; reads of the arch counter can differ.
+- **No hardware interrupt replay:** anything that waits for an interrupt ends at the idle boundary. Standalone delivery consumes embedded counter observations; construction can use deterministic counter inputs. These do not establish timer-interrupt support.
 - **Single process, single CPU,** QEMU TCG on both sides of the comparison.
 
 ## EL0-only native backend
@@ -460,11 +481,10 @@ python3 /work/tools/kernel_source_verify.py --all --build /kbuild \
 
 The report's `complete`, `verified_bytes` and `gaps` determine coverage. Unknown relocation fields are not counted as verified. The full verifier exits nonzero when coverage is incomplete. It also includes sized assembler code symbols whose ELF type is NOTYPE; the saved full-compile report predates that additional coverage, so 96.6% is a lower bound for the current verifier.
 
-## Working-tree notes
+## Local validation artifacts
 
-Original handoff state (before the implementation above):
+Build artifacts are local construction and validation outputs, excluded from Git. The captured-workload executable and load plan are retained in `build/el0-program-20261110c`; the supplied-user-ELF executable, Linux baseline and repeat-build comparison are in `build/el0-new-application-20261111b`. Their validation scope is described in the [demo report](el0-native-demo.md).
 
-- **Uncommitted, this session:** `runtime/el0/`, `tools/kernel_sysregs.py`, the change to `tools/kernel_state_dump.py`
-- **Uncommitted, older:** about 600 changes from earlier sessions in the working tree
-- **Kept RAM dump:** `build/kernel-state-el0-20261108a` (512 MiB, with all system registers); rebuilding a dump from a checkpoint takes seconds
-- **Disk:** `build/` is 7.9 GiB after cleanup, 41 GiB free; the pyelftools venv is `build/.venv-dwarf`
+Consolidation checks use a source-only snapshot in `build/consolidation-20261111/source`, with generated kernel excerpt trees rebuilt from the shared store. Its separate CMake build and regression logs are under `build/consolidation-20261111`. Native and QEMU application checks of the retained supplied-user-ELF executable were also rerun there. These are functional checks; RTL execution and cycle measurements remain pending.
+
+The November 11 consolidation passed all 23 default CTest suites and 529 entry-state regressions. The Linux profile batch passed 134 cases; its four fd-control cases passed on rerun after recapturing the fixture against the current source review. The recapture preserves the prior syscall observations and init binary. Additional EL0 checks passed 36 cases with nine conditional skips, and source/architecture checks passed 47 with one conditional skip. Counts overlap between suites. A fresh AArch64 constructor build is byte-identical to the constructor in `build/libkernel-capsule-20261111b`; both static/shared library contract executables and the standalone-host checks pass. The optional kernel-layout overlay passed header-generation and shell-syntax checks; a complete kernel rebuild with that overlay remains unvalidated.

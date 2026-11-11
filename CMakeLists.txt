@@ -94,7 +94,12 @@ if(BUILD_TESTING)
   target_link_libraries(object_lifetime_tests PRIVATE osrec)
   target_compile_options(object_lifetime_tests PRIVATE -Wall -Wextra -Werror)
   add_test(NAME object_lifetimes COMMAND object_lifetime_tests)
-  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
+  foreach(check IN ITEMS el0_application kernel_data_symbols kernel_excerpts)
+    add_test(NAME ${check} COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_${check}.py)
+    set_tests_properties(${check} PROPERTIES TIMEOUT 120)
+  endforeach()
   find_program(OSREC_ENTRY_CLANG NAMES clang HINTS "${OSREC_KLEE_LLVM_BIN}")
   if(OSREC_ENTRY_CLANG)
     add_test(NAME entry_state_analysis COMMAND ${Python3_EXECUTABLE}

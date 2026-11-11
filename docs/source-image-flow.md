@@ -119,28 +119,18 @@ Known limits:
 
 `runtime/el0_flat` is the current delivery work. Its startup, context gateway, software address checks, captured-kernel computation and validation execute at EL0. It has no host service calls before its optional terminal exit, no signals, TLS, libc, exception monitor, privileged bootstrap or physical device accesses. The earlier Linux/EL1 backends remain reference harnesses.
 
-The first admitted root is **`__arm64_sys_umask`**, entered through an explicit function checkpoint. `export_el0_flat.py` binds the kernel build to the captured package, preserves the live ftrace entry patch using the kernel's `mcount_loc` table, and emits six native islands. Thirteen ordinary instructions execute as captured machine words; MRS SP_EL0 reads logical current-task state through the shared architecture emulator, and RET selects a logical continuation. Effective addresses are checked and redirected to canonical linked RAM. The original contiguous PRFM/LDXR/STLXR/CBNZ/DMB sequence executes without a runtime call between its exclusive instructions. This is a bounded kernel-function checkpoint, not full application/syscall-dispatch continuation.
-
-**Coverage correction:** this is a gateway bring-up fixture. Its C driver directly enters one 60-byte kernel function. It bypasses the captured user program, original syscall entry, syscall dispatch and the wider kernel execution path. Retaining the full RAM payload does not mean the full kernel is executed. The reported 13 native instructions per call and 50,582 instructions with runtime overhead must not be used as a representative full-checkpoint kernel profile. The complete-checkpoint backend below supersedes this fixture as the application execution path.
-
 The gateway saves all 31 guest GPRs, NZCV, all 32 SIMD registers, FPCR and FPSR. Actual SP always belongs to a private runtime stack; guest SP is logical RAM state. Generated resume thunks restore the final two scratch registers before a direct branch, so no guest GPR is reserved and captured stack bytes are untouched. Original SP consumers must be lowered before entering this backend. The software walker preserves virtual aliases, observes current captured PTEs, checks inherited AP/XN restrictions and AF, and reports faults before native accesses. It supports checked cross-page transfers when physical and RAM backing are contiguous. Missing backing, faulting/discontiguous split transfers and unsupported code stop explicitly.
 
-`build/el0-flat-umask-20261109a/checkpoint` passes six stateful calls against the captured task/fs state. The mask transitions are `18 → 63 → 0 → 511 → 511 → 52 → 18`. Additional checks cover complete register/vector restoration, nested-entry rejection, transition-budget stops, recovery, and an unmapped argument that leaves persistent state unchanged. The external Linux observer reads a 320-byte RAM record at terminal exit and verifies that the first syscall made by the image is exit(0). It is a separate host tool and is never linked into the image. `build/el0-flat-validation-20261109d/validation.json` records this result. Mutations introducing MRS CurrentEL or modifying the exclusive sequence fail the instruction audit; a damaged GPR restore fails execution validation.
+The model loads ELF PT_LOAD segments, zeros their memory tails, supplies normal RAM and FP/SIMD at EL0, and starts at ELF e_entry. The image installs its own private stack. The generated load plan identifies the RAM result and completion PC before optional terminal exit. Functional QEMU/native checks do not establish original-kernel cycle equivalence.
 
-The model loads the ELF PT_LOAD segments and zeros each segment's memory tail, supplies an initial EL0 normal-RAM view with FP/SIMD enabled, and starts at ELF e_entry. The image installs its own private stack without privileged setup. The model can observe `flat_result` and stop at `flat_completed` before optional exit; these addresses come from the ELF symbols/audit. No ELF arguments, environment variables or host resource handles are used. The current ELF is about 54.5 MiB because it conservatively retains the package's nonzero physical state. Its reconstructed memory layout and gateway/address-adaptation overhead are part of the transformed workload; original-kernel cycle equivalence is not established.
-
-Generate on the construction host, then build on arm64 Linux:
+Gateway register preservation, nested-entry rejection, transition-budget stops and recovery now run independently of a captured kernel fixture:
 
 ```sh
-python3 tools/export_el0_flat.py \
-  --package build/native-application-20261109a \
-  --vmlinux build/linux-kernel-clang19-20261108/vmlinux \
-  --out build/my-el0-flat
-make -C runtime/el0_flat CC=clang-19 IMAGE="$PWD/build/my-el0-flat" checkpoint observer
-python3 tools/check_el0_flat.py --image build/my-el0-flat --out build/my-el0-validation
+# On AArch64 Linux, including the construction toolchain container:
+make -C runtime/el0_flat CC=clang-19 check-gateway
 ```
 
-The model/host contract is **all image code at EL0**. The system-mode QEMU GDB register interface in the current environment acknowledges but ignores writes needed to supply the EL0/FP/normal-memory initial state; adding an EL1 bootstrap would violate this contract. Native Linux user execution supplies a functional validation platform, while QEMU application mode is the appropriate functional instruction-counting backend. RTL/cycle-model execution remains unverified.
+The former direct-umask bring-up exporter, driver, fixture checker and counting command have been retired. The complete executor below is the supported application path. Shared ELF admission checks live in `tools/audit_el0_image.py`; current validation uses `tools/check_el0_program.py`.
 
 ### Complete user/kernel checkpoint
 
@@ -155,7 +145,7 @@ The conservative static closure contains 5,020 kernel functions, the user execut
 - Execution reaches the original `kernel_power_off` boundary at `0x80008008eb30`, after **2,261,577** gateway transitions in this run.
 - The separate native observer sees exec entry and terminal exit only. The image's first host service is `exit(0)`; no signal handler, libc, runtime file loading, privileged monitor or physical MMIO is used.
 
-The identical ELF also passes QEMU Linux application mode on Cortex-A53: `build/el0-program-qemu-app-20261110a/validation.json`. Guest tracing records only `exit(0)`. Native exclusive-store retries can vary the gateway transition count slightly between runs while leaving the checked computation unchanged. Full-workload instruction counts have not yet been recorded; the count table below applies only to the earlier umask fixture.
+The identical ELF also passes QEMU Linux application mode on Cortex-A53: `build/el0-program-qemu-app-20261110a/validation.json`. Guest tracing records only `exit(0)`. Native exclusive-store retries can vary the gateway transition count slightly between runs while leaving the checked computation unchanged. Full-workload instruction counts have not yet been recorded; the historical figures below apply only to the retired umask fixture.
 
 All initial nonzero state and input/validation data are linked into the roughly 92 MiB ELF. Canonical physical RAM has zero-backed storage for the complete captured bank, including initially empty pages that the kernel later allocates. The loader must zero ELF memory tails and provide normal RAM/FP/SIMD at EL0. Observe `flat_full_result` and stop at `flat_completed` before optional terminal exit; `load-plan.json`, generated after successful validation, reports load segments, initialization requirements and symbol addresses.
 
@@ -180,28 +170,11 @@ python3 tools/check_el0_program.py --image build/my-el0-program \
 
 The coverage listing can be reproduced with `check_monitor_checkpoint.py --code-log PATH` against the fixed-input reference monitor. That monitor remains a construction/validation tool and is never linked into the EL0 delivery image. Without a listing, syscall-root closure alone stops on missing indirect targets; `--extra-pc` also admits a whole function and its dependencies. New lowering tests cover scalar/SIMD memory operands, stack operations and exclusive windows. Native negative tests corrupt an expected result and an executable mapping, checking that validation fails while host interaction remains terminal exit only.
 
-### QEMU application-mode instruction counts
+### Historical bring-up instruction counts
 
-The EL0 executable also passes `qemu-aarch64` Linux user/application mode, with Cortex-A53 selected. It needs no system-mode QEMU, EL1 bootstrap or monitor. The only guest service observed is terminal `exit(0)`. QEMU 10.0.13's packaged user binary lacks plugin support, so `count_el0_app.py` uses `-one-insn-per-tb -d in_asm,exec,nochain`: every translated block is checked to contain one instruction, and each dynamic execution-log entry contributes one count. An independent five-iteration assembly loop produces exactly 20 executed instructions and 15 loop instructions, verifying dynamic rather than static counting.
+The retired direct-umask fixture recorded 459,949 instructions for its complete executable, including 303,492 across six execution intervals and 78 original kernel-island instructions. Its five-iteration counter sanity check recorded 20 instructions, including 15 loop instructions. These measurements cover a 60-byte function entered directly; they do not represent user-program continuation, syscall dispatch, the complete checkpoint, CPU cycles or original-kernel timing equivalence.
 
-| Counted region | Executed guest instructions |
-| --- | ---: |
-| Complete executable, including startup and all tests/checks | 459,949 |
-| Six valid kernel execution intervals, including runtime adaptation | 303,492 (50,582 each) |
-| Unmodified kernel-island instructions within those six intervals | 78 (13 each) |
-| Missing-mapping fault-check interval | 14,214 |
-| Startup, gateway tests, verification and code outside those intervals | 142,243 |
-
-Each kernel interval starts at the first native instruction in `umask_entry_body` and ends before `flat_escape` restores the caller. Initial gateway entry/restore and final caller restore are outside these intervals and remain included in the complete-program count. The negative fault test executes three additional native kernel-prefix instructions, so the complete program executes 81 unmodified kernel-island instructions. Context copying, software address checks and gateway/runtime work dominate this initial implementation. These are counts for the bounded `umask` checkpoint, not the full random/signal application workloads, CPU cycles or original-kernel timing equivalence.
-
-The report is `build/el0-flat-app-counts-20261109d/validation.json`; `counts.json` contains all seven intervals and `trace.log.gz` retains the complete dynamic execution evidence. Re-reading the compressed trace reproduces the reported counts. These counts use the frozen original fixture ELF, before the gateway stopped copying its entire frame on every transition; rebuilding that fixture with the current runtime changes its overhead.
-
-```sh
-docker build -f tools/qemu_plugins/Dockerfile.user \
-  -t osrec-qemu-user:20261109 tools/qemu_plugins
-python3 tools/count_el0_app.py --image build/el0-flat-umask-20261109a \
-  --out build/my-el0-app-counts
-```
+The frozen report, interval counts and compressed trace remain in `build/el0-flat-app-counts-20261109d/`; the retired tooling is recoverable from commit `bf670da`. Current full-workload dynamic instruction counts and RTL/cycle validation remain pending.
 
 ## EL0 runtime progress
 
@@ -410,7 +383,7 @@ python3 tools/check_embedded_checkpoint.py \
   --out build/my-embedded-validation
 ```
 
-`embedded-checkpoint` is an alias for `standalone-checkpoint`; the obsolete libc-static embedded link recipe has been removed. `make -C runtime/linuxkernel_el0 CC=clang-19 check-standalone-host` exercises real Linux startup, allocation/syscall error handling, alternate-stack signal delivery and signal-mask-restoring jump recovery without libc.
+Use the canonical `standalone-checkpoint` target; the old embedded-link alias has been retired. `make -C runtime/linuxkernel_el0 CC=clang-19 check-standalone-host` exercises real Linux startup, allocation/syscall error handling, alternate-stack signal delivery and signal-mask-restoring jump recovery without libc.
 
 The isolation validator requires a native arm64 Docker daemon and a local `alpine:3` image. `test_export_native_checkpoint.py` checks deterministic packing, byte-exact sparse reconstruction and malformed-input rejection on any build host. On arm64 Linux, `test_embedded_native_checkpoint.py` uses `OSREC_NATIVE_APPLICATION` and `OSREC_NATIVE_APPLICATION_ORACLE` to build/run a complete libc-free checkpoint, reject a changed embedded expectation, exercise loader failure cleanup, and reject a linker map containing a libc input. The established native runtime limits still apply; embedding does not add dynamic application loading, interrupts or retained-SVC interception.
 
@@ -488,3 +461,5 @@ Build artifacts are local construction and validation outputs, excluded from Git
 Consolidation checks use a source-only snapshot in `build/consolidation-20261111/source`, with generated kernel excerpt trees rebuilt from the shared store. Its separate CMake build and regression logs are under `build/consolidation-20261111`. Native and QEMU application checks of the retained supplied-user-ELF executable were also rerun there. These are functional checks; RTL execution and cycle measurements remain pending.
 
 The November 11 consolidation passed all 23 default CTest suites and 529 entry-state regressions. The Linux profile batch passed 134 cases; its four fd-control cases passed on rerun after recapturing the fixture against the current source review. The recapture preserves the prior syscall observations and init binary. Additional EL0 checks passed 36 cases with nine conditional skips, and source/architecture checks passed 47 with one conditional skip. Counts overlap between suites. A fresh AArch64 constructor build is byte-identical to the constructor in `build/libkernel-capsule-20261111b`; both static/shared library contract executables and the standalone-host checks pass. The optional kernel-layout overlay passed header-generation and shell-syntax checks; a complete kernel rebuild with that overlay remains unvalidated.
+
+The subsequent mainline cleanup registers the shared ELF audit and memory/gateway checks in default CTest, bringing it to 25 passing suites. Native validation of the complete 2,272-event workload and its corrupted-result and executable-map negative tests passes after extracting the shared audit. The fixture-independent gateway test also passes on AArch64 Linux and rejects a damaged register restore. Cleanup logs and QEMU validation are under `build/main-cleanup-20261111`.

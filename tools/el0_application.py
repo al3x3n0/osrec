@@ -340,9 +340,9 @@ def lower_application(package,reference,kernel,user,out,toolchain,validate):
                 continue
             verification['qemu']=run_qemu(image,out/'qemu-validation')
         else:
-            from check_el0_flat import audit
+            from audit_el0_image import audit
             from check_el0_program import load_plan
-            checked=audit(image/'checkpoint',full=True);write_json(out/'audit.json',checked);load_plan(image,checked)
+            checked=audit(image/'checkpoint');write_json(out/'audit.json',checked);load_plan(image,checked)
         image.rename(out/'program')
         return exported,verification,attempts
     raise ValueError('kernel code coverage did not converge in 12 complete attempts; see coverage-expansions.json')

@@ -1,7 +1,6 @@
-"""EL0 native gateway, software memory and target instruction audits."""
-import json
-import os
+"""Shared EL0 software memory and standalone native gateway contracts."""
 from pathlib import Path
+import platform
 import shutil
 import struct
 import subprocess
@@ -11,7 +10,6 @@ import unittest
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'tools'))
-from check_el0_flat import audit,run
 from kernel_source_verify import Elf
 
 
@@ -27,35 +25,24 @@ class FlatMemory(unittest.TestCase):
             self.assertIn('live PTE changes',result.stdout)
 
 
-@unittest.skipUnless(os.environ.get('OSREC_FLAT_IMAGE'),'set OSREC_FLAT_IMAGE for built-image tests')
-class FlatImage(unittest.TestCase):
-    def setUp(self):self.image=Path(os.environ['OSREC_FLAT_IMAGE']).resolve()
-    def mutated(self,path,symbol,transform):
-        data=bytearray((self.image/'checkpoint').read_bytes());elf=Elf(self.image/'checkpoint')
-        pc=next(s['value'] for s in elf.symbols if s['name']==symbol)
-        section=next(s for s in elf.sections if s['addr']<=pc<s['addr']+s['size'])
-        offset=section['offset']+pc-section['addr'];word,=struct.unpack_from('<I',data,offset)
-        struct.pack_into('<I',data,offset,transform(word));path.write_bytes(data);path.chmod(0o755)
-    def test_image_audit_rejects_privilege_and_atomic_changes(self):
-        checked=audit(self.image/'checkpoint');self.assertEqual(checked['runtime_el'],0)
-        self.assertEqual(len(checked['terminal_exit_sites']),1)
-        with tempfile.TemporaryDirectory() as name:
-            bad=Path(name)/'checkpoint'
-            self.mutated(bad,'flat_capture_rest',lambda word:0xd5384240) # MRS CurrentEL
-            with self.assertRaisesRegex(ValueError,'system register'):audit(bad)
-            self.mutated(bad,'umask_atomic_body',lambda word:0xd503201f)
-            with self.assertRaisesRegex(ValueError,'exclusive sequence'):audit(bad)
-    @unittest.skipUnless(os.environ.get('OSREC_FLAT_NATIVE'),'set OSREC_FLAT_NATIVE=1 for native execution')
-    def test_el0_execution_and_broken_register_restore(self):
+@unittest.skipUnless(sys.platform=='linux' and platform.machine() in ('aarch64','arm64') and shutil.which('make'),
+                     'native AArch64 Linux and make required')
+class FlatGateway(unittest.TestCase):
+    def test_register_restore_boundaries_and_recovery(self):
         with tempfile.TemporaryDirectory() as name:
             root=Path(name)
-            report=run(self.image,root/'positive',timeout=20)
-            self.assertTrue(report['verified']);self.assertEqual(report['result']['calls'],6)
-            bad=root/'bad';bad.mkdir()
-            self.mutated(bad/'checkpoint','flat_probe_resume2',lambda word:(word&~(31<<10))|(31<<10))
-            with self.assertRaisesRegex(ValueError,'checkpoint failed'):run(bad,root/'negative',timeout=20)
-            observed=json.loads((root/'negative/validation.json').read_text())
-            self.assertEqual(observed['result']['status'],2)
+            subprocess.run(['make','-C',str(ROOT/'runtime/el0_flat'),'OUT='+str(root),
+                            'CC='+('clang-19' if shutil.which('clang-19') else 'cc'),'check-gateway'],
+                           check=True,capture_output=True,text=True,timeout=120)
+            image=root/'gateway-check';elf=Elf(image);data=bytearray(elf.data)
+            pc=next(s['value'] for s in elf.symbols if s['name']=='flat_probe_resume2')
+            section=next(s for s in elf.sections if s['addr']<=pc<s['addr']+s['size'])
+            offset=section['offset']+pc-section['addr'];word,=struct.unpack_from('<I',data,offset)
+            # Corrupt the restore of a live guest register; the self-test must notice.
+            struct.pack_into('<I',data,offset,(word&~(31<<10))|(31<<10))
+            bad=root/'bad-restore';bad.write_bytes(data);bad.chmod(0o755)
+            result=subprocess.run([str(bad)],capture_output=True,timeout=20)
+            self.assertEqual(result.returncode,1)
 
 
 if __name__=='__main__':unittest.main()

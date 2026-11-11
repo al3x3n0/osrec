@@ -10,7 +10,7 @@ EDGEFLAGS += -mgeneral-regs-only -mbranch-protection=none
 endif
 OBJECTS := $(OUT)/entry.o $(OUT)/emulate.o $(OUT)/veneer.o $(OUT)/native.o $(OUT)/lower.o
 
-.PHONY: all check check-native check-standalone-host native-run prepare-application checkpoint embedded-checkpoint standalone-checkpoint clean install
+.PHONY: all check check-native check-standalone-host native-run prepare-application checkpoint standalone-checkpoint clean install
 all: $(OUT)/liblinuxkernel-el0.a $(OUT)/liblinuxkernel-el0.so
 
 $(OUT):
@@ -45,7 +45,6 @@ $(OUT)/user-checkpoint: $(ROOT)/tools/linuxkernel_checkpoint.c $(ROOT)/tools/lin
 $(OUT)/user-checkpoint-shared: $(ROOT)/tools/linuxkernel_checkpoint.c $(ROOT)/tools/linuxkernel_checkpoint_report.h $(OUT)/liblinuxkernel-el0.so
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(EDGEFLAGS) $(ROOT)/tools/linuxkernel_checkpoint.c -L$(OUT) -llinuxkernel-el0 -Wl,-rpath,'$$ORIGIN' -o $@
 checkpoint: $(OUT)/user-checkpoint $(OUT)/user-checkpoint-shared
-embedded-checkpoint: standalone-checkpoint
 
 # A separate object tree prevents mixing libc/TLS and freestanding objects.
 STANDALONE := $(OUT)/standalone

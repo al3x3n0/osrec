@@ -6,7 +6,7 @@ The separate ptrace observer is never part of the delivery executable.
 """
 import argparse,json,re,subprocess,time
 from pathlib import Path
-from check_el0_flat import audit
+from audit_el0_image import audit
 
 def load_plan(image,checked):
     plan=dict(format='osrec-el0-program-load-v1',image='checkpoint',image_sha256=checked['image_sha256'],
@@ -25,7 +25,7 @@ def load_plan(image,checked):
 
 def run(image,out,observer,timeout=120):
     image,out,observer=map(lambda p:Path(p).resolve(),(image,out,observer))
-    checked=audit(image/'checkpoint',full=True)
+    checked=audit(image/'checkpoint')
     out.mkdir(parents=True,exist_ok=False)
     command=['docker','run','--rm','--network','none','--read-only','--cap-add','SYS_PTRACE',
              '--mount','type=bind,src='+str(image/'checkpoint')+',dst=/checkpoint,readonly',
@@ -52,7 +52,7 @@ def run(image,out,observer,timeout=120):
     return report
 
 def run_qemu(image,out,docker_image='osrec-qemu-user:20261109',timeout=120):
-    image,out=Path(image).resolve(),Path(out).resolve();checked=audit(image/'checkpoint',full=True)
+    image,out=Path(image).resolve(),Path(out).resolve();checked=audit(image/'checkpoint')
     out.mkdir(parents=True,exist_ok=False)
     command=['docker','run','--rm','--network','none','--read-only',
              '--mount','type=bind,src='+str(image/'checkpoint')+',dst=/checkpoint,readonly',

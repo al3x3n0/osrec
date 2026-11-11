@@ -5,6 +5,7 @@
 | Prepare a reusable captured-kernel capsule and build a supplied user ELF | `el0_application.py kernel` / `el0_application.py build` |
 | Export the original captured user/kernel workload | `export_el0_program.py` |
 | Validate a complete EL0 executor natively or in QEMU application mode | `check_el0_program.py` |
+| Load/verify an EL0 executor on a simulator's GDB stub and check RAM completion | `el0_model.py` |
 | Audit EL0 executable admission | `audit_el0_image.py` (shared Python module) |
 | Build, run and compare source-built kernel images | `source_image.py` |
 | Audit kernel code against a fresh source build | `kernel_source_verify.py`, including `--all` |
@@ -13,6 +14,8 @@
 | Prepare and validate reviewed Linux syscall profiles | `preflight_linux_aarch64.py` / `run_linux_aarch64_checkpoint_pipeline.py` |
 
 See [the user-binary workflow](../docs/el0-user-binary.md), [source-image flow](../docs/source-image-flow.md), and [Linux syscall profiles](../docs/linux-aarch64-slices.md) for inputs, commands and limits.
+
+The [simulator-neutral GDB runner](../docs/el0-model-runner.md) is the model acceptance interface. Its functional reference uses QEMU user mode; RTL and cycle claims require a model-specific integration.
 
 The source-image, native Linux and monitor tools remain construction/reference harnesses. In particular, `export_monitor_checkpoint.py` constructs the fixed-input monitor used by `check_monitor_checkpoint.py --code-log` to produce reference code coverage. LiteOS, syscall-slice and KLEE tools retain their documented workflows and regression uses.
 

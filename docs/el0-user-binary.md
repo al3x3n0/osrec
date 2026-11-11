@@ -47,4 +47,6 @@ The output contains `program/checkpoint`, `program/load-plan.json`, `application
 
 Delivery embeds state and inputs and uses no libc, loader, runtime files, host signals, host clock or physical UART. Stop at the load plan's completion PC and inspect its RAM result, or allow the optional terminal exit. Construction's `execveat` and host services are outside delivery and its measurement interval.
 
+The [simulator-neutral GDB runner](el0-model-runner.md) loads or verifies those segments, checks EL0 entry, and reads the RAM result at a hardware completion breakpoint before terminal exit.
+
 The example checks argc/argv/auxv, demand-zero memory, a checksum and memfd write/seek/read/close, then prints `OSREC_USER_ELF_PASS` and requests exit(0). It supplies a new ELF rather than resuming the original captured user workload.

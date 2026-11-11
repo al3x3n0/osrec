@@ -8,8 +8,8 @@ import argparse,json,re,subprocess,time
 from pathlib import Path
 from audit_el0_image import audit
 
-def load_plan(image,checked):
-    plan=dict(format='osrec-el0-program-load-v1',image='checkpoint',image_sha256=checked['image_sha256'],
+def make_load_plan(checked):
+    return dict(format='osrec-el0-program-load-v1',image='checkpoint',image_sha256=checked['image_sha256'],
               entry=checked['entry'],execution_level=0,load_segments=checked['load_segments'],
               initialization='Load ELF bytes at segment addresses and zero every memory tail.',
               requirements='Initial EL0 execution, normal RAM covering segment memory extents, FP/SIMD enabled.',
@@ -20,6 +20,9 @@ def load_plan(image,checked):
               optional_terminal_exit=dict(instruction_pc=checked['terminal_exit_sites'][0],number=93),
               hardware_inputs='Embedded timer values and RAM-backed UART registers; no physical devices or interrupts.',
               cycles_verified=False,rtl_execution_verified=False)
+
+def load_plan(image,checked):
+    plan=make_load_plan(checked)
     (Path(image)/'load-plan.json').write_text(json.dumps(plan,indent=2)+'\n')
     return plan
 

@@ -15,9 +15,25 @@
 #define ALIGNED (1ull<<46)
 volatile struct flat_full_result flat_full_result;
 static unsigned char runtime_stack[131072] __attribute__((aligned(16)));
-static struct {uint64_t temp,value,writeback,base,info,uart;} pending;
-static struct flat_event *pending_event;
-static uint64_t event_count,pending_regs,counter_used,uart_used;
+struct flat_memory_pending flat_memory_pending;
+struct flat_observer_pending flat_observer_pending;
+static uint64_t event_count,counter_used,uart_used;
+#ifdef OSREC_FLAT_PROFILE
+static uint64_t gateway_kinds[10];
+uint64_t flat_memory_profile[8];
+uint64_t flat_system_profile[4096][3];
+static void profile_system(const struct flat_op *op)
+{
+    unsigned i=0;
+    for(;i<4095;i++) {
+        uint64_t *row=flat_system_profile[i];
+        if(!row[2]){row[0]=op->word;row[1]=op->metadata;break;}
+        if(row[0]==op->word && row[1]==op->metadata)break;
+    }
+    if(i==4095){flat_system_profile[i][0]=MASK64;flat_system_profile[i][1]=MASK64;}
+    flat_system_profile[i][2]++;
+}
+#endif
 extern void *memcpy(void *,const void *,size_t);
 static uint64_t reg(struct osrec_context *c,unsigned r){return r==31?0:c->x[r];}
 static uint64_t u64(const unsigned char *p){uint64_t v=0;for(unsigned i=0;i<8;i++)v|=(uint64_t)p[i]<<(8*i);return v;}
@@ -71,13 +87,19 @@ static flat_target step(void *opaque,struct flat_frame *f,const struct flat_site
 {
     (void)opaque;
     const struct flat_op *o=flat_program.ops+(site->kind>>1);unsigned post=site->kind&1;
+#ifdef OSREC_FLAT_PROFILE
+    if(o->kind<10)gateway_kinds[o->kind]++;
+    if(o->kind==P_SYSTEM)profile_system(o);
+    if(o->kind==P_MEMORY)flat_memory_profile[post?7:o->info&EXCLUSIVE?3:o->info&HINT?4:
+                                          o->info&USER?2:flat_program.shadow->mode==OSREC_USER?0:1]++;
+#endif
     struct osrec_context *c=&f->cpu;uint64_t info=o->info;
     unsigned rn=info&31,temp=info>>10&31;
     if(post) {
         if(o->kind==P_STACK && info&DST_SP)c->sp=c->x[temp];
-        c->x[pending.temp]=pending.value;
-        if(pending.info&WB){if(pending.base==31)c->sp=pending.writeback;else c->x[pending.base]=pending.writeback;}
-        if(pending.uart) {
+        c->x[flat_memory_pending.temp]=flat_memory_pending.value;
+        if(flat_memory_pending.info&WB){if(flat_memory_pending.base==31)c->sp=flat_memory_pending.writeback;else c->x[flat_memory_pending.base]=flat_memory_pending.writeback;}
+        if(flat_memory_pending.uart) {
             if(uart_used==4096)osrec_platform_stop(OSREC_STOP_RUNTIME,o->pc,uart_used,0);
             flat_uart[uart_used++]=flat_uart_registers[0];
         }
@@ -96,16 +118,25 @@ static flat_target step(void *opaque,struct flat_frame *f,const struct flat_site
         unsigned bytes=(1u<<(info>>15&7))*((info&(1ull<<18))?2:1),write=!(info&LOAD);
         int user=flat_program.shadow->mode==OSREC_USER || !!(info&USER);
         if((info&(EXCLUSIVE|ALIGNED)) && (address&(bytes-1))) {
+#ifdef OSREC_FLAT_PROFILE
+            flat_memory_profile[6]++;
+#endif
             enter_fault(f,0x21,address,info&EXCLUSIVE?0:write);return target(c->pc);
         }
         if(flat_program.uart_va && address>=flat_program.uart_va && address-flat_program.uart_va<4096) {
+#ifdef OSREC_FLAT_PROFILE
+            flat_memory_profile[5]++;
+#endif
             uint64_t off=address-flat_program.uart_va;
             if(user || (off!=0 && off!=0x18 && off!=0x38) || bytes>4 || (!write && off!=0x18) || (write && off==0x18))
                 osrec_platform_stop(OSREC_STOP_UNSUPPORTED,c->pc,o->word,address);
-            pending.uart=write && !off;
-        } else pending.uart=0;
+            flat_memory_pending.uart=write && !off;
+        } else flat_memory_pending.uart=0;
         struct flat_translation t=flat_translate(&flat_program.memory,address,bytes,info&EXCLUSIVE?FLAT_READ:write?FLAT_WRITE:FLAT_READ,user);
         if(t.fault) {
+#ifdef OSREC_FLAT_PROFILE
+            flat_memory_profile[6]++;
+#endif
             if(info&HINT){c->pc=o->pc+o->metadata*4;return o->following;}
             enter_fault(f,t.fault,address,info&EXCLUSIVE?0:write);return target(c->pc);
         }
@@ -116,11 +147,11 @@ static flat_target step(void *opaque,struct flat_frame *f,const struct flat_site
             if(writable.fault)osrec_platform_stop(OSREC_STOP_UNSUPPORTED,c->pc,writable.fault,address);
         }
         if(write && !(info&HINT))writable_data(c->pc,t.pa,bytes);
-        pending.temp=temp;pending.value=c->x[temp];pending.base=rn;pending.info=info;pending.writeback=base+offset;
+        flat_memory_pending.temp=temp;flat_memory_pending.value=c->x[temp];flat_memory_pending.base=rn;flat_memory_pending.info=info;flat_memory_pending.writeback=base+offset;
         c->x[temp]=(uintptr_t)t.data;return o->native;
     }
     case P_STACK:
-        pending.temp=temp;pending.value=c->x[temp];pending.info=0;pending.uart=0;
+        flat_memory_pending.temp=temp;flat_memory_pending.value=c->x[temp];flat_memory_pending.info=0;flat_memory_pending.uart=0;
         c->x[temp]=info&SRC_SP?c->sp:0;return o->native;
     case P_SYSTEM:
         if(o->metadata&0x40000000ull){struct osrec_site s={o->pc,(uint32_t)o->word,(uint32_t)o->metadata};osrec_lowered_site(flat_program.shadow,c,&s);}
@@ -134,15 +165,15 @@ static flat_target step(void *opaque,struct flat_frame *f,const struct flat_site
     }
     case P_SVC: {
         if(flat_program.shadow->mode!=OSREC_USER)osrec_platform_stop(OSREC_STOP_UNSUPPORTED,c->pc,o->word,0);
-        pending_event=event(c->pc);pending_event->number=c->x[8];for(unsigned i=0;i<6;i++)pending_event->args[i]=c->x[i];
-        pending_regs=flat_program.shadow->sp_el1-0x150;
+        flat_observer_pending.event=event(c->pc);flat_observer_pending.event->number=c->x[8];for(unsigned i=0;i<6;i++)flat_observer_pending.event->args[i]=c->x[i];
+        flat_observer_pending.regs=flat_program.shadow->sp_el1-0x150;
         if(!osrec_enter_syscall(flat_program.shadow,c,(uint32_t)o->word,OSREC_ENTRY_VENEER))osrec_platform_stop(OSREC_STOP_RUNTIME,c->pc,o->word,0);
         return target(c->pc);
     }
     case P_OBSERVE:
-        if(pending_event){struct flat_translation t=flat_translate(&flat_program.memory,pending_regs,8,FLAT_READ,0);
-            if(t.fault)osrec_platform_stop(OSREC_STOP_RUNTIME,c->pc,t.fault,pending_regs);
-            pending_event->result=u64(t.data);pending_event->completed=1;pending_event=0;}
+        if(flat_observer_pending.event){struct flat_translation t=flat_translate(&flat_program.memory,flat_observer_pending.regs,8,FLAT_READ,0);
+            if(t.fault)osrec_platform_stop(OSREC_STOP_RUNTIME,c->pc,t.fault,flat_observer_pending.regs);
+            flat_observer_pending.event->result=u64(t.data);flat_observer_pending.event->completed=1;flat_observer_pending.event=0;}
         return o->native;
     case P_BOUNDARY:osrec_platform_stop(OSREC_STOP_BOUNDARY,c->pc,o->word,0);break;
     case P_COVERAGE:flat_full_result.missing_pc=c->pc;osrec_platform_stop(0x100,c->pc,o->word,0);break;
@@ -210,5 +241,9 @@ int flat_main(void)
     flat_full_result.events=event_count;flat_full_result.expected=flat_program.expected_count;flat_full_result.transitions=transitions;
     flat_full_result.counters=counter_used;flat_full_result.uart_bytes=uart_used;
     flat_full_result.debug[0]=flat_initial.cpu.pc;for(unsigned i=0;i<12;i++)flat_full_result.debug[i+1]=flat_initial.cpu.x[i];
+#ifdef OSREC_FLAT_PROFILE
+    flat_full_result.debug[13]=0x31464f525052534full;
+    for(unsigned i=0;i<10;i++)flat_full_result.debug[14+i]=gateway_kinds[i];
+#endif
     flat_full_result.status=okay?1:2;return okay?0:1;
 }

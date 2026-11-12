@@ -134,8 +134,13 @@ The former direct-umask bring-up exporter, driver, fixture checker and counting 
 
 The optional [hardware-memory backend](el0-hardware-memory.md) constructs
 EL0-accessible hardware aliases from the captured kernel mappings. Eligible
-kernel RAM loads/stores and logical stack arithmetic bypass the full-context
-gateway. Changing user translations and fault handling retain the software path.
+kernel RAM loads/stores, intact exclusive windows, prefetch hints, logical stack
+arithmetic, shadow/PSTATE operations, guarded register accesses, native zeroing,
+inert maintenance and indirect branches bypass the full-context gateway. Checked
+single memory accesses also complete inline, retaining their initial permission
+and fault checks. Syscall results in aligned admitted kernel RAM are recorded
+inline into the same validated event records. Changing user
+translations and fault handling retain the software path.
 Its separate system-model load plan establishes the page tables before EL0
 entry; no EL1 monitor services execution.
 

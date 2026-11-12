@@ -18,12 +18,18 @@ typedef void (*run_fn)(const struct osrec_context *,struct osrec_context *);
 struct fixture { const char *name; run_fn fast, reference; };
 #include "cases.h"
 
-/* The whitelist must never invoke platform actions or stop. */
+/* Only the flat executor treats maintenance callbacks as inert. Keep the
+ * original veneer suite strict about every platform callback. */
+#ifdef OSREC_TEST_FLAT_MAINTENANCE
+#define MAINTENANCE() ((void)0)
+#else
+#define MAINTENANCE() abort()
+#endif
 void osrec_platform_set_ttbr0(uint64_t v) { (void)v; abort(); }
 void osrec_platform_set_ttbr1(uint64_t v) { (void)v; abort(); }
-void osrec_platform_tlb_flush(void) { abort(); }
-void osrec_platform_icache_flush(void) { abort(); }
-void osrec_platform_dcache_clean_invalidate(uint64_t v) { (void)v; abort(); }
+void osrec_platform_tlb_flush(void) { MAINTENANCE(); }
+void osrec_platform_icache_flush(void) { MAINTENANCE(); }
+void osrec_platform_dcache_clean_invalidate(uint64_t v) { (void)v; MAINTENANCE(); }
 uint64_t osrec_platform_translate(uint64_t v,int op) { (void)v; (void)op; abort(); }
 void osrec_platform_set_tpidrro(uint64_t v) { (void)v; abort(); }
 void osrec_platform_stop(uint64_t reason,uint64_t pc,uint64_t detail,uint64_t far)
@@ -47,6 +53,12 @@ int main(void)
         initial.ttbr0=0x40000000;
         initial.mode=OSREC_KERNEL;
         initial.emulated=seed&1 ? ~0ull : seed;
+        const unsigned generic[]={0xc684,0xc681,0xde82,0xc3a0,0xc020,0xc101};
+        for(unsigned i=0;i<sizeof generic/sizeof generic[0];i++) {
+            unsigned key=generic[i];
+            initial.known[key>>3]|=(uint8_t)(1u<<(key&7));
+            initial.value[key]=0x1020304050607080ull^((uint64_t)seed<<32)^key;
+        }
         for (unsigned r=0;r<31;r++)
             before.x[r]=(0x1020304050607080ull*(r+1)) ^ ((uint64_t)seed*0x9e3779b97f4a7c15ull);
         before.sp=(uint64_t)(stack+sizeof stack-16);

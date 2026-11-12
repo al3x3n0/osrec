@@ -9,6 +9,11 @@ def audit(binary):
     image=Elf(binary);data=image.data
     if struct.unpack_from('<HH',data,16)!=(2,183):raise ValueError('requires an arm64 ET_EXEC')
     symbols={s['name']:s for s in image.symbols if s['shndx']}
+    hardware='flat_direct_read' in symbols
+    zero_bytes=0
+    if 'flat_hardware_zero_bytes' in symbols:
+        zero_bytes=struct.unpack('<Q',image.read(symbols['flat_hardware_zero_bytes']['value'],8))[0]
+        if not hardware or not 4<=zero_bytes<=2048 or zero_bytes&(zero_bytes-1):raise ValueError('invalid native zero-block contract')
     if any(s['name'] and not s['shndx'] for s in image.symbols):raise ValueError('unresolved image dependency')
     if any(s['type']==6 for s in image.symbols):raise ValueError('TLS dependency')
     phoff,=struct.unpack_from('<Q',data,32);stride,count=struct.unpack_from('<HH',data,54)
@@ -26,7 +31,7 @@ def audit(binary):
     ranges=[(s['addr'],s['addr']+s['size']) for s in image.sections if s['flags']&4 and s['size']]
     if max(hi for lo,hi in ranges)-min(lo for lo,hi in ranges)>=1<<27:
         raise ValueError('code span permits branch veneers that could clobber guest registers')
-    allowed={0xda10,0xda20,0xda21};exit_sites=[];system=[];instructions=0
+    allowed={0xda10,0xda20,0xda21};exit_sites=[];system=[];zero_sites=[];instructions=0
     for lo,hi in instruction_ranges(image,ranges):
         for pc in range(lo,hi,4):
             word,=struct.unpack('<I',image.read(pc,4));instructions+=1
@@ -41,6 +46,8 @@ def audit(binary):
                 key=word>>5&65535
                 if key not in allowed:raise ValueError('privileged/non-RAM system register at '+hex(pc))
                 system.append(key)
+            elif word&~31==0xd50b7420 and hardware and zero_bytes:
+                zero_sites.append(hex(pc))
             elif word not in (0xd503201f,0xd503203f,0xd503229f,0xd503241f,0xd503245f,0xd503249f,0xd50324df) and\
                  word&0xfffff0ff not in (0xd50330bf,0xd503309f,0xd50330df,0xd503305f):
                 raise ValueError('unsupported system instruction at '+hex(pc))
@@ -50,6 +57,6 @@ def audit(binary):
                 result_address=hex(result['value']),result_bytes=result['size'],
                 load_segments=loads,runtime_el=0,libc=False,tls=False,undefined_symbols=0,
                 instructions= instructions,terminal_exit_sites=[hex(exit_pc)],
-                memory_backend='hardware-kernel' if 'flat_direct_read' in symbols else 'software',
+                memory_backend='hardware-kernel' if hardware else 'software',native_zero_bytes=zero_bytes,native_zero_sites=zero_sites,
                 system_registers=sorted(set(map(hex,system))),exclusive_sequence_intact=None,
                 real_mmio=False,host_signals=False)

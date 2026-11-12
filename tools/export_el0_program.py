@@ -15,15 +15,6 @@ from el0_flat_lower import *
 MASK48=(1<<48)-1
 ROOT=Path(__file__).resolve().parents[1]
 
-def local_conditional(word,to):
-    if word&0xff000010==0x54000000:
-        condition=('eq','ne','cs','cc','mi','pl','vs','vc','hi','ls','ge','lt','gt','le','al','nv')[word&15]
-        return '    b.%s %s\n'%(condition,to)
-    register=('x' if word>>31 else 'w')+str(word&31)
-    if word&0x7e000000==0x34000000:
-        return '    %s %s,%s\n'%('cbnz' if word&(1<<24) else 'cbz',register,to)
-    return '    %s %s,#%d,%s\n'%('tbnz' if word&(1<<24) else 'tbz',register,((word>>31)<<5)|(word>>19&31),to)
-
 class Package:
     def __init__(self,path):
         self.path=Path(path);self.data=(self.path/'native.bin').read_bytes();self.h=struct.unpack_from('<10Q',self.data)
@@ -80,6 +71,8 @@ def text_metadata(out,p,user_elf):
 
 def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_memory=False):
     p=Package(Path(package).resolve());out=Path(out).resolve();vmlinux=Path(vmlinux).resolve();oracle=Path(oracle).resolve()
+    dczid=struct.unpack_from('<Q',p.shadow,104+8192+0xd807*8)[0]
+    zero_bytes=4<<(dczid&15) if not dczid&16 and dczid&15<=9 else 0
     manifest=json.loads((p.path/'manifest.json').read_text());record=json.loads((oracle/'calls.json').read_text())
     if hashlib.sha256(Path(user_elf).read_bytes()).hexdigest()!=manifest['application']['user_elf_sha256']:raise ValueError('user ELF identity mismatch')
     source=record.get('source_image_sha256') or json.loads((Path(record['image'])/'manifest.json').read_text())['image_sha256']
@@ -189,16 +182,30 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
                 if pc+4 not in words:stream.write('    b %s\n'%label(pc+4))
             else:
                 idx,o,m=descriptions[pc]
-                if hardware_memory and o.kind==STACK:
-                    from el0_hardware import stack_path
-                    stream.write(stack_path(o))
+                inline=''
+                if hardware_memory and o.kind in (STACK,SYSTEM):
+                    from el0_hardware import stack_path,system_path
+                    inline=stack_path(o) if o.kind==STACK else system_path(o.word,m)
+                if inline:
+                    stream.write(inline)
                     stream.write('    b %s\n'%label(pc+4))
-                    stream.write(thunk('.Lnr%x'%pc,'.Lp%x'%pc))
+                    if o.kind==STACK:stream.write(thunk('.Lnr%x'%pc,'.Lp%x'%pc))
                     stream.write(thunk('.Lr%x'%pc,'.Lp%x'%pc))
                     continue
                 if hardware_memory and o.kind==MEMORY:
                     from el0_hardware import memory_path
-                    stream.write(memory_path(pc,o,label(pc+o.length*4)))
+                    stream.write(memory_path(pc,o,label(pc+o.length*4),groups.get(pc),label))
+                if hardware_memory and o.kind==INDIRECT:
+                    from el0_hardware import indirect_path
+                    stream.write(indirect_path(pc,o.word))
+                if hardware_memory and o.kind==SYSTEM:
+                    from el0_hardware import guarded_system_path,zero_path,lowered_branch_path
+                    stream.write(lowered_branch_path(pc,o.word,m,label))
+                    stream.write(guarded_system_path(pc,o.word,m,label(pc+4)))
+                    stream.write(zero_path(pc,o.word,m,label(pc+4),zero_bytes))
+                if hardware_memory and o.kind==OBSERVE:
+                    from el0_hardware import observe_path
+                    stream.write(observe_path(pc,'.Ln%x'%pc))
                 stream.write('flat_capture .Lc%x,0x%x,0x%x,%d\n'%(pc,pc,w,idx*2))
                 if o.kind in (MEMORY,STACK):
                     stream.write('.Ln%x:\n'%pc)
@@ -220,6 +227,9 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
                         for dest,to in exits.items():
                             stream.write('%s:\nflat_capture .Lex%x_%x,0x%x,0,%d\n'%(to,pc,dest,dest,idx*2+1));label(dest)
                     else:stream.write('    .inst 0x%08x\n'%o.native)
+                    if hardware_memory and o.kind==MEMORY:
+                        from el0_hardware import memory_finish_path
+                        stream.write(memory_finish_path(pc,o,label(pc+4*o.length)))
                     stream.write('flat_capture .Ld%x,0x%x,0,%d\n'%(pc,pc+4*o.length,idx*2+1))
                     stream.write(thunk('.Lnr%x'%pc,'.Ln%x'%pc))
                 elif o.kind==OBSERVE:
@@ -234,6 +244,14 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
             stream.write(thunk('.Lr%x'%pc,'.Lp%x'%pc))
         stream.write('.section .rodata,"a"\n.balign 8\n.global flat_pcs\nflat_pcs:\n')
         for pc in sorted(set(pcs)|missing):stream.write('    .quad 0x%x,%s\n'%(pc,resume(pc)))
+        if hardware_memory:
+            from el0_hardware import indirect_resume
+            stream.write('.global flat_direct_pc_count\nflat_direct_pc_count:\n.quad %d\n'%(len(set(pcs)|missing)))
+            stream.write('.global flat_direct_pcs\nflat_direct_pcs:\n')
+            for pc in sorted(set(pcs)|missing):stream.write('    .quad 0x%x,.Li%x\n'%(pc,pc))
+            stream.write('.pushsection .text.resumes,"ax"\n')
+            for pc in sorted(set(pcs)|missing):stream.write(indirect_resume('.Li%x'%pc,label(pc)))
+            stream.write('.popsection\n')
         stream.write('.global flat_ops\nflat_ops:\n')
         for pc,o,m in ops:
             native='.Lnr%x'%pc if o.kind in (MEMORY,STACK,OBSERVE) else '0'
@@ -246,6 +264,7 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
         from el0_hardware import direct_ranges
         aliases,reads,writes=direct_ranges(p.maps,p.h[2],p.h[3],immutable)
         hardware=dict(format='osrec-el0-hardware-memory-v1',ram_base=p.h[2],ram_bytes=p.h[3],
+                      native_zero_bytes=zero_bytes,
                       aliases=aliases,read_ranges=reads,write_ranges=writes,
                       translation='kernel VA -> flat_phys + captured PA - ram_base',
                       changing_user_mappings='checked software path',runtime_exception_level=0)
@@ -275,6 +294,7 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
         data+='.balign 16\n.global %s\n%s:\n.incbin "%s"\n'%(name,name,file)
     for name,value in [('osrec_kernel_range_count',p.h[5]),('osrec_veneer_count',p.h[8]),('osrec_veneer_base',p.h[7]),('flat_expected_uart_bytes',len(uart))]:data+='.global %s\n%s:\n.quad 0x%x\n'%(name,name,value)
     if hardware_memory:
+        if zero_bytes:data+='.balign 8\n.global flat_hardware_zero_bytes\nflat_hardware_zero_bytes:\n.quad %d\n'%zero_bytes
         for name,ranges in [('flat_direct_read',reads),('flat_direct_write',writes)]:
             data+='.balign 16\n.global %s\n%s:\n'%(name,name)
             data+=''.join('.quad 0x%x,0x%x\n'%tuple(row) for row in ranges)+'.quad 0,0\n'

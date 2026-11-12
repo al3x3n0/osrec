@@ -3,6 +3,9 @@ CC ?= cc
 OUT ?= $(ROOT)/build/el0-flat
 CPPFLAGS += -I$(ROOT)/runtime/el0 -I$(ROOT)/runtime/el0_flat -I$(ROOT)/tools
 CFLAGS := -O2 -g -std=c11 -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie -mgeneral-regs-only -mno-outline-atomics -mbranch-protection=none
+ifeq ($(PROFILE),1)
+CPPFLAGS += -DOSREC_FLAT_PROFILE
+endif
 .DEFAULT_GOAL := program
 .PHONY: observer program check-gateway
 observer: $(OUT)/flat-observe

@@ -6,6 +6,18 @@ enum {P_NATIVE,P_MEMORY,P_STACK,P_SYSTEM,P_INDIRECT,P_SVC,P_BOUNDARY,P_UNSUPPORT
 struct flat_op {uint64_t pc;flat_target native,following;uint64_t word,metadata,kind,info,immediate;};
 struct flat_pc {uint64_t pc;flat_target target;};
 struct flat_event {uint64_t exception,number,args[6],result,completed;};
+/* Shared with generated result observation code. */
+struct flat_observer_pending {struct flat_event *event;uint64_t regs;};
+extern struct flat_observer_pending flat_observer_pending;
+_Static_assert(offsetof(struct flat_observer_pending,regs)==8,"observer registers ABI");
+_Static_assert(offsetof(struct flat_event,result)==64,"observer result ABI");
+_Static_assert(offsetof(struct flat_event,completed)==72,"observer completion ABI");
+/* Shared with generated memory completion code. */
+struct flat_memory_pending {uint64_t temp,value,writeback,base,info,uart;};
+extern struct flat_memory_pending flat_memory_pending;
+_Static_assert(offsetof(struct flat_memory_pending,value)==8,"memory completion value ABI");
+_Static_assert(offsetof(struct flat_memory_pending,writeback)==16,"memory completion writeback ABI");
+_Static_assert(offsetof(struct flat_memory_pending,uart)==40,"memory completion UART ABI");
 struct flat_counter {uint64_t pc,key,value;};
 struct flat_text_span {uint64_t address,bytes;};
 struct flat_execmap {uint64_t va,pa,bytes;};

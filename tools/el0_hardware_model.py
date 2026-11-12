@@ -40,6 +40,8 @@ def prepare(image, out, llvm=LLVM):
     if manifest.get('memory_backend') != 'hardware-kernel' or sha(image / 'hardware-memory.json') != manifest['hardware_memory_sha256']:
         raise ValueError('hardware mapping metadata is not bound to this export')
     checked = audit(image / 'checkpoint')
+    zero_bytes=checked.get('native_zero_bytes',0)
+    if zero_bytes!=metadata.get('native_zero_bytes',0):raise ValueError('native zero-block metadata differs from ELF')
     elf = Elf(image / 'checkpoint')
     symbols = {s['name']: s for s in elf.symbols if s['shndx']}
     backing = symbols['flat_phys']['value']
@@ -94,7 +96,7 @@ def prepare(image, out, llvm=LLVM):
     # 48-bit TTBR0, 4 KiB granules, normal WB walks, inner shareable; TTBR1 off.
     tcr = 16 | (1 << 8) | (1 << 10) | (3 << 12) | (16 << 16) | (1 << 23) | (2 << 30) | (2 << 32)
     registers = dict(MAIR_EL1=0xff, TCR_EL1=tcr, TTBR0_EL1=TABLES + tables.root,
-                     TTBR1_EL1=0, CPACR_EL1=3 << 20, SCTLR_EL1=0x30d01805)
+                     TTBR1_EL1=0, CPACR_EL1=3 << 20, SCTLR_EL1=0x30d01805 | ((1<<14) if zero_bytes else 0))
     source = '.text\n.global _start\n_start:\n    msr daifset,#15\n'
     for name, value in registers.items():
         source += '    ldr x0,=0x%x\n    msr %s,x0\n' % (value, name.lower()) if name != 'SCTLR_EL1' else ''
@@ -105,9 +107,23 @@ def prepare(image, out, llvm=LLVM):
     tlbi vmalle1
     dsb sy
     isb
-    ldr x0,=0x30d01805
+    ldr x0,=0x%x
     msr sctlr_el1,x0
     isb
+'''%registers['SCTLR_EL1']
+    if zero_bytes:
+        expected=(zero_bytes//4).bit_length()-1
+        source+='''    mrs x0,dczid_el0
+.global hardware_zero_check
+hardware_zero_check:
+    mov x1,#%d
+    cmp x0,x1
+    b.eq 1f
+    mov x2,#0xdc
+    b hardware_unexpected
+1:
+'''%expected
+    source+='''
     mov x0,#0x3c0
     msr spsr_el1,x0
     ldr x0,=%s
@@ -139,12 +155,21 @@ hardware_unexpected:
                 page_tables=dict(address=TABLES, bytes=len(raw), sha256=sha(out / 'page-tables.bin')),
                 load_segments=checked['load_segments'], entry=checked['entry'], execution_level=0,
                 platform_registers=registers, ram=dict(address=RAM_BASE, bytes=RAM_END - RAM_BASE),
+                native_zero_bytes=zero_bytes,
                 result=dict(address=checked['result_address'], bytes=checked['result_bytes']),
                 completion_pc=checked['terminal_pc'], unexpected_pc=hex(stop),
                 setup=dict(image='setup.elf', sha256=sha(out / 'setup.elf'), entry=SETUP,
                            scope='QEMU model initialization only; outside delivered EL0 computation'),
                 runtime_el1_services=False, physical_devices=False, cycles_verified=False,
                 rtl_execution_verified=False)
+    if 'flat_memory_profile' in symbols:
+        profile=symbols['flat_memory_profile']
+        if profile['size']!=64:raise ValueError('unsupported memory-profile layout')
+        plan['memory_profile']=dict(address=profile['value'],bytes=profile['size'])
+    if 'flat_system_profile' in symbols:
+        profile=symbols['flat_system_profile']
+        if profile['size']!=4096*24:raise ValueError('unsupported system-profile layout')
+        plan['system_profile']=dict(address=profile['value'],bytes=profile['size'])
     (out / 'hardware-load-plan.json').write_text(json.dumps(plan, indent=2) + '\n')
     return plan
 
@@ -179,7 +204,7 @@ def run(image, prepared, out, timeout=180, qemu='qemu-system-aarch64'):
             remote.resume()
             pc = remote.wait(timeout)
             if pc != entry or remote.register('cpsr') & 15:
-                raise ValueError('hardware setup failed before EL0 entry: ' + hex(pc))
+                raise ValueError('hardware setup failed before EL0 entry: '+json.dumps(remote.registers(('pc','cpsr','x0','x1','x2'))))
             entry_state = remote.registers(('pc', 'cpsr'))
             remote.breakpoint(entry, False)
             remote.breakpoint(completion)
@@ -187,6 +212,8 @@ def run(image, prepared, out, timeout=180, qemu='qemu-system-aarch64'):
             pc = remote.wait(timeout)
             state = remote.registers(('pc', 'cpsr', 'x0', 'x1', 'x2'))
             raw = remote.read(int(plan['result']['address'], 0), plan['result']['bytes'])
+            memory_profile=remote.read(plan['memory_profile']['address'],64) if 'memory_profile' in plan else None
+            system_profile=remote.read(plan['system_profile']['address'],4096*24) if 'system_profile' in plan else None
         finally:
             if remote:
                 remote.socket.close()
@@ -195,15 +222,32 @@ def run(image, prepared, out, timeout=180, qemu='qemu-system-aarch64'):
     values = struct.unpack('<40Q', raw)
     result = dict(zip(RESULT_NAMES, values[:16]))
     result['debug'] = values[16:]
+    profile = None
+    if result['debug'][13] == 0x31464f525052534f:
+        kinds = ('native', 'memory', 'stack', 'system', 'indirect', 'svc', 'boundary', 'unsupported', 'observe', 'coverage')
+        profile = dict(zip(kinds, result['debug'][14:]))
+    memory_counts=struct.unpack('<8Q',memory_profile) if memory_profile is not None else None
+    system_counts=[dict(word=hex(word),metadata=hex(metadata),count=count) for word,metadata,count in
+                   struct.iter_unpack('<3Q',system_profile) if count] if system_profile is not None else None
     verified = (pc == completion and not state['cpsr'] & 15 and state['x0'] == 0 and
                 result['magic'] == 0x324c55464652534f and result['version'] == 2 and result['status'] == 1 and
-                result['first_mismatch'] == (1 << 64) - 1 and not result['missing_pc'])
+                result['first_mismatch'] == (1 << 64) - 1 and not result['missing_pc'] and
+                (profile is None or sum(profile.values()) == result['transitions']) and
+                (memory_counts is None or profile is None or sum(memory_counts[:5])+memory_counts[7]==profile['memory']) and
+                (system_counts is None or profile is None or sum(r['count'] for r in system_counts)==profile['system']))
     report = dict(verified=verified, entry=entry_state, completion=state, result=result,
                   image_sha256=plan['image_sha256'], mapping_sha256=plan['mapping_sha256'],
                   page_tables_sha256=plan['page_tables']['sha256'], hardware_exceptions=int(pc == unexpected),
                   runtime_el1_services=False, host_calls_before_completion=0,
                   functional_model='QEMU system Cortex-A53', seconds=round(time.monotonic() - started, 3),
                   cycles_verified=False, rtl_execution_verified=False)
+    if profile is not None:
+        report['gateway_profile'] = profile
+    if memory_profile is not None:
+        names=('user','kernel','user_copy','exclusive','hint','uart','fault','post')
+        report['memory_profile']=dict(zip(names,memory_counts))
+    if system_counts is not None:
+        report['system_profile']=sorted(system_counts,key=lambda r:-r['count'])
     (out / 'result.bin').write_bytes(raw)
     (out / 'validation.json').write_text(json.dumps(report, indent=2) + '\n')
     return report

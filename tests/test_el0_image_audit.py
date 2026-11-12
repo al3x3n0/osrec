@@ -76,5 +76,23 @@ class ImageAudit(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'dynamic loader'):
             audit(target)
 
+    def test_native_zero_requires_hardware_marker_and_valid_block_geometry(self):
+        source=SOURCE.replace('    nop','    dc zva,x0')
+        source+='\n.data\n.global flat_direct_read,flat_hardware_zero_bytes\nflat_direct_read: .quad 0,0\nflat_hardware_zero_bytes: .quad 64\n'
+        (self.root/'zero.S').write_text(source)
+        subprocess.run([str(LLVM/'llvm-mc'),'-triple=aarch64-linux-gnu','-filetype=obj',str(self.root/'zero.S'),'-o',str(self.root/'zero.o')],check=True,capture_output=True)
+        subprocess.run([str(LLVM/'ld.lld'),'-static','-e','_start',str(self.root/'zero.o'),'-o',str(self.root/'zero')],check=True,capture_output=True)
+        checked=audit(self.root/'zero')
+        self.assertEqual(checked['native_zero_bytes'],64)
+        self.assertEqual(len(checked['native_zero_sites']),1)
+        self.elf=Elf(self.root/'zero')
+        with self.assertRaisesRegex(ValueError,'unsupported system instruction'):
+            audit(self.mutate_word('guest_block',0xd50b7e20)) # unrelated cache operation
+        with self.assertRaisesRegex(ValueError,'invalid native zero-block'):
+            audit(self.mutate_word('flat_hardware_zero_bytes',96))
+        self.elf=Elf(self.image)
+        with self.assertRaisesRegex(ValueError,'unsupported system instruction'):
+            audit(self.mutate_word('guest_block',0xd50b7420))
+
 
 if __name__=='__main__':unittest.main()

@@ -76,8 +76,9 @@ def text_metadata(out,p,user_elf):
     data+=''.join('{0x%x,0x%x,4096},\n'%(va,p.pa(va)) for va in sorted(user_pages))+'};\n'
     data+='const uint64_t flat_user_text_count=%d;\n'%len(user_pages)
     (Path(out)/'text.c').write_text(data)
+    return physical
 
-def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None):
+def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_memory=False):
     p=Package(Path(package).resolve());out=Path(out).resolve();vmlinux=Path(vmlinux).resolve();oracle=Path(oracle).resolve()
     manifest=json.loads((p.path/'manifest.json').read_text());record=json.loads((oracle/'calls.json').read_text())
     if hashlib.sha256(Path(user_elf).read_bytes()).hexdigest()!=manifest['application']['user_elf_sha256']:raise ValueError('user ELF identity mismatch')
@@ -188,6 +189,16 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None):
                 if pc+4 not in words:stream.write('    b %s\n'%label(pc+4))
             else:
                 idx,o,m=descriptions[pc]
+                if hardware_memory and o.kind==STACK:
+                    from el0_hardware import stack_path
+                    stream.write(stack_path(o))
+                    stream.write('    b %s\n'%label(pc+4))
+                    stream.write(thunk('.Lnr%x'%pc,'.Lp%x'%pc))
+                    stream.write(thunk('.Lr%x'%pc,'.Lp%x'%pc))
+                    continue
+                if hardware_memory and o.kind==MEMORY:
+                    from el0_hardware import memory_path
+                    stream.write(memory_path(pc,o,label(pc+o.length*4)))
                 stream.write('flat_capture .Lc%x,0x%x,0x%x,%d\n'%(pc,pc,w,idx*2))
                 if o.kind in (MEMORY,STACK):
                     stream.write('.Ln%x:\n'%pc)
@@ -230,7 +241,15 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None):
             meta=o.length if o.kind in (MEMORY,STACK) else m
             stream.write('    .quad 0x%x,%s,%s,0x%x,0x%x,%d,0x%x,0x%x\n'%(pc,native,following,o.word,meta,o.kind,o.info,o.imm&((1<<64)-1)))
         stream.write('.section .note.GNU-stack,"",%progbits\n')
-    text_metadata(out,p,user_elf)
+    immutable=text_metadata(out,p,user_elf)
+    if hardware_memory:
+        from el0_hardware import direct_ranges
+        aliases,reads,writes=direct_ranges(p.maps,p.h[2],p.h[3],immutable)
+        hardware=dict(format='osrec-el0-hardware-memory-v1',ram_base=p.h[2],ram_bytes=p.h[3],
+                      aliases=aliases,read_ranges=reads,write_ranges=writes,
+                      translation='kernel VA -> flat_phys + captured PA - ram_base',
+                      changing_user_mappings='checked software path',runtime_exception_level=0)
+        (out/'hardware-memory.json').write_text(json.dumps(hardware,indent=2)+'\n')
     # Sparse initial bytes are copied into one zero-backed canonical RAM store.
     extents=[]
     with (p.path/'memory.bin').open('rb') as src,(out/'ram.bin').open('wb') as dst:
@@ -255,6 +274,10 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None):
     for name,file in [('flat_payload','ram.bin'),('flat_maps','maps.bin'),('flat_expected','expected.bin'),('flat_counters','counters.bin'),('flat_expected_uart','uart.bin'),('osrec_kernel_ranges','ranges.bin'),('osrec_veneer_origins','origins.bin')]:
         data+='.balign 16\n.global %s\n%s:\n.incbin "%s"\n'%(name,name,file)
     for name,value in [('osrec_kernel_range_count',p.h[5]),('osrec_veneer_count',p.h[8]),('osrec_veneer_base',p.h[7]),('flat_expected_uart_bytes',len(uart))]:data+='.global %s\n%s:\n.quad 0x%x\n'%(name,name,value)
+    if hardware_memory:
+        for name,ranges in [('flat_direct_read',reads),('flat_direct_write',writes)]:
+            data+='.balign 16\n.global %s\n%s:\n'%(name,name)
+            data+=''.join('.quad 0x%x,0x%x\n'%tuple(row) for row in ranges)+'.quad 0,0\n'
     data+='.section .note.GNU-stack,"",%progbits\n';(out/'state.S').write_text(data)
     s='#include "program.h"\nextern unsigned char flat_shadow[],flat_payload[],flat_maps[],flat_expected[],flat_counters[];\nextern const struct flat_pc flat_pcs[]; extern const struct flat_op flat_ops[];\n'
     s+='unsigned char flat_phys[%d] __attribute__((aligned(4096)));\n'%p.h[3]
@@ -270,7 +293,9 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None):
                 kernel_sha256=hashlib.sha256(vmlinux.read_bytes()).hexdigest(),
                 native_state_sha256=hashlib.sha256(p.data).hexdigest(),source_image_sha256=source,
                 coverage_sha256=hashlib.sha256(Path(coverage).read_bytes()).hexdigest() if coverage else None,
-                scope='restored user checkpoint and actual kernel entry/dispatch/return, conservative code closure',runtime_el=0)
+                scope='restored user checkpoint and actual kernel entry/dispatch/return, conservative code closure',runtime_el=0,
+                memory_backend='hardware-kernel' if hardware_memory else 'software',
+                hardware_memory_sha256=hashlib.sha256((out/'hardware-memory.json').read_bytes()).hexdigest() if hardware_memory else None)
     (out/'manifest.json').write_text(json.dumps(report,indent=2)+'\n');return report
 
 if __name__=='__main__':
@@ -278,4 +303,5 @@ if __name__=='__main__':
     for name in ('package','vmlinux','user-elf','oracle','out'):a.add_argument('--'+name,required=True)
     a.add_argument('--extra-pc',action='append',type=lambda s:int(s,0),default=[])
     a.add_argument('--coverage',help='optional QEMU in_asm listing; static function coverage seed only')
-    p=a.parse_args();print(json.dumps(export(p.package,p.vmlinux,p.user_elf,p.oracle,p.out,p.extra_pc,p.coverage),indent=2))
+    a.add_argument('--hardware-memory',action='store_true',help='inline static kernel RAM accesses; requires the generated hardware page-table load plan')
+    p=a.parse_args();print(json.dumps(export(p.package,p.vmlinux,p.user_elf,p.oracle,p.out,p.extra_pc,p.coverage,p.hardware_memory),indent=2))

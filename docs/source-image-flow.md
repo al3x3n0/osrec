@@ -132,6 +132,13 @@ make -C runtime/el0_flat CC=clang-19 check-gateway
 
 The former direct-umask bring-up exporter, driver, fixture checker and counting command have been retired. The complete executor below is the supported application path. Shared ELF admission checks live in `tools/audit_el0_image.py`; current validation uses `tools/check_el0_program.py`.
 
+The optional [hardware-memory backend](el0-hardware-memory.md) constructs
+EL0-accessible hardware aliases from the captured kernel mappings. Eligible
+kernel RAM loads/stores and logical stack arithmetic bypass the full-context
+gateway. Changing user translations and fault handling retain the software path.
+Its separate system-model load plan establishes the page tables before EL0
+entry; no EL1 monitor services execution.
+
 ### Complete user/kernel checkpoint
 
 `tools/export_el0_program.py` and `runtime/el0_flat/program.c` now resume the saved user PC and execute the complete captured random/fault workload. User SVC enters the original captured exception vector, entry code, dispatcher and syscall body. Logical ERET resumes user computation. Software-detected data faults enter the captured kernel fault handlers, which update the same canonical RAM and page tables. Syscall results are computed by these paths; embedded expected events are read for final validation, not to produce results or select branches.

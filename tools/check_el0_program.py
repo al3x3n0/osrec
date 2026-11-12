@@ -9,6 +9,8 @@ from pathlib import Path
 from audit_el0_image import audit
 
 def make_load_plan(checked):
+    if checked.get('memory_backend')=='hardware-kernel':
+        raise ValueError('hardware-memory executors require el0_hardware_model.py prepare and its hardware load plan')
     return dict(format='osrec-el0-program-load-v1',image='checkpoint',image_sha256=checked['image_sha256'],
               entry=checked['entry'],execution_level=0,load_segments=checked['load_segments'],
               initialization='Load ELF bytes at segment addresses and zero every memory tail.',
@@ -29,6 +31,8 @@ def load_plan(image,checked):
 def run(image,out,observer,timeout=120):
     image,out,observer=map(lambda p:Path(p).resolve(),(image,out,observer))
     checked=audit(image/'checkpoint')
+    if checked.get('memory_backend')=='hardware-kernel':
+        raise ValueError('hardware-memory executors require a system model with the generated page tables')
     out.mkdir(parents=True,exist_ok=False)
     command=['docker','run','--rm','--network','none','--read-only','--cap-add','SYS_PTRACE',
              '--mount','type=bind,src='+str(image/'checkpoint')+',dst=/checkpoint,readonly',
@@ -56,6 +60,8 @@ def run(image,out,observer,timeout=120):
 
 def run_qemu(image,out,docker_image='osrec-qemu-user:20261109',timeout=120):
     image,out=Path(image).resolve(),Path(out).resolve();checked=audit(image/'checkpoint')
+    if checked.get('memory_backend')=='hardware-kernel':
+        raise ValueError('hardware-memory executors require a system model with the generated page tables')
     out.mkdir(parents=True,exist_ok=False)
     command=['docker','run','--rm','--network','none','--read-only',
              '--mount','type=bind,src='+str(image/'checkpoint')+',dst=/checkpoint,readonly',

@@ -50,5 +50,6 @@ def audit(binary):
                 result_address=hex(result['value']),result_bytes=result['size'],
                 load_segments=loads,runtime_el=0,libc=False,tls=False,undefined_symbols=0,
                 instructions= instructions,terminal_exit_sites=[hex(exit_pc)],
+                memory_backend='hardware-kernel' if 'flat_direct_read' in symbols else 'software',
                 system_registers=sorted(set(map(hex,system))),exclusive_sequence_intact=None,
                 real_mmio=False,host_signals=False)

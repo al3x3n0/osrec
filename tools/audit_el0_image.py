@@ -52,8 +52,17 @@ def audit(binary):
                  word&0xfffff0ff not in (0xd50330bf,0xd503309f,0xd50330df,0xd503305f):
                 raise ValueError('unsupported system instruction at '+hex(pc))
     if exit_sites!=[exit_pc]:raise ValueError('exactly one terminal exit required')
+    validation=symbols.get('flat_validation_enabled')
+    validation_mode=1 if validation is None else struct.unpack('<Q',image.read(validation['value'],8))[0]
+    if validation_mode not in (0,1):raise ValueError('invalid runtime validation mode')
+    if validation and (image.sections[validation['shndx']]['flags']&1 or any(
+            segment['flags']&2 and segment['address']<=validation['value']<segment['address']+segment['memory_bytes']
+            for segment in loads)):
+        raise ValueError('runtime validation mode is writable')
     result=symbols['flat_full_result']
     return dict(image_sha256=hashlib.sha256(data).hexdigest(),image_bytes=len(data),entry=hex(entry),terminal_pc=hex(end),
+                runtime_validation=bool(validation_mode),
+                verification_scope='workload-results' if validation_mode else 'execution-completion',
                 result_address=hex(result['value']),result_bytes=result['size'],
                 load_segments=loads,runtime_el=0,libc=False,tls=False,undefined_symbols=0,
                 instructions= instructions,terminal_exit_sites=[hex(exit_pc)],

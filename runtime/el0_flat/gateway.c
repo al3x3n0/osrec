@@ -18,7 +18,8 @@ flat_target flat_dispatch(struct flat_frame *frame,const struct flat_site *site)
     if(!target)copy(c->frame,frame);
     return target;
 }
-enum flat_status flat_run(struct flat_frame *frame,flat_target entry,void *stack,size_t bytes,
+/* Preserve the public execution boundary when runtime modules use LTO. */
+__attribute__((noinline)) enum flat_status flat_run(struct flat_frame *frame,flat_target entry,void *stack,size_t bytes,
                           uint64_t limit,flat_handler handler,void *opaque,uint64_t *transitions)
 {
     if(transitions)*transitions=0;

@@ -1,0 +1,7 @@
+{
+  "window": "execution_interval",
+  "numerator": "runtime_adapter",
+  "denominator": "kernel_source_visits",
+  "maximum_fraction": 0.20,
+  "target_fraction": 0.10
+}

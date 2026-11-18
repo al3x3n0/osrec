@@ -9,6 +9,7 @@ import unittest
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
 from el0_hardware import immediate, observe_path
+from kernel_source_verify import Elf
 
 LLVM=Path('/opt/homebrew/opt/llvm@16/bin')
 CC=str(LLVM/'clang') if (LLVM/'clang').exists() else shutil.which('clang')
@@ -18,6 +19,12 @@ QEMU=shutil.which('qemu-system-aarch64')
 @unittest.skipUnless(CC and QEMU,'AArch64 cross compiler and system QEMU required')
 class Instructions(unittest.TestCase):
     def test_event_fields_ranges_page_crossing_flags_registers_and_fallback(self):
+        self.exercise(None)
+
+    def test_paired_pending_load_straddles_page_without_losing_flags_or_registers(self):
+        self.exercise(4088)
+
+    def exercise(self,placement):
         source=['.text','.global _start','_start:',
                 'adrp x0,stack_end','add x0,x0,:lo12:stack_end','mov sp,x0']
         offsets=(-8,0,1,4088,4089,4096,8184,8185,8192)
@@ -63,15 +70,22 @@ class Instructions(unittest.TestCase):
         source+=['mov x2,#0','b exit','fail:','mov x2,#1','exit:',
                  'adrp x1,exit_status','add x1,x1,:lo12:exit_status','str x2,[x1,#8]',
                  'mov x0,#0x20','hlt #0xf000','b .','.data','.balign 16',
-                 'exit_status: .quad 0x20026,1','flat_observer_pending: .zero 16',
+                 'exit_status: .quad 0x20026,1',
                  'event: .zero 80','flat_direct_read: .zero 32',
                  '.balign 4096','buffer: .zero 8192',
                  '.bss','.balign 16','.space 16384','stack_end:']
+        source+=['.section .data.observer,"aw"']
+        if placement is not None:source+=['.balign 4096','.space %d'%placement]
+        else:source+=['.balign 16']
+        source+=['flat_observer_pending: .zero 16']
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);(root/'test.S').write_text('\n'.join(source)+'\n')
             subprocess.run([CC,'--target=aarch64-none-elf','-fuse-ld=lld','-nostdlib',
                             '-Wl,-Ttext=0x40200000,-e,_start',str(root/'test.S'),'-o',str(root/'test.elf')],
                            check=True,capture_output=True)
+            if placement is not None:
+                elf=Elf(root/'test.elf')
+                self.assertEqual(next(s['value'] for s in elf.symbols if s['name']=='flat_observer_pending')&4095,placement)
             result=subprocess.run([QEMU,'-M','virt-9.2,secure=off,virtualization=off','-cpu','cortex-a53',
                                    '-accel','tcg','-nodefaults','-display','none','-monitor','none','-serial','none',
                                    '-semihosting-config','enable=on,target=native',

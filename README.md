@@ -16,6 +16,14 @@ page faults and user continuation. Its standalone executable matches 2,272
 events, nine embedded timer inputs and 92 RAM-backed UART bytes. Its gateway
 preserves every guest GPR and FP/SIMD register; the image makes no host syscall
 before terminal exit. See the [current EL0 backend](docs/source-image-flow.md#complete-userkernel-checkpoint).
+The exporter also supports an [execution-only production option](docs/el0-runtime-optimization.md#execution-only-production-option)
+with `--no-validation`; `--trust-syscall-abi` retains direct user-memory proofs
+under the existing return ABI. Validation is enabled by default.
+[Grouped DAIF forwarding](docs/el0-runtime-optimization.md#grouped-daif-forwarding)
+brings production runtime instructions to 3,516,375 (1.1562 per original kernel
+operation), 0.038% below the compact-state image; the 0.20 ceiling remains unmet.
+An [opt-in descriptor write tracker](docs/el0-runtime-optimization.md#experimental-descriptor-write-tracking)
+reduces scans but regresses total instruction overhead, so it remains disabled by default.
 The [simulator-neutral GDB runner](docs/el0-model-runner.md) loads or verifies its
 RAM, checks EL0 entry, and inspects the embedded result at completion before exit.
 RTL execution and timing validation remain pending. See the
@@ -24,9 +32,9 @@ RTL execution and timing validation remain pending. See the
 An optional [hardware-memory backend](docs/el0-hardware-memory.md) now uses the
 captured QEMU mappings to execute eligible kernel RAM accesses through hardware
 page tables without the full-context gateway. Inline shadow-register operations
-and indirect branches, native exclusive/prefetch/zeroing paths, inert maintenance
-and inline memory completion and result observation reduce gateway entries by about 99%
-on the complete workload. It matches with no hardware exceptions or runtime EL1 services; model initialization
+and indirect branches, native exclusive/prefetch/zeroing paths, inert maintenance,
+inline user-memory translation, syscall entry, memory completion and result
+observation and UART register buffering reduce gateway entries by about 99.9% on the complete workload. It matches with no hardware exceptions or runtime EL1 services; model initialization
 establishes the mappings before entering the EL0 executable.
 
 A [user-binary builder](docs/el0-user-binary.md) also combines a reusable captured-kernel capsule with a supplied static AArch64 ELF. Construction runs the kernel's real `execveat`; delivery starts the new program at its ELF entry and handles its syscalls through captured kernel code, entirely at EL0. The example passes native and QEMU application checks, matches stdout and exit status on Linux, and rebuilds byte-identically from the same inputs. The initial contract admits static non-PIE binaries with immutable executable pages; general scheduling, devices and dynamic loading remain outside it. See the [demo report](docs/el0-native-demo.md) for evidence and limits.

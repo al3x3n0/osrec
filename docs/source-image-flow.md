@@ -21,6 +21,26 @@ The primary application-to-library entry is a direct branch through a linked sys
 
 ## Current flow
 
+The newest [pretranslated-memory ELF](el0-pretranslated-memory.md) resolves
+mappings during construction and embeds both hardware tables and initial RAM
+in the executable. Ordinary kernel RAM operations and 43 proven user memory
+sites execute directly; both logical domains use native SP between context
+edges. The complete workload passes at EL0 without an external page-table image
+or runtime EL1 service. The latest [combined runtime pass](el0-runtime-optimization.md), with LTO,
+retains all syscall gateways and reduces runtime instructions by a further 1.92%
+to 4,465,783, or 1.4684 per original kernel
+operation; the 0.20 ceiling remains unmet. The following sections
+also retain the preceding backend and construction-flow evidence.
+
+An [execution-only production option](el0-runtime-optimization.md#execution-only-production-option)
+omits the workload ledger, expected outputs and saved-context comparisons.
+`--no-validation` uses live user translation; adding `--trust-syscall-abi` retains
+direct user accesses under the existing return ABI. Validation remains the
+default. Execution completion and workload-result verification are reported
+separately. The selected trusted production build, with profiling disabled,
+measures 4,116,488 runtime instructions (1.3536 per original kernel operation)
+and 7,091,246 whole-ELF instructions; the 0.20 ceiling remains unmet.
+
 The delivery backend is `runtime/el0_flat`: one native executable embeds user and captured-kernel code, initial RAM/registers, inputs and verification, all executing at EL0. The complete captured workload passes native AArch64 and QEMU application mode; see the [demo report](el0-native-demo.md). Model loading uses the generated `load-plan.json`; RTL execution and cycle validation remain pending.
 
 For a separately supplied static ELF, [the user-binary builder](el0-user-binary.md) takes a reusable libkernel capsule, runs the captured kernel's real `execveat` during construction, and snapshots the new process at its ELF entry. It records a native reference with deterministic RAM inputs, emits native code, expands explicitly missing kernel functions, and validates the resulting standalone executable. The new reference is not an independent live-Linux oracle. The original captured demo retains its live-Linux comparison.
@@ -139,10 +159,25 @@ arithmetic, shadow/PSTATE operations, guarded register accesses, native zeroing,
 inert maintenance and indirect branches bypass the full-context gateway. Checked
 single memory accesses also complete inline, retaining their initial permission
 and fault checks. Syscall results in aligned admitted kernel RAM are recorded
-inline into the same validated event records. Changing user
-translations and fault handling retain the software path.
+inline into the same validated event records. User and explicit user-copy
+accesses use fresh inline page-table checks and native canonical-RAM loads/stores;
+faults and unsupported accesses retain the software handler. Logical syscall
+entry also runs inline while preserving event records and executing the captured
+kernel vector. Eligible UART register-buffer operations and output recording
+run inline with privilege, offset, width and capacity checks. ERET retains the
+shared emulator and code-mapping checks.
 Its separate system-model load plan establishes the page tables before EL0
 entry; no EL1 monitor services execution.
+
+The [native kernel-stack backend](el0-native-stack.md), selected with
+`--hardware-memory --native-kernel-stack`, restores actual kernel SP at context
+entry and uses a private stack for handlers. Ordinary kernel SP arithmetic and
+SP-relative memory operations retain their original instructions. User memory
+and logical user SP keep their existing checked paths. Its complete EL0 run
+matches the workload and reduces runtime instructions to 65,640,936, or
+21.5838 per original kernel operation. The 0.20 ceiling and 0.10 target remain
+unmet. Logical syscall entries now use the context gateway; all runtime code
+still executes at EL0 without EL1 services.
 
 ### Complete user/kernel checkpoint
 
@@ -157,7 +192,7 @@ The conservative static closure contains 5,020 kernel functions, the user execut
 - Execution reaches the original `kernel_power_off` boundary at `0x80008008eb30`, after **2,261,577** gateway transitions in this run.
 - The separate native observer sees exec entry and terminal exit only. The image's first host service is `exit(0)`; no signal handler, libc, runtime file loading, privileged monitor or physical MMIO is used.
 
-The identical ELF also passes QEMU Linux application mode on Cortex-A53: `build/el0-program-qemu-app-20261110a/validation.json`. Guest tracing records only `exit(0)`. Native exclusive-store retries can vary the gateway transition count slightly between runs while leaving the checked computation unchanged. Full-workload instruction counts have not yet been recorded; the historical figures below apply only to the retired umask fixture.
+The identical ELF also passes QEMU Linux application mode on Cortex-A53: `build/el0-program-qemu-app-20261110a/validation.json`. Guest tracing records only `exit(0)`. Native exclusive-store retries can vary the gateway transition count slightly between runs while leaving the checked computation unchanged. The preceding cached-target backend's [full-workload instruction measurement](el0-instruction-profile.md) records 27.1518 runtime/adaptation instructions per original kernel operation after adding cached indirect targets, down from 31.3153. The required ceiling is 0.20:1, with a 0.10:1 target; both remain unmet. The historical figures below apply only to the retired umask fixture.
 
 All initial nonzero state and input/validation data are linked into the roughly 92 MiB ELF. Canonical physical RAM has zero-backed storage for the complete captured bank, including initially empty pages that the kernel later allocates. The loader must zero ELF memory tails and provide normal RAM/FP/SIMD at EL0. Observe `flat_full_result` and stop at `flat_completed` before optional terminal exit; `load-plan.json`, generated after successful validation, reports load segments, initialization requirements and symbol addresses.
 
@@ -186,7 +221,7 @@ The coverage listing can be reproduced with `check_monitor_checkpoint.py --code-
 
 The retired direct-umask fixture recorded 459,949 instructions for its complete executable, including 303,492 across six execution intervals and 78 original kernel-island instructions. Its five-iteration counter sanity check recorded 20 instructions, including 15 loop instructions. These measurements cover a 60-byte function entered directly; they do not represent user-program continuation, syscall dispatch, the complete checkpoint, CPU cycles or original-kernel timing equivalence.
 
-The frozen report, interval counts and compressed trace remain in `build/el0-flat-app-counts-20261109d/`; the retired tooling is recoverable from commit `bf670da`. Current full-workload dynamic instruction counts and RTL/cycle validation remain pending.
+The frozen report, interval counts and compressed trace remain in `build/el0-flat-app-counts-20261109d/`; the retired tooling is recoverable from commit `bf670da`. Current full-workload dynamic instruction counts are recorded in [the hardware-memory measurement report](el0-instruction-profile.md); RTL/cycle validation remains pending.
 
 ## EL0 runtime progress
 

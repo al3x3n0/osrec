@@ -1,6 +1,6 @@
-/* EL0-only native execution edge. No OS, exceptions, TLS or privileged state.
- * Actual SP belongs to the private runtime stack. Guest SP is logical RAM
- * state: original SP consumers must be lowered before using this gateway. */
+/* EL0-only native execution edge. No OS, host exceptions, TLS or privileged
+ * state. Handlers use a private stack. Logical-stack blocks lower guest SP;
+ * native-kernel-stack blocks switch actual SP at the context edges. */
 #ifndef OSREC_FLAT_H
 #define OSREC_FLAT_H
 #include <stddef.h>
@@ -14,9 +14,9 @@ struct flat_frame {
     uint64_t padding;
 };
 struct flat_site {uint64_t pc;uint32_t word,kind;};
-/* A generated target thunk restores x16/x17 from the frame, pops 800 bytes of
- * private stack and branches to a statically linked native block. This avoids
- * losing a guest register to an indirect context-resume branch. */
+/* A generated target thunk restores x16/x17 and selects the block's logical
+ * or native stack before a static branch. No guest register is lost to the
+ * indirect context-resume branch. */
 typedef void (*flat_target)(void);
 typedef flat_target (*flat_handler)(void *,struct flat_frame *,const struct flat_site *);
 struct flat_control {

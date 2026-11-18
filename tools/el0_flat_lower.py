@@ -25,7 +25,7 @@ def local_conditional(word,to):
     if word&0xff000010==0x54000000:
         condition=('eq','ne','cs','cc','mi','pl','vs','vc','hi','ls','ge','lt','gt','le','al','nv')[word&15]
         return '    b.%s %s\n'%(condition,to)
-    register=('x' if word>>31 else 'w')+str(word&31)
+    register=('x' if word>>31 else 'w')+('zr' if word&31==31 else str(word&31))
     if word&0x7e000000==0x34000000:
         return '    %s %s,%s\n'%('cbnz' if word&(1<<24) else 'cbz',register,to)
     return '    %s %s,#%d,%s\n'%('tbnz' if word&(1<<24) else 'tbz',register,((word>>31)<<5)|(word>>19&31),to)

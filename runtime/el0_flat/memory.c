@@ -1,5 +1,39 @@
 #include "memory.h"
 #define MASK 0x0000fffffffff000ull
+static struct {
+    const struct flat_mapping *maps;size_t count;
+    uint64_t first,span;
+} kernel_index;
+int flat_memory_index_init(const struct flat_memory *m,const struct flat_mapping *immutable)
+{
+    kernel_index.maps=0;kernel_index.count=0;
+    if(!m || !immutable || m->kernel!=immutable || !m->kernel_count)return 0;
+    uint64_t end=0;
+    for(size_t i=0;i<m->kernel_count;i++) {
+        const struct flat_mapping *k=immutable+i;
+        if(!k->bytes || k->bytes>UINT64_MAX-k->va || (i && k->va<end))return 0;
+        end=k->va+k->bytes;
+    }
+    kernel_index.first=immutable[0].va;kernel_index.span=end-immutable[0].va;
+    kernel_index.maps=immutable;kernel_index.count=m->kernel_count;return 1;
+}
+static const struct flat_mapping *kernel_mapping(const struct flat_memory *m,uint64_t va)
+{
+    if(kernel_index.count && m->kernel==kernel_index.maps && m->kernel_count==kernel_index.count) {
+        /* This unsigned interval check rejects both sides of the ordered
+         * table without reading a descriptor, including ordinary user VAs. */
+        if(va-kernel_index.first>=kernel_index.span)return 0;
+        size_t lo=0,hi=kernel_index.count;
+        while(lo<hi){size_t mid=lo+(hi-lo)/2;if(kernel_index.maps[mid].va<=va)lo=mid+1;else hi=mid;}
+        if(lo){const struct flat_mapping *k=kernel_index.maps+lo-1;if(va-k->va<k->bytes)return k;}
+        return 0;
+    }
+    for(size_t i=0;i<m->kernel_count;i++) {
+        const struct flat_mapping *k=m->kernel+i;
+        if(va>=k->va && va-k->va<k->bytes)return k;
+    }
+    return 0;
+}
 void *flat_physical(const struct flat_memory *m,uint64_t pa,size_t bytes)
 {
     if(!m || (bytes && pa>UINT64_MAX-(bytes-1)))return 0;
@@ -10,7 +44,7 @@ void *flat_physical(const struct flat_memory *m,uint64_t pa,size_t bytes)
     return 0;
 }
 static uint64_t qword(const void *p)
-{const unsigned char *s=p;uint64_t v=0;for(unsigned i=0;i<8;i++)v|=(uint64_t)s[i]<<(8*i);return v;}
+{uint64_t v;__builtin_memcpy(&v,p,sizeof v);return v;}
 static unsigned permission(uint64_t d,enum flat_access op,int user,unsigned level)
 {
     if(!(d&(1ull<<10)))return 8+level;
@@ -22,9 +56,8 @@ static struct flat_translation page(const struct flat_memory *m,uint64_t va,size
 {
     struct flat_translation r={.far=va,.fault=FLAT_CROSS_PAGE};
     if(!m || !bytes || op>FLAT_EXECUTE || va>UINT64_MAX-(bytes-1) || (va&4095)+bytes>4096)return r;
-    for(size_t i=0;i<m->kernel_count;i++) {
-        const struct flat_mapping *k=m->kernel+i;
-        if(va<k->va || va-k->va>=k->bytes)continue;
+    const struct flat_mapping *k=kernel_mapping(m,va);
+    if(k) {
         if(bytes>k->bytes-(va-k->va))return r;
         r.attrs=k->attrs;r.pa=k->pa+va-k->va;
         r.fault=user?15:permission(r.attrs,op,0,3);

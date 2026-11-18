@@ -95,7 +95,7 @@ if(BUILD_TESTING)
   target_compile_options(object_lifetime_tests PRIVATE -Wall -Wextra -Werror)
   add_test(NAME object_lifetimes COMMAND object_lifetime_tests)
   find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
-  foreach(check IN ITEMS el0_application el0_image_audit el0_model el0_flat el0_hardware el0_lowered_branch el0_memory_finish el0_observe kernel_data_symbols kernel_excerpts)
+  foreach(check IN ITEMS el0_application el0_image_audit el0_model el0_runtime el0_flat el0_hardware el0_lowered_branch el0_memory_finish el0_observe el0_user_memory el0_user_exclusion el0_memory_elision el0_syscall el0_uart el0_indirect_cache el0_dispatch el0_control el0_arithmetic el0_instruction_profile el0_native_stack el0_pretranslate el0_call_analysis el0_runtime_hot el0_system_inputs el0_system_header el0_system_groups el0_return el0_production kernel_data_symbols kernel_excerpts)
     add_test(NAME ${check} COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_${check}.py)
     set_tests_properties(${check} PROPERTIES TIMEOUT 120)

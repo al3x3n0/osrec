@@ -12,6 +12,8 @@ def make_load_plan(checked):
     if checked.get('memory_backend')=='hardware-kernel':
         raise ValueError('hardware-memory executors require el0_hardware_model.py prepare and its hardware load plan')
     return dict(format='osrec-el0-program-load-v1',image='checkpoint',image_sha256=checked['image_sha256'],
+              runtime_validation=checked.get('runtime_validation',True),
+              verification_scope=checked.get('verification_scope','workload-results'),
               entry=checked['entry'],execution_level=0,load_segments=checked['load_segments'],
               initialization='Load ELF bytes at segment addresses and zero every memory tail.',
               requirements='Initial EL0 execution, normal RAM covering segment memory extents, FP/SIMD enabled.',
@@ -72,7 +74,7 @@ def run_qemu(image,out,docker_image='osrec-qemu-user:20261109',timeout=120):
     verified=not observed.returncode and len(calls)==1 and bool(re.fullmatch(r'\d+\s+exit\(0\)',calls[0]))
     report=dict(checked,verified=verified,full_checkpoint_executed=verified,qemu_mode='Linux user/application mode',
                 cpu='cortex-a53',guest_services=calls,cycles_measured=False,
-                observation='guest exit status after in-RAM verification; guest syscall trace',
+                observation='guest exit status after '+('in-RAM verification' if checked['runtime_validation'] else 'execution completion')+'; guest syscall trace',
                 seconds=round(time.monotonic()-started,3))
     (out/'validation.json').write_text(json.dumps(report,indent=2)+'\n')
     if not verified:raise ValueError('QEMU application execution failed: '+observed.stderr)

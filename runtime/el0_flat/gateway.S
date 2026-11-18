@@ -1,6 +1,8 @@
-/* Every instruction runs at EL0. Guest SP is virtual; actual SP is private.
+/* Every instruction runs at EL0. Handler SP is private. Generated blocks
+ * select logical user SP or native kernel SP at their context edges.
  * Only unprivileged NZCV/FPCR/FPSR system-register accesses occur here. */
-    .arch armv8-a
+#include "validation.h"
+    .arch armv8-a+simd
     .text
     .balign 4
     .global flat_enter
@@ -86,6 +88,54 @@ flat_capture_rest:
     b flat_restore
     .size flat_capture_rest,.-flat_capture_rest
 
+    /* x0 is the site descriptor. x0/x1, x16/x17 and actual guest SP have
+     * already been saved by flat_native_capture on the private stack. */
+    .global flat_native_capture_rest
+    .type flat_native_capture_rest,%function
+flat_native_capture_rest:
+    stp x2,x3,[sp,#16]
+    stp x4,x5,[sp,#32]
+    stp x6,x7,[sp,#48]
+    stp x8,x9,[sp,#64]
+    stp x10,x11,[sp,#80]
+    stp x12,x13,[sp,#96]
+    stp x14,x15,[sp,#112]
+    stp x18,x19,[sp,#144]
+    stp x20,x21,[sp,#160]
+    stp x22,x23,[sp,#176]
+    stp x24,x25,[sp,#192]
+    stp x26,x27,[sp,#208]
+    stp x28,x29,[sp,#224]
+    str x30,[sp,#240]
+    mrs x2,nzcv
+    str x2,[sp,#264]
+    stp q0,q1,[sp,#272]
+    stp q2,q3,[sp,#304]
+    stp q4,q5,[sp,#336]
+    stp q6,q7,[sp,#368]
+    stp q8,q9,[sp,#400]
+    stp q10,q11,[sp,#432]
+    stp q12,q13,[sp,#464]
+    stp q14,q15,[sp,#496]
+    stp q16,q17,[sp,#528]
+    stp q18,q19,[sp,#560]
+    stp q20,q21,[sp,#592]
+    stp q22,q23,[sp,#624]
+    stp q24,q25,[sp,#656]
+    stp q26,q27,[sp,#688]
+    stp q28,q29,[sp,#720]
+    stp q30,q31,[sp,#752]
+    mrs x2,fpsr
+    mrs x3,fpcr
+    str w2,[sp,#784]
+    str w3,[sp,#788]
+    mov x1,x0
+    mov x0,sp
+    bl flat_dispatch
+    cbz x0,flat_escape
+    b flat_restore
+    .size flat_native_capture_rest,.-flat_native_capture_rest
+
     .type flat_restore,%function
 flat_restore:
     mov x16,x0
@@ -152,4 +202,60 @@ flat_escape:
     add sp,sp,#192
     ret
     .size flat_escape,.-flat_escape
+
+#if OSREC_FLAT_VALIDATION
+    /* These helpers run only after complete guest SIMD capture. q0..q4 are
+     * AAPCS caller-saved; integer SIMD leaves NZCV, FPSR and FPCR unchanged. */
+    .global flat_copy_user_context
+    .type flat_copy_user_context,%function
+flat_copy_user_context:
+    .irp offset,0,32,64,96,128,160,192,224
+    ldp q0,q1,[x1,#\offset]
+    stp q0,q1,[x0,#\offset]
+    .endr
+    ldr x2,[x1,#256]
+    str x2,[x0,#256]
+    ret
+    .size flat_copy_user_context,.-flat_copy_user_context
+
+    .global flat_user_context_difference
+    .type flat_user_context_difference,%function
+flat_user_context_difference:
+    ldp q0,q1,[x0]
+    ldp q2,q3,[x1]
+    eor v0.16b,v0.16b,v2.16b
+    eor v1.16b,v1.16b,v3.16b
+    cbz w2,1f
+    mov v0.d[0],xzr
+1:  orr v0.16b,v0.16b,v1.16b
+    .irp offset,32,64,96,128,160,192,224
+    ldp q1,q2,[x0,#\offset]
+    ldp q3,q4,[x1,#\offset]
+    eor v1.16b,v1.16b,v3.16b
+    eor v2.16b,v2.16b,v4.16b
+    orr v0.16b,v0.16b,v1.16b
+    orr v0.16b,v0.16b,v2.16b
+    .endr
+    umaxv b0,v0.16b
+    umov w0,v0.b[0]
+    ret
+    .size flat_user_context_difference,.-flat_user_context_difference
+#endif
+    .bss
+    .balign 8
+    .weak flat_pc_indices
+flat_pc_indices:
+    .zero 24
+    .weak flat_native_stack_ranges
+flat_native_stack_ranges:
+    .zero 16
+    .weak flat_pretranslated_bindings
+flat_pretranslated_bindings:
+    .zero 32
+    .weak flat_pretranslated_checks
+flat_pretranslated_checks:
+    .zero 24
+    .weak flat_user_resume_ranges
+flat_user_resume_ranges:
+    .zero 16
     .section .note.GNU-stack,"",%progbits

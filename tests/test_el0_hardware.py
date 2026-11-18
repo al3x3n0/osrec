@@ -60,7 +60,7 @@ class Ranges(unittest.TestCase):
     def test_guarded_registers_keep_ordered_inputs_and_platform_writes(self):
         for key in (0xdf01,0xdf02):
             self.assertEqual(guarded_system_path(0,0xd5200000|(key<<5),0,'.Lnext'),'')
-        for key in (0xc100,0xc101,0xde83,0xc080):
+        for key in (0xc100,0xc101,0xc080):
             self.assertEqual(guarded_system_path(0,0xd5000000|(key<<5),0,'.Lnext'),'')
         self.assertEqual(guarded_system_path(0,0xd538d080,0x40000000,'.Lnext'),'')
 

@@ -15,6 +15,9 @@ enum flat_access {FLAT_READ,FLAT_WRITE,FLAT_EXECUTE};
 enum flat_memory_fault {FLAT_CROSS_PAGE=0x100,FLAT_MISSING_RAM,FLAT_ADDRESS_SIZE};
 struct flat_translation {unsigned char *data;uint64_t pa,attrs,far;unsigned fault;};
 void *flat_physical(const struct flat_memory *,uint64_t,size_t);
+/* Optional lookup for a linked immutable map array. Mutable or unadmitted
+ * arrays retain their original first-matching-entry scan. */
+int flat_memory_index_init(const struct flat_memory *,const struct flat_mapping *immutable);
 /* 4 KiB captured stage-1 tables, 25..48 bits, table AP/XN restrictions and AF.
  * Faults 1..63 are architectural FSCs. Address-size FSC zero uses the distinct
  * FLAT_ADDRESS_SIZE code; missing backing and cross-page operations are explicit

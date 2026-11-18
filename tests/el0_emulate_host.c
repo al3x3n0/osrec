@@ -11,6 +11,7 @@ _Static_assert(offsetof(struct osrec_context, sp) == 248, "assembly SP offset");
 _Static_assert(offsetof(struct osrec_context, pc) == 256, "assembly PC offset");
 _Static_assert(offsetof(struct osrec_context, pstate) == 264, "assembly PSTATE offset");
 _Static_assert(offsetof(struct osrec_shadow, known) == 104, "builder shadow header");
+_Static_assert(offsetof(struct osrec_shadow, value) == 8296, "veneer shadow value offset");
 _Static_assert(sizeof(struct osrec_site) == 16, "builder site stride");
 static struct osrec_shadow s;
 static struct osrec_context c;
@@ -44,6 +45,11 @@ static void sysregs(void)
     osrec_emulate_site(&s,&c,MSR(t1,0)); assert(ttbr1==0x1122);
     osrec_emulate_site(&s,&c,MRS(t1,1)); assert(c.x[1]==0x1122);
     osrec_emulate_site(&s,&c,MSR(KEY(3,3,13,0,3),0)); assert(tpidrro==0x1122);
+    unsigned tls=KEY(3,3,13,0,2);
+    s.known[tls>>3]|=1<<(tls&7);
+    c.x[2]=0x123456789abcdef0ull;
+    osrec_emulate_site(&s,&c,MSR(tls,2)); assert(s.value[tls]==c.x[2]);
+    osrec_emulate_site(&s,&c,MRS(tls,3)); assert(c.x[3]==c.x[2]);
     reset(); s.known[t1>>3]|=1<<(t1&7); s.value[t1]=0x12345000; c.x[0]=0x56789000;
     expect_stop(MSR(t1,0),OSREC_STOP_UNSUPPORTED);
     reset(); s.known[t1>>3]|=1<<(t1&7); s.value[t1]=0x12345000; c.x[0]=0xabcd000012345000ull;
@@ -84,6 +90,53 @@ static void exceptions(void)
     reset(); s.spsr=4; expect_stop(0xd69f03e0,OSREC_STOP_UNSUPPORTED);
     reset(); s.spsr=0x60001000; s.elr=0x4000; s.sp_el0=0x2000;
     osrec_emulate_site(&s,&c,0xd69f03e0); assert(c.pstate==0x60001000);
+}
+static void syscall_entries(void)
+{
+    static struct osrec_shadow before,expected;
+    const uint64_t pcs[]={0,4,0x1000,0x1001,UINT64_MAX-7,UINT64_MAX-3,UINT64_MAX};
+    const uint64_t extras[]={0,1ull<<12,1,0x3c0,1ull<<22,1ull<<63};
+    const uint32_t words[]={0xd4000001,0xd41fffe1,0xd4024681,0xd4000002,0xd4000000};
+    const int entries[]={OSREC_ENTRY_VENEER,OSREC_ENTRY_SVC,-1,2};
+    reset();s.known[123]=0xa5;s.value[123]=0x0123456789abcdefull;
+    for(unsigned flags=0;flags<16;flags++)for(unsigned extra=0;extra<6;extra++)
+    for(unsigned pc=0;pc<7;pc++)for(unsigned entry=0;entry<4;entry++)
+    for(unsigned word=0;word<5;word++)for(unsigned mode=0;mode<3;mode++) {
+        /* Only the architecture header can change; avoid copying the 512 KiB
+         * generic sysreg table for every boundary case. */
+        before.sp_el0=123;before.sp_el1=0x9000;before.elr=456;before.spsr=789;
+        before.esr=0x1234;before.far=0xfedcba9876543210ull;
+        before.daif=0x80;before.pan=1;before.vbar=0x800000;before.ttbr0=0x2345;
+        before.mode=mode;before.emulated=25;before.entries=flags&1?UINT64_MAX:10;
+        memcpy(&s,&before,104);memcpy(&expected,&before,104);
+        struct osrec_context original={0};
+        for(unsigned r=0;r<31;r++)original.x[r]=0x1020304050607080ull*(r+1);
+        original.pc=pcs[pc];original.sp=0x2000;original.pstate=((uint64_t)flags<<28)|extras[extra];
+        c=original;struct osrec_context result=original;
+        int valid=mode==OSREC_USER && !(original.pc&3) &&
+            !(original.pstate&~0xf0001000ull) && (words[word]&0xffe0001f)==0xd4000001 &&
+            ((entries[entry]==OSREC_ENTRY_VENEER && original.pc<=UINT64_MAX-4) ||
+             (entries[entry]==OSREC_ENTRY_SVC && original.pc>=4));
+        if(valid) {
+            expected.entries++;
+            expected.elr=original.pc+(entries[entry]==OSREC_ENTRY_VENEER?4:0);
+            expected.spsr=original.pstate;expected.sp_el0=original.sp;
+            expected.esr=0x56000000ull|((words[word]>>5)&65535);
+            expected.mode=OSREC_KERNEL;expected.daif=0x3c0;
+            result.pc=before.vbar+0x400;result.sp=before.sp_el1;
+        }
+        assert(osrec_enter_syscall(&s,&c,words[word],entries[entry])==valid);
+        assert(!memcmp(&s,&expected,104));assert(!memcmp(&c,&result,sizeof c));
+        assert(!osrec_enter_syscall(NULL,&c,words[word],entries[entry]));
+        assert(!osrec_enter_syscall(&s,NULL,words[word],entries[entry]));
+        assert(!memcmp(&s,&expected,104));assert(!memcmp(&c,&result,sizeof c));
+    }
+    assert(s.known[123]==0xa5 && s.value[123]==0x0123456789abcdefull);
+    reset();c.pstate=1;
+    memcpy(&before,&s,104);struct osrec_context original=c;
+    if(!setjmp(stopped)){osrec_enter_kernel(&s,&c,0x92000005,0x1234,1);assert(!"invalid user PSTATE must stop");}
+    assert(reason==OSREC_STOP_UNSUPPORTED && stop_pc==original.pc && detail==1 && stop_far==0x1234);
+    assert(!memcmp(&s,&before,104) && !memcmp(&c,&original,sizeof c));
 }
 static void operations(void)
 {
@@ -145,4 +198,4 @@ static void dispatch(void)
     if (!setjmp(stopped)) { osrec_handle_exception(&s,&c,0,0,0,0); assert(!"undefined instruction must stop"); }
     assert(reason==OSREC_STOP_UNDEFINED);
 }
-int main(void) { sysregs(); pstate(); exceptions(); operations(); lookup(); dispatch(); puts("EL0 emulation contracts passed"); }
+int main(void) { sysregs(); pstate(); exceptions(); syscall_entries(); operations(); lookup(); dispatch(); puts("EL0 emulation contracts passed"); }

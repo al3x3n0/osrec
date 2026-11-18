@@ -22,6 +22,8 @@ PAGE = 4096
 MONITOR_PA = 0x71000000
 MONITOR_VA = 0xffff8000f0000000
 MONITOR_SIZE = 16 << 20
+SHARED_MONITOR_VA = 1 << 40
+SHARED_RAM_VA = SHARED_MONITOR_VA + (1 << 30)
 TABLE_PA = 0x70000000
 STAGE = 0x78000000
 BRK_SITE = 0xd4200000 | (0xf00 << 5)
@@ -44,19 +46,23 @@ def instruction_ranges(image, sections):
     return sorted(ranges)
 
 
-def rewrite(insn):
+def rewrite(insn, dczid=None, *, shadow_tls=False):
     """Return (replacement, kind). An unrecognised trapped op is an explicit stop.
 
-    NZCV, FP and the user thread register retain their hardware meaning. Counter
+    NZCV and FP retain their hardware meaning. The user thread register can
+    be shadowed in kernel code when the veneers use the hardware slot. Counter
     reads retain the existing source-image clock limitation. Barriers and BTI are
     legal at EL0. All other system operations go through the shadow core.
     """
+    if dczid is not None and 0 <= dczid <= 0xffff and insn & 0xffffffe0 == 0xd53b00e0:
+        # DCZID_EL0 is read-only. Use the captured value, including the DZP bit.
+        return 0xd2800000 | (dczid << 5) | (insn & 31), 'inline sysreg'
     if insn in {0xd503211f, 0xd503215f, 0xd503219f, 0xd50321df,
                 0xd503233f, 0xd503237f, 0xd50323bf, 0xd50323ff, 0xd50320ff}:
         return NOP, 'pac-hint'
     if insn & 0xfff00000 in (0xd5300000, 0xd5100000):
         key = insn >> 5 & 0xffff
-        if key in {0xda10, 0xda20, 0xda21, 0xde82}:  # NZCV, FPCR, FPSR, TPIDR_EL0
+        if key in {0xda10, 0xda20, 0xda21} or (key == 0xde82 and not shadow_tls):
             return insn, None
         if insn & 0xfff00000 == 0xd5300000 and key in {0xdf01, 0xdf02}:
             return insn, None  # CNTPCT, CNTVCT
@@ -122,6 +128,15 @@ def shadow_image(cpu):
     return struct.pack('<13Q', *fields) + known + values, missing
 
 
+def site_page_index(sites):
+    if not sites:
+        return 0, [0]
+    addresses = [va for va, _, _ in sites]
+    base = addresses[0] & -PAGE
+    end = (addresses[-1] & -PAGE) + PAGE
+    return base, [bisect.bisect_left(addresses, page) for page in range(base, end + PAGE, PAGE)]
+
+
 def build(dump, vmlinux, profile_path, out, dwarf_db=None,lower_kernel=0,va_profile=None,dispatch='traps'):
     from source_image import Ram, text_ranges, boundary_extents, LLVM, ROOT, DTB, ATTRS, CONTIGUOUS, NT
     from kernel_boundary_replay import elf
@@ -137,6 +152,14 @@ def build(dump, vmlinux, profile_path, out, dwarf_db=None,lower_kernel=0,va_prof
         raise ValueError('captured user PSTATE needs unsupported architecture state')
     if (tcr >> 14 & 3) != 0 or (tcr >> 30 & 3) != 2:
         raise ValueError('the EL0 monitor requires 4 KiB granules')
+    from kernel_replay_tables import KERNEL_BASE, TCR_A1, TCR_EPD1, captured_roots
+    shared = bool(tcr & TCR_EPD1)
+    if shared:
+        if lower_kernel or tcr & TCR_A1:
+            raise ValueError('the shared root requires TTBR0 ASIDs and an already low-linked kernel')
+        _, guest_kernel_entry, _ = captured_roots(ram)
+    fast_sysregs = shared and dispatch == 'branches'
+    dczid = ram.state['cpu'].get('sysregs_all', {}).get('DCZID_EL0') if fast_sysregs else None
     out = Path(out).resolve()
     out.mkdir(parents=True, exist_ok=False)
     image, text = text_ranges(vmlinux)
@@ -151,8 +174,12 @@ def build(dump, vmlinux, profile_path, out, dwarf_db=None,lower_kernel=0,va_prof
     def boundary(va):
         i = bisect.bisect_right(starts, va) - 1
         return i >= 0 and va < cuts[i][1]
-    upper, _ = ram.mappings(1)
     user, _ = ram.mappings(0)
+    if shared:
+        upper = [leaf for leaf in user if leaf[0] >= KERNEL_BASE]
+        user = [leaf for leaf in user if leaf[0] < KERNEL_BASE]
+    else:
+        upper, _ = ram.mappings(1)
     devices = [(int(d['pa'], 16), int(d['pa'], 16) + int(d['size'], 16)) for d in profile.get('devices', [])]
     symbols = {s['name']: s['value'] for s in image.symbols if s['value']}
     lowering=None
@@ -163,7 +190,7 @@ def build(dump, vmlinux, profile_path, out, dwarf_db=None,lower_kernel=0,va_prof
         from va_lowering import plan
         lowering=plan(ram,image,json.loads(Path(va_profile).read_text()),load(dwarf_db),instructions)
     move=lowering['move'] if lowering else lambda va:va
-    monitor_va=MONITOR_VA&MASK48 if lowering else MONITOR_VA
+    monitor_va = SHARED_MONITOR_VA if shared else MONITOR_VA & MASK48 if lowering else MONITOR_VA
     table_window=0x8000e0000000
     init = symbols['__init_begin'], symbols['__init_end']
     blob = {}
@@ -171,7 +198,8 @@ def build(dump, vmlinux, profile_path, out, dwarf_db=None,lower_kernel=0,va_prof
     counts = collections.Counter()
     mapped = []
     actual_mapped=[]
-    root = Tables(ram.bits[1])
+    kernel_bits = ram.bits[0] if shared else ram.bits[1]
+    root = Tables(kernel_bits)
     for va, pa, d in upper:
         data = ram.page(pa)
         executable = any(lo <= va < hi for lo, hi in text)
@@ -189,7 +217,7 @@ def build(dump, vmlinux, profile_path, out, dwarf_db=None,lower_kernel=0,va_prof
                 if boundary(va + k):
                     replacement, kind = BRK_BOUNDARY, 'boundary'
                 else:
-                    replacement, kind = rewrite(original)
+                    replacement, kind = rewrite(original, dczid, shadow_tls=fast_sysregs)
                     if lowering and va+k in lowering['code']:
                         replacement=lowering['code'][va+k];kind='lowered code'
                 if kind:
@@ -213,6 +241,7 @@ def build(dump, vmlinux, profile_path, out, dwarf_db=None,lower_kernel=0,va_prof
         mapped.append(dict(va=hex(move(va)),original_va=hex(va),pa=hex(pa),kind=kind))
     calls=[]
     call_base=call_size=0
+    percpu_offset = None
     if dispatch=='branches':
         from source_image_calls import analyse_sites,choose_base,assembly,BRANCH_PA
         original_pages={va:pa for va,pa,_ in upper}
@@ -224,19 +253,24 @@ def build(dump, vmlinux, profile_path, out, dwarf_db=None,lower_kernel=0,va_prof
             def __getitem__(self,pc):
                 if pc not in self:raise KeyError(pc)
                 return struct.unpack_from('<I',ram.ram,original_pages[pc&~4095]-ram.base+(pc&4095))[0]
-        calls=analyse_sites(sites,OriginalWords(),lambda pc:originals[pc&~4095]+(pc&4095))
+        calls=analyse_sites(sites, OriginalWords(), lambda pc: originals[pc&~4095]+(pc&4095),
+                            percpu=fast_sysregs and 'TPIDR_EL1' in ram.sysregs, tls_spill=fast_sysregs)
         if calls:
+            percpu_offset = next((v.offset for v in calls if v.kind == 'percpu'), None)
+            alias_bytes = (3 if percpu_offset is not None else 2)*PAGE
             call_base,call_size=choose_base(actual_mapped+user,calls,calls[0].pc)
             call_alias=call_base+((call_size+4095)&~4095)
+            if shared and not KERNEL_BASE <= call_base < call_alias + alias_bytes <= SHARED_MONITOR_VA:
+                raise ValueError('shared-root veneers must fit in the kernel window')
             (out/'calls.S').write_text(assembly(calls))
             (out/'calls.json').write_text(json.dumps([v.report() for v in calls],indent=1)+'\n')
             attrs=(1<<6)|(1<<10)|(3<<8)|(1<<53)
             for k in range(0,(call_size+4095)&~4095,PAGE):
                 root.map(call_base+k,BRANCH_PA+k,attrs)
                 actual_mapped.append((call_base+k,BRANCH_PA+k,attrs))
-            # Reserve two alias pages before the monitor link determines the
+            # Reserve the alias pages before the monitor link determines the
             # physical shadow address. The range list needs their VAs now.
-            for k in range(0,2*PAGE,PAGE):
+            for k in range(0,alias_bytes,PAGE):
                 a=(1<<6)|(1<<10)|(3<<8)|(1<<53)|(1<<54)
                 root.map(call_alias+k,MONITOR_PA+k,a)
                 actual_mapped.append((call_alias+k,MONITOR_PA+k,a))
@@ -251,9 +285,10 @@ def build(dump, vmlinux, profile_path, out, dwarf_db=None,lower_kernel=0,va_prof
             page=pa&~4095;b=bytearray(blob.get(page,bytes(PAGE)))
             struct.pack_into('<Q',b,pa&4095,new);blob[page]=bytes(b)
     monitor_attrs = (1 << 54) | (1 << 10) | (3 << 8)
-    for k in range(0, MONITOR_SIZE, PAGE):
-        root.map(monitor_va + k, MONITOR_PA + k, monitor_attrs)
-        actual_mapped.append((monitor_va+k,MONITOR_PA+k,monitor_attrs))
+    if not shared:
+        for k in range(0, MONITOR_SIZE, PAGE):
+            root.map(monitor_va + k, MONITOR_PA + k, monitor_attrs)
+            actual_mapped.append((monitor_va+k,MONITOR_PA+k,monitor_attrs))
     if lowering:
         for k in range(0,MONITOR_PA-TABLE_PA,PAGE):
             root.map(table_window+k,TABLE_PA+k,monitor_attrs)
@@ -264,12 +299,13 @@ def build(dump, vmlinux, profile_path, out, dwarf_db=None,lower_kernel=0,va_prof
             va,pa=lowering['veneer_va']+k,lowering['veneer_pa']+k
             root.map(va,pa,attrs);blob[pa]=data[k:k+PAGE]
             actual_mapped.append((va,pa,attrs))
-    native_upper=Tables(ram.bits[1],root.next)
+    native_upper=Tables(kernel_bits,root.next)
     mapped_vas={int(m['original_va'],16) for m in mapped}
     for va,pa,d in upper:
         if va in mapped_vas:native_upper.map(move(va),pa,d&ATTRS&~CONTIGUOUS&~NT)
-    for k in range(0,MONITOR_SIZE,PAGE):
-        native_upper.map(monitor_va+k,MONITOR_PA+k,monitor_attrs)
+    if not shared:
+        for k in range(0, MONITOR_SIZE, PAGE):
+            native_upper.map(monitor_va+k,MONITOR_PA+k,monitor_attrs)
     if lowering:
         for va,pa,attrs in actual_mapped:
             if table_window<=va<table_window+(MONITOR_PA-TABLE_PA):native_upper.map(va,pa,attrs)
@@ -278,11 +314,16 @@ def build(dump, vmlinux, profile_path, out, dwarf_db=None,lower_kernel=0,va_prof
     if calls:
         for k in range(0,(call_size+4095)&~4095,PAGE):
             native_upper.map(call_base+k,BRANCH_PA+k,(1<<10)|(3<<8)|(1<<53)|(1<<54))
-        for k in range(0,2*PAGE,PAGE):
+        for k in range(0,alias_bytes,PAGE):
             native_upper.map(call_alias+k,MONITOR_PA+k,(1<<10)|(3<<8)|(1<<53)|(1<<54))
     identity = Tables(ram.bits[0], native_upper.next)
     for k in range(0, MONITOR_SIZE, PAGE):
         identity.map(MONITOR_PA + k, MONITOR_PA + k, monitor_attrs & ~(1 << 54))
+        if shared:
+            identity.map(monitor_va + k, MONITOR_PA + k, monitor_attrs)
+    if shared:
+        for k in range(0, ram.size, PAGE):
+            identity.map(SHARED_RAM_VA + k, ram.base + k, monitor_attrs | (1 << 53))
     if lowering:
         for va,pa,attrs in actual_mapped:identity.map(va,pa,attrs)
 
@@ -296,6 +337,14 @@ def build(dump, vmlinux, profile_path, out, dwarf_db=None,lower_kernel=0,va_prof
             recovered.update(lowering['cpu']['sysregs_all']);lowering['cpu']['sysregs_all']=recovered
     cpu=lowering['cpu'] if lowering else ram.state['cpu']
     shadow, missing = shadow_image(cpu)
+    if fast_sysregs:
+        from source_image_calls import TPIDR_EL0, TPIDR_EL1
+        required = [('TPIDR_EL0', TPIDR_EL0)]
+        if percpu_offset is not None:
+            required.append(('TPIDR_EL1', TPIDR_EL1))
+        for name, key in required:
+            if not shadow[13*8 + (key >> 3)] & (1 << (key & 7)):
+                raise ValueError(f'shared-root branch dispatch requires a captured {name} value')
     (out / 'shadow.bin').write_bytes(shadow)
     sites.sort()
     (out / 'sites.bin').write_bytes(b''.join(struct.pack('<QII', *site) for site in sites))
@@ -311,7 +360,7 @@ def build(dump, vmlinux, profile_path, out, dwarf_db=None,lower_kernel=0,va_prof
     # No hardware PAN, pointer signing, WXN or EL0 trap of counter/cache access.
     sctlr = sr['SCTLR'] & ~((1 << 19) | (1 << 31) | (1 << 30) | (1 << 27) | (1 << 13))
     actual_tcr=tcr|(1<<23) if lowering else tcr
-    actual_ttbr1=sr['TTBR1_EL1']&0xffff000000000000 if lowering else root.root
+    actual_ttbr1 = 0 if shared else sr['TTBR1_EL1'] & 0xffff000000000000 if lowering else root.root
     data += quad([sr['MAIR_EL1'], actual_tcr, actual_ttbr1, identity.root, sr['CPACR'], sr['CNTKCTL'] | 3,
                   sctlr, 'minios_vectors', 'osrec_monitor_stack_top', 'minios_main'])
     for name, body in [('staged_count', quad([len(staged)])),
@@ -334,6 +383,21 @@ def build(dump, vmlinux, profile_path, out, dwarf_db=None,lower_kernel=0,va_prof
                             ('osrec_veneer_count',[len(lowering['origins'])]),
                             ('osrec_veneer_origins',lowering['origins'])]:
             data+='\n.balign 16\n.global %s\n%s:\n%s'%(name,name,quad(values))
+    if shared:
+        user_kernel_entry = struct.unpack_from('<Q', native_upper.pages[native_upper.root], 8)[0]
+        el0_kernel_entry = struct.unpack_from('<Q', root.pages[root.root], 8)[0]
+        monitor_entry = struct.unpack_from('<Q', identity.pages[identity.root], 16)[0]
+        for name, values in [('osrec_shared_ram_pa', [ram.base]), ('osrec_shared_ram_size', [ram.size]),
+                             ('osrec_shared_ram_va', [SHARED_RAM_VA]), ('osrec_shared_monitor_pa', [MONITOR_PA]),
+                             ('osrec_shared_monitor_va', [monitor_va]), ('osrec_shared_monitor', [monitor_entry]),
+                             ('osrec_shared_guest_kernel', [guest_kernel_entry]),
+                             ('osrec_shared_kernel', [user_kernel_entry, el0_kernel_entry])]:
+            data += '.balign 8\n.global %s\n%s:\n%s' % (name, name, quad(values))
+        site_base, offsets = site_page_index(sites)
+        data += '.balign 8\n.global osrec_site_base, osrec_site_pages, osrec_site_offsets\n'
+        data += 'osrec_site_base:\n' + quad([site_base])
+        data += 'osrec_site_pages:\n' + quad([len(offsets) - 1])
+        data += 'osrec_site_offsets:\n' + ''.join('    .long %d\n' % i for i in offsets)
     data += '.section .bss,"aw",@nobits\n.balign 4096\n.space 65536\n.global osrec_monitor_stack_top\nosrec_monitor_stack_top:\n'
     (out / 'data.S').write_text(data)
     (out / 'monitor.ld').write_text('ENTRY(_start)\nSECTIONS { . = 0x%x; .text : { *(.text.boot) *(.text*) } .rodata : { *(.rodata*) } .data : { *(.data*) } .bss : { *(.bss*) *(COMMON) } osrec_monitor_end = .; }\n' % monitor_va)
@@ -343,6 +407,8 @@ def build(dump, vmlinux, profile_path, out, dwarf_db=None,lower_kernel=0,va_prof
                '-Wl,-T,' + str(out / 'monitor.ld'), '-Wl,--build-id=none',
                str(runtime / 'minios.S'), str(runtime / 'minios.c'), str(runtime / 'emulate.c'), str(out / 'data.S'), '-o', str(out / 'monitor.elf')]
     if lowering:command.extend(['-DOSREC_LOWERED',str(runtime/'lower.c'),str(runtime/'lower_mmu.c')])
+    if shared:command.extend(['-DOSREC_SHARED_ROOT',str(runtime/'shared_mmu.c')])
+    if fast_sysregs:command.append('-DOSREC_BRANCH_TLS')
     subprocess.run(command, check=True)
     from kernel_source_verify import Elf
     monitor = Elf(out / 'monitor.elf')
@@ -355,6 +421,10 @@ def build(dump, vmlinux, profile_path, out, dwarf_db=None,lower_kernel=0,va_prof
             raise ValueError('branch spill area must immediately precede shadow state')
         script='ENTRY(osrec_call_0)\nSECTIONS { . = 0x%x; .text : { *(.text*) } /DISCARD/ : { *(.comment) *(.note*) } }\n'%call_base
         script+='osrec_branch_state = 0x%x;\n'%(call_alias+(ms['osrec_branch_state']&4095))
+        if percpu_offset is not None:
+            percpu_value = ms['osrec_shadow'] + percpu_offset
+            percpu_alias = call_alias + 2*PAGE
+            script += 'osrec_branch_tpidr = 0x%x;\n' % (percpu_alias + (percpu_value & (PAGE-1)))
         script+=''.join('osrec_call_return_%d = 0x%x;\n'%(i,v.pc+4) for i,v in enumerate(calls))
         (out/'calls.ld').write_text(script)
         subprocess.run([str(LLVM/'clang'),'--target=aarch64-none-elf','-mcpu=cortex-a53','-nostdlib',
@@ -379,6 +449,11 @@ def build(dump, vmlinux, profile_path, out, dwarf_db=None,lower_kernel=0,va_prof
             root.map(call_alias+k,shadow_page+k,attrs)
             native_upper.map(call_alias+k,shadow_page+k,(attrs&~(1<<6)))
             if lowering:identity.map(call_alias+k,shadow_page+k,attrs)
+        if percpu_offset is not None:
+            physical = MONITOR_PA + (percpu_value & -PAGE) - monitor_va
+            read_only = monitor_attrs | (1 << 7) | (1 << 53)
+            root.map(percpu_alias, physical, read_only | (1 << 6))
+            native_upper.map(percpu_alias, physical, read_only)
     subprocess.run([str(LLVM / 'llvm-objcopy'), '-O', 'binary', str(out / 'monitor.elf'), str(out / 'monitor.bin')], check=True)
     code = (out / 'monitor.bin').read_bytes()
     code += bytes(-len(code) % PAGE)
@@ -398,7 +473,7 @@ def build(dump, vmlinux, profile_path, out, dwarf_db=None,lower_kernel=0,va_prof
         run.extend(data)
     if run:
         segments.append((address, bytes(run)))
-    (out / 'image.elf').write_bytes(elf(segments, MONITOR_PA))
+    checkpoint = elf(segments, MONITOR_PA)
     manifest = dict(format='osrec-source-image-v1', execution='el0-minios',
                     ram=ram.state['ram'],
                     dump=str(Path(dump).resolve()), vmlinux=str(Path(vmlinux).resolve()), profile=str(Path(profile_path).resolve()),
@@ -408,14 +483,20 @@ def build(dump, vmlinux, profile_path, out, dwarf_db=None,lower_kernel=0,va_prof
                     shadow_pa=hex(ms['osrec_shadow'] - monitor_va + MONITOR_PA),
                     context_pointer_pa=hex(ms['osrec_active_context'] - monitor_va + MONITOR_PA),
                     monitor_va=hex(monitor_va),monitor_pa=hex(MONITOR_PA),
-                    lowered=lowering['summary'] if lowering else None,
+                    lowered=lowering['summary'] if lowering else None, shared_root=shared,
                     dispatch=dispatch, branch_sites=len(calls),
+                    inline_system_reads={'DCZID_EL0': dczid} if counts['inline sysreg'] else {},
+                    kernel_tls_shadow=fast_sysregs,
                     branch_veneers=dict(va=hex(call_base),pa=hex(BRANCH_PA),size=call_size,
                                         state_va=hex(call_alias+(ms['osrec_branch_state']&4095))) if calls else None,
                     kernel_shift='0x1000000000000' if lowering else '0x0',
                     vector_base=hex(sr['VBAR']), pages=mapped, uncaptured_sysreg_names=missing,
-                    boundary_functions=[n for _, _, n in cuts],
-                    image_sha256=hashlib.sha256((out / 'image.elf').read_bytes()).hexdigest())
+                    boundary_functions=[n for _, _, n in cuts])
+    if shared:
+        from source_image_symbols import symbolize
+        checkpoint, manifest['symbols'] = symbolize(out, checkpoint, manifest, kernel=image, monitor=monitor)
+    (out / 'image.elf').write_bytes(checkpoint)
+    manifest['image_sha256'] = hashlib.sha256(checkpoint).hexdigest()
     (out / 'manifest.json').write_text(json.dumps(manifest, indent=1) + '\n')
     return {k: manifest[k] for k in ('execution', 'rewrite', 'site_count', 'table_pages', 'stop')}
 
@@ -441,6 +522,7 @@ def relink(image_dir,out):
              '-Wl,-T,'+str(out/'monitor.ld'),'-Wl,--build-id=none',str(runtime/'minios.S'),str(runtime/'minios.c'),
              str(runtime/'emulate.c'),str(out/'data.S'),'-o',str(out/'monitor.elf')]
     if m.get('lowered'):command+=['-DOSREC_LOWERED',str(runtime/'lower.c'),str(runtime/'lower_mmu.c')]
+    if m.get('shared_root'):command+=['-DOSREC_SHARED_ROOT',str(runtime/'shared_mmu.c')]
     subprocess.run(command,check=True)
     monitor=Elf(out/'monitor.elf');symbols={s['name']:s['value'] for s in monitor.symbols}
     monitor_va=int(m['monitor_va'],16)
@@ -453,10 +535,14 @@ def relink(image_dir,out):
         if kind==1 and not MONITOR_PA<=pa<MONITOR_PA+MONITOR_SIZE:segments.append((pa,raw[offset:offset+size]))
     code=(out/'monitor.bin').read_bytes();code+=bytes(-len(code)%PAGE)
     segments.append((MONITOR_PA,code));segments.sort()
-    (out/'image.elf').write_bytes(elf(segments,MONITOR_PA))
+    checkpoint = elf(segments, MONITOR_PA)
+    if m.get('shared_root'):
+        from source_image_symbols import symbolize
+        checkpoint, m['symbols'] = symbolize(out, checkpoint, m, monitor=monitor)
+    (out/'image.elf').write_bytes(checkpoint)
     m.update(stop=hex(symbols['osrec_stopped']),shadow_pa=hex(symbols['osrec_shadow']-monitor_va+MONITOR_PA),
              context_pointer_pa=hex(symbols['osrec_active_context']-monitor_va+MONITOR_PA),relinked_from=str(image_dir),
-             image_sha256=hashlib.sha256((out/'image.elf').read_bytes()).hexdigest())
+             image_sha256=hashlib.sha256(checkpoint).hexdigest())
     (out/'manifest.json').write_text(json.dumps(m,indent=1)+'\n')
     return dict(stop=m['stop'],relinked_from=str(image_dir))
 

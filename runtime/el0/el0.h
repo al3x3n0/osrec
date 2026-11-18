@@ -12,6 +12,7 @@
 
 #define OSREC_BRK_SITE 0xF00u      /* an emulated instruction site */
 #define OSREC_BRK_BOUNDARY 0xF01u  /* a word of a boundary function (explicit stop) */
+#define OSREC_TPIDR_EL0_KEY 0xde82u
 
 /* The interrupted EL0 context, as a runtime saves it (layout shared with the assembly). */
 struct osrec_context {
@@ -85,6 +86,9 @@ int osrec_lowered_address(uint64_t va);
 void osrec_lowered_site(struct osrec_shadow *s, struct osrec_context *c, const struct osrec_site *site);
 void osrec_lowered_exception(struct osrec_shadow *s, struct osrec_context *c, uint64_t esr, uint64_t far);
 void osrec_lowered_mmu(int force);
+#endif
+#ifdef OSREC_SHARED_ROOT
+void osrec_shared_mmu(int force);
 #endif
 
 #endif

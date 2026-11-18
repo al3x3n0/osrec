@@ -43,7 +43,7 @@ CONTIGUOUS=1<<52;NT=1<<16
 class Ram:
     """A RAM dump and the live EL1&0 translation tables in it."""
     def __init__(self,dump):
-        self.state=json.load(open(Path(dump)/'state.json'));self.base=self.state['ram']['base'];self.size=self.state['ram']['size']
+        self.state=json.loads((Path(dump)/'state.json').read_text());self.base=self.state['ram']['base'];self.size=self.state['ram']['size']
         self.file=open(Path(dump)/'ram.bin','rb');self.ram=mmap.mmap(self.file.fileno(),0,access=mmap.ACCESS_READ)
         sr=self.state['cpu']['sysregs'];self.sysregs=sr;tcr=sr['TCR_EL1']
         self.bits={1:64-((tcr>>16)&0x3f),0:64-(tcr&0x3f)}
@@ -325,7 +325,7 @@ def svc_entry(r):
     return dict(number=g['x8'],arguments=[g['x%d'%i] for i in range(6)],regs=r.register('sp')-PT_REGS_OFFSET)
 
 
-def record(r,svc_vector,stop,limit,timeout,symbols=None,counters=None,result_at=None,pending=None,shadow_pa=None,memory=False,context_pointer_pa=None,monitor_offset=0,memory_ram=None,progress=None,clock_sites=None,clock_events=None,mmio_sites=None,mmio_ranges=(),mmio_events=None):
+def record(r,svc_vector,stop,limit,timeout,symbols=None,counters=None,result_at=None,pending=None,shadow_pa=None,memory=False,context_pointer_pa=None,monitor_offset=0,memory_ram=None,progress=None,clock_sites=None,clock_events=None,mmio_sites=None,mmio_ranges=(),mmio_events=None,shared_root=False,callstacks=None):
     """Syscalls and user exceptions from the current point and how the run ended.
 
     A call is taken at the SVC vector; its result is read from pt_regs.regs[0] at `result_at`, before any signal
@@ -339,6 +339,10 @@ def record(r,svc_vector,stop,limit,timeout,symbols=None,counters=None,result_at=
     mmio_sites=mmio_sites or {};mmio_enabled=False
     for a in clock_sites:r.breakpoint(a)
     if stop is not None:r.breakpoint(stop)
+    if callstacks:
+        observed = {svc_vector, result_at, stop, *counters.values(), *clock_sites, *mmio_sites}
+        for address in callstacks.locations.keys() - observed:
+            r.breakpoint(address)
     end=None;spurious=0;spurious_pcs=[]
     def exception_state():
         if shadow_pa is None:return r.registers(['ESR_EL1','FAR_EL1','ELR_EL1'])
@@ -357,6 +361,7 @@ def record(r,svc_vector,stop,limit,timeout,symbols=None,counters=None,result_at=
         finally:physical(r,False)
     if memory:
         from source_image_memory import snapshot
+        from kernel_replay_tables import KERNEL_BASE, TCR_EPD1
         memory_tcr=r.register('TCR_EL1') if pending else None
         if pending:pending['_memory_root']=memory_root()
     def step_over(pc):r.breakpoint(pc,False);r.step();r.breakpoint(pc);r.resume()
@@ -366,6 +371,8 @@ def record(r,svc_vector,stop,limit,timeout,symbols=None,counters=None,result_at=
         try:pc=r.wait(timeout)
         except Exited:end=dict(reason='exited');break
         except Exception as error:end=dict(reason='timeout',detail=str(error));break
+        if callstacks and callstacks.enabled(pc):
+            callstacks.capture(r, pc)
         if stop is not None and pc==stop:
             g=r.registers(['x0','x1','x2','x3'])
             if shadow_pa is not None:
@@ -397,13 +404,10 @@ def record(r,svc_vector,stop,limit,timeout,symbols=None,counters=None,result_at=
                     finally:physical(r,False)
                 elif shadow_pa is not None:frames=[];fp=0
                 else:frames=[r.register('x30')];fp=r.register('x29')
-                for _ in range(32):
-                    if fp>>48!=0xffff:break
-                    try:record_=r.read(fp,16)
-                    except Exception:break
-                    fp,lr=int.from_bytes(record_[:8],'little'),int.from_bytes(record_[8:],'little')
-                    if not lr:break
-                    frames.append(lr)
+                from source_image_trace import frame_links
+                from kernel_replay_tables import KERNEL_BASE
+                stack_address = (lambda va: KERNEL_BASE <= va < 2*KERNEL_BASE) if shared_root else (lambda va: va >> 48 == 0xffff)
+                frames.extend(frame_links(r, fp, stack_address))
                 end['backtrace']=[symbols(f&((1<<64)-1 if f>>48==0xffff else 0) or f) for f in frames]
             break
         hit=next((n for n,a in counters.items() if a==pc),None)
@@ -441,10 +445,19 @@ def record(r,svc_vector,stop,limit,timeout,symbols=None,counters=None,result_at=
         if pc==result_at:
             if pending:
                 pending['result']=int.from_bytes(r.read(pending.pop('regs'),8),'little')
-                if memory:pending['memory']=snapshot(r,pending.pop('_memory_root'),memory_tcr,memory_ram)
+                if memory:
+                    user_va_limit = KERNEL_BASE if memory_tcr & TCR_EPD1 and (memory_tcr & 63) == 17 else None
+                    pending['memory']=snapshot(r,pending.pop('_memory_root'),memory_tcr,memory_ram,user_va_limit)
                 calls.append(pending);pending=None
                 if progress and len(calls)%100==0:progress(len(calls))
             step_over(pc);continue
+        if callstacks and pc in callstacks.locations:
+            r.breakpoint(pc, False)
+            r.step()
+            if callstacks.enabled(pc):
+                r.breakpoint(pc)
+            r.resume()
+            continue
         # A stop at a user address with no breakpoint there (the gdbstub can report a just-removed breakpoint again
         # around an interrupt on the live machine): counted, stepped past and resumed.
         if pc>>48==0:
@@ -461,7 +474,7 @@ def record(r,svc_vector,stop,limit,timeout,symbols=None,counters=None,result_at=
     return calls,end
 
 
-def run_image(image_dir,out,limit,timeout,count=(),memory=False,clock_package=None):
+def run_image(image_dir,out,limit,timeout,count=(),memory=False,clock_package=None,trace=(),trace_limit=32):
     image_dir=Path(image_dir).resolve();out=Path(out);out.mkdir(parents=True,exist_ok=False)
     m=json.load(open(image_dir/'manifest.json'));port=free_port()
     e=Elf(m['vmlinux']);kernel_base=next(s['value'] for s in e.symbols if s['name']=='_text')
@@ -473,6 +486,10 @@ def run_image(image_dir,out,limit,timeout,count=(),memory=False,clock_package=No
         a=(a-kshift)&((1<<64)-1)
         i=bisect.bisect_right(starts,a)-1;return '%s+0x%x'%(syms[i][1],a-syms[i][0]) if i>=0 else hex(a)
     el0=m.get('execution')=='el0-minios'
+    callstacks = None
+    if trace:
+        from source_image_trace import Callstacks
+        callstacks = Callstacks(image_dir/'image.elf', m, trace, trace_limit)
     clock_sites={};clock_events=[];mmio_sites={};mmio_events=[];mmio_ranges=[]
     if clock_package:
         cp=Path(clock_package)
@@ -504,13 +521,17 @@ def run_image(image_dir,out,limit,timeout,count=(),memory=False,clock_package=No
                              memory_ram=(m.get('ram',{}).get('base',0x40000000),m.get('ram',{}).get('base',0x40000000)+m.get('ram',{}).get('size',512<<20)),
                              progress=lambda n:(out/'progress.json').write_text(json.dumps(dict(events=n,seconds=round(time.time()-start,2)))+'\n'),
                              clock_sites=clock_sites,clock_events=clock_events,
-                             mmio_sites=mmio_sites,mmio_ranges=mmio_ranges,mmio_events=mmio_events)
+                             mmio_sites=mmio_sites,mmio_ranges=mmio_ranges,mmio_events=mmio_events,
+                             shared_root=m.get('shared_root', False),callstacks=callstacks)
             if end.get('function'):
                 cut=next((label for label,pattern in json.load(open(m['profile']))['boundaries'].items() if re.fullmatch(pattern,end['function'].split('+')[0])),None)
                 end['boundary']=cut
         finally:
             p.terminate();p.wait()
     report=dict(kind='image',image=str(image_dir),source_image_sha256=m['image_sha256'],calls=calls,end=end,seconds=round(time.time()-start,2))
+    if callstacks:
+        (out/'callstacks.json').write_text(json.dumps(callstacks.samples, indent=2) + '\n')
+        report['callstack_samples'] = len(callstacks.samples)
     if clock_package:
         (out/'counters.bin').write_bytes(b''.join(struct.pack('<3Q',*v) for v in clock_events))
         report['counter_reads']=len(clock_events)
@@ -589,6 +610,8 @@ def main():
     r=sub.add_parser('run');r.add_argument('--image',required=True);r.add_argument('--out',required=True)
     r.add_argument('--limit',type=int,default=10000);r.add_argument('--timeout',type=int,default=120)
     r.add_argument('--count',action='append',default=[],help='kernel function whose entries are counted (e.g. __switch_to)')
+    r.add_argument('--trace', action='append', default=[], help='record kernel callstacks at a checkpoint code symbol')
+    r.add_argument('--trace-limit', type=int, default=32, help='maximum callstack samples per breakpoint address')
     r.add_argument('--memory',action='store_true',help='hash every accessible user page after each syscall')
     r.add_argument('--native-counters',help='matching native package: record ordered architecture counter inputs')
     n=sub.add_parser('native');n.add_argument('--checkpoint',required=True);n.add_argument('--contract',default=str(ROOT/'integrations/linux_aarch64/svc-boundary.json'))
@@ -606,7 +629,7 @@ def main():
             print(json.dumps(build_el0(a.dump,a.vmlinux,a.profile,a.out,a.dwarf_db,a.lower_kernel,a.va_profile,a.el0_dispatch)))
         else:print(json.dumps(build(a.dump,a.vmlinux,a.profile,a.closure,a.out,a.state,a.relocate,a.dwarf_db,a.relocate_linear,a.va_profile,a.shift_kernel,a.lower_kernel)))
     elif a.command=='run':
-        rep=run_image(a.image,a.out,a.limit,a.timeout,a.count,a.memory,a.native_counters);print(json.dumps(dict(calls=len(rep['calls']),end=rep['end'],counter_reads=rep.get('counter_reads'))))
+        rep=run_image(a.image,a.out,a.limit,a.timeout,a.count,a.memory,a.native_counters,a.trace,a.trace_limit);print(json.dumps(dict(calls=len(rep['calls']),end=rep['end'],counter_reads=rep.get('counter_reads'),callstack_samples=rep.get('callstack_samples',0))))
     elif a.command=='native':
         select={k:int(v,0) for k,_,v in (x.partition('=') for x in a.select)}
         rep=run_native(a.checkpoint,a.contract,select,a.occurrence,a.out,a.limit,a.timeout,a.vmlinux,a.memory);print(json.dumps(dict(calls=len(rep['calls']),end=rep['end'])))

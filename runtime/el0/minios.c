@@ -16,7 +16,7 @@ extern const uint64_t osrec_ttbr1_root;  /* our TTBR1 tables (physical) */
 extern const uint64_t osrec_ttbr1_user_root; /* original upper-half EL0 permissions */
 struct osrec_context *osrec_active_context; /* saved kernel frame for stop diagnostics */
 
-#ifndef OSREC_LOWERED
+#if !defined(OSREC_LOWERED) && !defined(OSREC_SHARED_ROOT)
 static uint64_t upper_root(void)
 {
     return osrec_shadow.mode == OSREC_KERNEL ? osrec_ttbr1_root : osrec_ttbr1_user_root;
@@ -27,6 +27,8 @@ static void apply_mode(int force)
 {
 #ifdef OSREC_LOWERED
     osrec_lowered_mmu(force);
+#elif defined(OSREC_SHARED_ROOT)
+    osrec_shared_mmu(force);
 #else
     (void)force;
     uint64_t old;
@@ -42,6 +44,8 @@ static void apply_mode(int force)
 void osrec_platform_set_ttbr0(uint64_t v) {
 #ifdef OSREC_LOWERED
     (void)v;osrec_lowered_mmu(1);
+#elif defined(OSREC_SHARED_ROOT)
+    (void)v;osrec_shared_mmu(1);
 #else
     __asm__ volatile("msr ttbr0_el1, %0\n\tisb" :: "r"(v) : "memory");
 #endif
@@ -49,7 +53,7 @@ void osrec_platform_set_ttbr0(uint64_t v) {
 void osrec_platform_set_ttbr1(uint64_t v)
 {
     uint64_t t = (v & 0xffff000000000000ull);
-#ifndef OSREC_LOWERED
+#if !defined(OSREC_LOWERED) && !defined(OSREC_SHARED_ROOT)
     t |= upper_root();
 #endif
     __asm__ volatile("msr ttbr1_el1, %0\n\tisb" :: "r"(t) : "memory");
@@ -57,6 +61,8 @@ void osrec_platform_set_ttbr1(uint64_t v)
 void osrec_platform_tlb_flush(void) {
 #ifdef OSREC_LOWERED
     osrec_lowered_mmu(1);
+#elif defined(OSREC_SHARED_ROOT)
+    osrec_shared_mmu(1);
 #else
     __asm__ volatile("dsb ishst\n\ttlbi vmalle1\n\tdsb ish\n\tisb" ::: "memory");
 #endif
@@ -80,9 +86,13 @@ uint64_t osrec_platform_translate(uint64_t va, int op)
 /* The start: the user program's address space; returns to the assembly, which enters the program. */
 void minios_start(void)
 {
+#ifdef OSREC_SHARED_ROOT
+    apply_mode(1);
+#else
     osrec_platform_set_ttbr0(osrec_shadow.ttbr0);
     apply_mode(1);
     osrec_platform_tlb_flush();
+#endif
 #ifdef OSREC_CHECKPOINT
     osrec_checkpoint_start();
 #endif
@@ -93,6 +103,16 @@ void minios_sync(struct osrec_context *c, uint64_t esr, uint64_t far)
     osrec_active_context = c;
 #ifdef OSREC_CHECKPOINT
     if(osrec_checkpoint_before(c,esr,far))return;
+#endif
+#ifdef OSREC_BRANCH_TLS
+    /* Kernel veneers borrow hardware TPIDR_EL0. Kernel TLS accesses use the
+     * shadow slot, and application code uses the hardware register. */
+    uint64_t previous_mode = osrec_shadow.mode;
+    if (previous_mode == OSREC_USER) {
+        uint64_t tls;
+        __asm__ volatile("mrs %0, tpidr_el0" : "=r"(tls));
+        osrec_shadow.value[OSREC_TPIDR_EL0_KEY] = tls;
+    }
 #endif
     int refresh=0;
 #ifdef OSREC_LOWERED
@@ -106,6 +126,12 @@ void minios_sync(struct osrec_context *c, uint64_t esr, uint64_t far)
     osrec_lowered_exception(&osrec_shadow,c,esr,far);
 #endif
     osrec_handle_exception(&osrec_shadow, c, osrec_sites, osrec_site_count, esr, far);
+#ifdef OSREC_BRANCH_TLS
+    if (previous_mode == OSREC_KERNEL && osrec_shadow.mode == OSREC_USER) {
+        uint64_t tls = osrec_shadow.value[OSREC_TPIDR_EL0_KEY];
+        __asm__ volatile("msr tpidr_el0, %0" :: "r"(tls));
+    }
+#endif
     apply_mode(refresh && osrec_shadow.mode==OSREC_KERNEL);
 }
 

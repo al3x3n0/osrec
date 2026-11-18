@@ -9,7 +9,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
 from aarch64_liveness import ALL, NZCV, reg
-from source_image_calls import FIELDS, analyse_sites, assembly, branch, choose_base, plan, sysreg
+from source_image_calls import (FIELDS, TPIDR_EL1, analyse_sites, assembly, branch,
+                                choose_base, plan, sysreg)
 NATIVE_CC = shutil.which('clang-19') or shutil.which('clang')
 
 
@@ -44,6 +45,19 @@ class Calls(unittest.TestCase):
         v = plan(0x1000, op, ALL & ~reg(17))
         self.assertNotIn(16, (v.address, v.temporary))
 
+    def test_tls_spill_preserves_a_live_address_register(self):
+        op = msr(sysreg(3, 0, 4, 1, 0), 16)
+        veneer = plan(0x1000, op, tls_spill=True)
+        self.assertNotIn(16, (veneer.address, veneer.temporary))
+        self.assertEqual(veneer.saves, reg(veneer.address) | reg(veneer.temporary))
+        address, temporary = f'x{veneer.address}', f'x{veneer.temporary}'
+        instructions = veneer.instructions('end')
+        self.assertEqual(instructions[0], f'msr tpidr_el0, {address}')
+        self.assertIn(f'str x16, [{address}, #16]', instructions)
+        self.assertEqual(instructions[-3:], [f'ldr {temporary}, [{address}]',
+                                             f'mrs {address}, tpidr_el0', 'b end'])
+        self.assertIsNone(plan(0x1000, msr(sysreg(3, 0, 2, 0, 0)), tls_spill=True))
+
     def test_fault_observer_prevents_dead_write_scratch(self):
         op = msr(sysreg(3, 0, 4, 0, 1))
         words = {4: 0xf9400021, 8: 0xd2800010}  # load can fault before mov x16
@@ -75,6 +89,31 @@ class Calls(unittest.TestCase):
                    msr(sysreg(3, 0, 4, 2, 2)), 0xd69f03e0, 0xd508871f):
             self.assertIsNone(plan(0, op, 0))
 
+    def test_daif_immediates_use_plain_shadow_updates(self):
+        for opcode, instruction in ((0xd50340df, 'orr'), (0xd50340ff, 'bic')):
+            for mask in range(16):
+                op = opcode | mask << 8
+                self.assertIsNone(plan(0, op))  # no dead address register across the branch
+                veneer = plan(0, op, ALL & ~reg(16))
+                source = assembly([veneer])
+                self.assertEqual(source.count(instruction + ' '), mask.bit_count())
+                self.assertEqual(source.count('#64]'), 2 if mask else 0)
+                self.assertNotIn('nzcv', source)
+
+    def test_percpu_read_uses_the_live_shadow_alias(self):
+        op = mrs(TPIDR_EL1, 12)
+        self.assertIsNone(plan(0x1000, op))
+        self.assertIsNone(plan(0x1000, msr(TPIDR_EL1, 12), 0, percpu=True))
+        veneer = plan(0x1000, op, percpu=True)
+        scratch = f'x{veneer.temporary}'
+        self.assertEqual(veneer.instructions('end')[-4:], [
+            f'ldr {scratch}, [x12]',
+            'adrp x12, osrec_branch_tpidr',
+            'ldr x12, [x12, :lo12:osrec_branch_tpidr]',
+            'b end',
+        ])
+        self.assertEqual(analyse_sites([(0x1000, op, 1)], {}, percpu=True), [])
+
     def test_branch_limits_and_occupied_windows(self):
         self.assertEqual(branch(0x1000, 0x1008), 0x14000002)
         self.assertEqual(branch(0x1000, 0x0ff8), 0x17fffffe)
@@ -93,6 +132,13 @@ class Calls(unittest.TestCase):
             for op in (mrs(key), mrs(key, 31), msr(key), msr(key, 31)):
                 v = plan(0x1000, op, 0)
                 if v is not None: veneers.append(v)
+        for opcode in (0xd50340df, 0xd50340ff):
+            veneers.extend(plan(0x1000, opcode | mask << 8, 0) for mask in range(16))
+            veneers.extend(plan(0x1000, opcode | mask << 8, tls_spill=True) for mask in range(16))
+        for key in FIELDS:
+            veneers.extend(v for rd in range(32)
+                           if (v := plan(0x1000, msr(key, rd), tls_spill=True)) is not None)
+        veneers.extend(plan(0x1000, mrs(TPIDR_EL1, rd), 0, percpu=True) for rd in range(32))
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / 'veneers.S'
             source.write_text(assembly(veneers))

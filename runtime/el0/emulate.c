@@ -38,6 +38,15 @@ static inline void set(struct osrec_shadow *s, unsigned key, uint64_t v) { s->va
 static inline uint64_t reg(const struct osrec_context *c, unsigned r) { return r == 31 ? 0 : c->x[r]; }
 static inline void put(struct osrec_context *c, unsigned r, uint64_t v) { if (r != 31) c->x[r] = v; }
 
+static inline int is_kernel_address(uint64_t va)
+{
+#ifdef OSREC_SHARED_ROOT
+    return va >> 39 == 1;
+#else
+    return va >> 48 == 0xffff;
+#endif
+}
+
 static uint64_t read_sysreg(struct osrec_shadow *s, struct osrec_context *c, unsigned key)
 {
 #ifdef OSREC_CHECKPOINT
@@ -89,7 +98,7 @@ static void write_sysreg(struct osrec_shadow *s, struct osrec_context *c, unsign
     /* A changed MMU/FP/debug regime needs platform support, not just a new
      * shadow value. Per-CPU and context identifiers are plain stored state. */
     if (key != SYSREG(3, 0, 13, 0, 4) && key != SYSREG(3, 0, 13, 0, 1) &&
-        key != SYSREG(3, 3, 13, 0, 2) && /* virtual TPIDR_EL0; never host TLS */
+        key != OSREC_TPIDR_EL0_KEY &&
         key != R_PAR_EL1 && s->value[key] != v)
         osrec_platform_stop(OSREC_STOP_UNSUPPORTED, c->pc, key, 0);
     set(s, key, v);
@@ -115,30 +124,44 @@ static void exception_return(struct osrec_shadow *s, struct osrec_context *c)
     }
 }
 
-void osrec_enter_kernel(struct osrec_shadow *s, struct osrec_context *c, uint64_t esr, uint64_t far, int from_user)
+/* Both callers validate user PSTATE before reaching this transition. Keep the
+ * shared user-entry implementation inline so syscall entry does not repeat
+ * validation or call the general same-level exception path. */
+static inline void enter_user_kernel(struct osrec_shadow *s, struct osrec_context *c,
+                                     uint64_t esr, uint64_t far)
 {
-    if (from_user && (c->pstate & ~USER_PSTATE))
-        osrec_platform_stop(OSREC_STOP_UNSUPPORTED, c->pc, c->pstate, far);
     s->entries++;
     s->elr = c->pc;
     s->far = far;
-    if (from_user) {
-        s->spsr = c->pstate & USER_PSTATE;   /* the user's PSTATE (EL0t) */
-        s->esr = esr;
-        s->sp_el0 = c->sp;                    /* the user stack pointer; kernel_entry saves it and loads current */
-        c->sp = s->sp_el1;
-        s->mode = OSREC_KERNEL;
-        c->pc = s->vbar + 0x400;              /* lower EL, AArch64, synchronous */
-    } else {
-        s->spsr = (c->pstate & USER_PSTATE) | s->daif | (s->pan << 22) | M_EL1H;
-        /* The hardware reported a lower-EL exception; the kernel code must see one from its own level. */
-        uint64_t ec = EC(esr);
-        if (ec == 0x24 || ec == 0x20) esr += 1ull << 26;  /* data/instruction abort: lower EL -> same EL */
-        s->esr = esr;
-        c->pc = s->vbar + 0x200;              /* current EL with SP_ELx, synchronous */
-    }
+    s->spsr = c->pstate;
+    s->esr = esr;
+    s->sp_el0 = c->sp;
+    c->sp = s->sp_el1;
+    s->mode = OSREC_KERNEL;
+    c->pc = s->vbar + 0x400;
     s->daif = DAIF_ALL;
-    c->pstate = c->pstate & USER_PSTATE;       /* EL0t underneath */
+    /* Validated PSTATE already has precisely the admitted EL0t bits. */
+}
+
+void osrec_enter_kernel(struct osrec_shadow *s, struct osrec_context *c, uint64_t esr, uint64_t far, int from_user)
+{
+    if (from_user) {
+        if (c->pstate & ~USER_PSTATE)
+            osrec_platform_stop(OSREC_STOP_UNSUPPORTED, c->pc, c->pstate, far);
+        enter_user_kernel(s, c, esr, far);
+        return;
+    }
+    s->entries++;
+    s->elr = c->pc;
+    s->far = far;
+    s->spsr = (c->pstate & USER_PSTATE) | s->daif | (s->pan << 22) | M_EL1H;
+    /* Report captured lower-EL data/instruction aborts as same-level faults. */
+    uint64_t ec = EC(esr);
+    if (ec == 0x24 || ec == 0x20) esr += 1ull << 26;
+    s->esr = esr;
+    c->pc = s->vbar + 0x200;
+    s->daif = DAIF_ALL;
+    c->pstate &= USER_PSTATE;
 }
 
 int osrec_enter_syscall(struct osrec_shadow *s, struct osrec_context *c,
@@ -153,14 +176,18 @@ int osrec_enter_syscall(struct osrec_shadow *s, struct osrec_context *c,
     if (entry == OSREC_ENTRY_VENEER) c->pc += 4;
     /* SVC does not produce a new FAR value. Keep the captured architecture's
      * FAR, rather than importing a monitor/host handler's unrelated FAR. */
-    osrec_enter_kernel(s, c, (0x15ull << 26) | (1ull << 25) |
-                        ((insn >> 5) & 0xffff), s->far, 1);
+    enter_user_kernel(s, c, (0x15ull << 26) | (1ull << 25) |
+                      ((insn >> 5) & 0xffff), s->far);
     return 1;
 }
 
 void osrec_emulate_site(struct osrec_shadow *s, struct osrec_context *c, uint32_t insn)
 {
     s->emulated++;
+    if (insn == 0xd69f03e0u) { /* Hot return edge; retain the shared checks. */
+        exception_return(s, c);
+        return;
+    }
     unsigned rt = insn & 31;
     if ((insn & 0xfff00000u) == 0xd5300000u) {            /* MRS Xt, <sysreg> */
         put(c, rt, read_sysreg(s, c, (insn >> 5) & 0xffff));
@@ -188,7 +215,7 @@ void osrec_emulate_site(struct osrec_shadow *s, struct osrec_context *c, uint32_
             uint64_t va = reg(c, rt);
             /* Our upper-half AP bits grant EL0 access to kernel code. Do not
              * report those artificial permissions as the captured kernel's. */
-            if (op2 > 3 || (op2 >= 2 && va >> 48 == 0xffff))
+            if (op2 > 3 || (op2 >= 2 && is_kernel_address(va)))
                 osrec_platform_stop(OSREC_STOP_UNSUPPORTED, c->pc, insn, va);
             set(s, R_PAR_EL1, osrec_platform_translate(va, op2));
         }
@@ -197,9 +224,6 @@ void osrec_emulate_site(struct osrec_shadow *s, struct osrec_context *c, uint32_
 #ifdef __aarch64__
         __asm__ volatile("hint #20" ::: "memory");
 #endif
-    } else if (insn == 0xd69f03e0u) {                     /* ERET */
-        exception_return(s, c);
-        return;
     } else {                                              /* HVC, SMC, WFI and anything else */
         osrec_platform_stop(OSREC_STOP_UNSUPPORTED, c->pc, insn, 0);
     }
@@ -209,6 +233,19 @@ void osrec_emulate_site(struct osrec_shadow *s, struct osrec_context *c, uint32_
 const struct osrec_site *osrec_find_site(const struct osrec_site *sites, uint64_t count, uint64_t va)
 {
     uint64_t lo = 0, hi = count;
+#ifdef OSREC_SHARED_ROOT
+    extern const struct osrec_site osrec_sites[];
+    extern const uint64_t osrec_site_count, osrec_site_base, osrec_site_pages;
+    extern const uint32_t osrec_site_offsets[];
+    if (sites == osrec_sites && count == osrec_site_count) {
+        uint64_t page = (va - osrec_site_base) >> 12;
+        if (page >= osrec_site_pages)
+            return 0;
+        lo = osrec_site_offsets[page];
+        hi = osrec_site_offsets[page + 1];
+        count = hi;
+    }
+#endif
     while (lo < hi) {
         uint64_t mid = lo + (hi - lo) / 2;
         if (sites[mid].va < va) lo = mid + 1;
@@ -221,7 +258,7 @@ void osrec_handle_exception(struct osrec_shadow *s, struct osrec_context *c,
                             const struct osrec_site *sites, uint64_t count, uint64_t esr, uint64_t far)
 {
     uint64_t ec = EC(esr);
-    if (s->mode == OSREC_USER && (ec == 0x20 || ec == 0x24) && far >> 48 == 0xffff)
+    if (s->mode == OSREC_USER && (ec == 0x20 || ec == 0x24) && is_kernel_address(far))
         osrec_platform_stop(OSREC_STOP_USER_KERNEL, c->pc, esr, far);
     /* A user BRK, including these immediates, belongs to the captured kernel.
      * Only its own rewritten instruction sites invoke the monitor protocol. */

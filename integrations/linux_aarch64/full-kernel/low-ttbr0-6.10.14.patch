@@ -1,0 +1,226 @@
+--- a/arch/arm64/include/asm/kernel-pgtable.h
++++ b/arch/arm64/include/asm/kernel-pgtable.h
+@@ -31,7 +31,7 @@
+ #define SWAPPER_PGTABLE_LEVELS		(CONFIG_PGTABLE_LEVELS - SWAPPER_SKIP_LEVEL)
+ #define INIT_IDMAP_PGTABLE_LEVELS	(IDMAP_LEVELS - SWAPPER_SKIP_LEVEL)
+ 
+-#define IDMAP_VA_BITS		48
++#define IDMAP_VA_BITS		47
+ #define IDMAP_LEVELS		ARM64_HW_PGTABLE_LEVELS(IDMAP_VA_BITS)
+ #define IDMAP_ROOT_LEVEL	(4 - IDMAP_LEVELS)
+ 
+--- a/arch/arm64/include/asm/memory.h
++++ b/arch/arm64/include/asm/memory.h
+@@ -40,18 +40,20 @@
+  * KIMAGE_VADDR - the virtual address of the start of the kernel image.
+  * VA_BITS - the maximum number of bits for virtual addresses.
+  */
++#define OSREC_KERNEL_END	(UL(1) << 40)
++#define OSREC_KERNEL_SLOT	1
+ #define VA_BITS			(CONFIG_ARM64_VA_BITS)
+-#define _PAGE_OFFSET(va)	(-(UL(1) << (va)))
++#define _PAGE_OFFSET(va)	(OSREC_KERNEL_END - (UL(1) << (va)))
+ #define PAGE_OFFSET		(_PAGE_OFFSET(VA_BITS))
+ #define KIMAGE_VADDR		(MODULES_END)
+ #define MODULES_END		(MODULES_VADDR + MODULES_VSIZE)
+ #define MODULES_VADDR		(_PAGE_END(VA_BITS_MIN))
+ #define MODULES_VSIZE		(SZ_2G)
+ #define VMEMMAP_START		(VMEMMAP_END - VMEMMAP_SIZE)
+-#define VMEMMAP_END		(-UL(SZ_1G))
++#define VMEMMAP_END		(OSREC_KERNEL_END - UL(SZ_1G))
+ #define PCI_IO_START		(VMEMMAP_END + SZ_8M)
+ #define PCI_IO_END		(PCI_IO_START + PCI_IO_SIZE)
+-#define FIXADDR_TOP		(-UL(SZ_8M))
++#define FIXADDR_TOP		(OSREC_KERNEL_END - UL(SZ_8M))
+ 
+ #if VA_BITS > 48
+ #ifdef CONFIG_ARM64_16K_PAGES
+@@ -63,7 +65,7 @@
+ #define VA_BITS_MIN		(VA_BITS)
+ #endif
+ 
+-#define _PAGE_END(va)		(-(UL(1) << ((va) - 1)))
++#define _PAGE_END(va)		(OSREC_KERNEL_END - (UL(1) << ((va) - 1)))
+ 
+ #define KERNEL_START		_text
+ #define KERNEL_END		_end
+--- a/arch/arm64/include/asm/mmu_context.h
++++ b/arch/arm64/include/asm/mmu_context.h
+@@ -37,7 +37,7 @@
+ }
+ 
+ /*
+- * Set TTBR0 to reserved_pg_dir. No translations will be possible via TTBR0.
++ * Set TTBR0 to the reserved root, which maps only the kernel.
+  */
+ static inline void cpu_set_reserved_ttbr0_nosync(void)
+ {
+@@ -81,7 +81,7 @@
+ 	isb();
+ }
+ 
+-#define cpu_set_default_tcr_t0sz()	__cpu_set_tcr_t0sz(TCR_T0SZ(vabits_actual))
++#define cpu_set_default_tcr_t0sz()	__cpu_set_tcr_t0sz(idmap_t0sz)
+ #define cpu_set_idmap_tcr_t0sz()	__cpu_set_tcr_t0sz(idmap_t0sz)
+ 
+ /*
+--- a/arch/arm64/kernel/head.S
++++ b/arch/arm64/kernel/head.S
+@@ -478,7 +478,7 @@
+ 	b.gt    __no_granule_support
+ 	phys_to_ttbr x2, x2
+ 	msr	ttbr0_el1, x2			// load TTBR0
+-	load_ttbr1 x1, x1, x3
++	msr	ttbr1_el1, xzr
+ 
+ 	set_sctlr_el1	x0
+ 
+--- a/arch/arm64/kernel/image-vars.h
++++ b/arch/arm64/kernel/image-vars.h
+@@ -58,6 +58,7 @@
+ PROVIDE(__pi_init_pg_dir		= init_pg_dir);
+ PROVIDE(__pi_init_pg_end		= init_pg_end);
+ PROVIDE(__pi_swapper_pg_dir		= swapper_pg_dir);
++PROVIDE(__pi_reserved_pg_dir		= reserved_pg_dir);
+ 
+ PROVIDE(__pi__text			= _text);
+ PROVIDE(__pi__stext               	= _stext);
+--- a/arch/arm64/kernel/pi/map_kernel.c
++++ b/arch/arm64/kernel/pi/map_kernel.c
+@@ -18,7 +18,20 @@
+ 
+ extern const u8 __eh_frame_start[], __eh_frame_end[];
+ 
+-extern void idmap_cpu_replace_ttbr1(void *pgdir);
++/* The boot ID map remains in slot zero while the kernel subtree changes. */
++static void __init install_kernel_root(pgd_t *pgdir)
++{
++	init_idmap_pg_dir[OSREC_KERNEL_SLOT] = __pgd(0);
++	dsb(ishst);
++	__tlbi(vmalle1);
++	dsb(nsh);
++	isb();
++
++	init_idmap_pg_dir[OSREC_KERNEL_SLOT] =
++		__pgd(__phys_to_pte_val((u64)pgdir) | PMD_TYPE_TABLE);
++	dsb(ishst);
++	isb();
++}
+ 
+ static void __init map_segment(pgd_t *pg_dir, u64 *pgd, u64 va_offset,
+ 			       void *start, void *end, pgprot_t prot,
+@@ -43,6 +56,7 @@
+ 	u64 pgdp = (u64)init_pg_dir + PAGE_SIZE;
+ 	pgprot_t text_prot = PAGE_KERNEL_ROX;
+ 	pgprot_t data_prot = PAGE_KERNEL;
++	pgd_t *reserved_root = (void *)reserved_pg_dir + va_offset;
+ 	pgprot_t prot;
+ 
+ 	/*
+@@ -90,7 +104,7 @@
+ 		    true, root_level);
+ 	dsb(ishst);
+ 
+-	idmap_cpu_replace_ttbr1(init_pg_dir);
++	install_kernel_root(init_pg_dir);
+ 
+ 	if (twopass) {
+ 		if (IS_ENABLED(CONFIG_RELOCATABLE))
+@@ -128,8 +142,11 @@
+ 
+ 	/* Copy the root page table to its final location */
+ 	memcpy((void *)swapper_pg_dir + va_offset, init_pg_dir, PAGE_SIZE);
+-	dsb(ishst);
+-	idmap_cpu_replace_ttbr1(swapper_pg_dir);
++	/* After boot, the reserved root retains the kernel alone. */
++	reserved_root[OSREC_KERNEL_SLOT] =
++		__pgd(__phys_to_pte_val((u64)swapper_pg_dir) | PMD_TYPE_TABLE);
++	dsb(ishst);
++	install_kernel_root(swapper_pg_dir);
+ }
+ 
+ static void noinline __section(".idmap.text") set_ttbr0_for_lpa2(u64 ttbr)
+--- a/arch/arm64/kernel/setup.c
++++ b/arch/arm64/kernel/setup.c
+@@ -311,8 +311,7 @@
+ 	local_daif_restore(DAIF_PROCCTX_NOIRQ);
+ 
+ 	/*
+-	 * TTBR0 is only used for the identity mapping at this stage. Make it
+-	 * point to zero page to avoid speculatively fetching new entries.
++	 * Remove the identity mapping and keep the kernel entry in TTBR0.
+ 	 */
+ 	cpu_uninstall_idmap();
+ 
+--- a/arch/arm64/mm/context.c
++++ b/arch/arm64/mm/context.c
+@@ -346,27 +346,28 @@
+ 			ARM64_WORKAROUND_CAVIUM_27456));
+ }
+ 
++typedef pgd_t osrec_root_t[PTRS_PER_PGD];
++static DEFINE_PER_CPU_PAGE_ALIGNED(osrec_root_t, osrec_ttbr0_root);
++
+ void cpu_do_switch_mm(phys_addr_t pgd_phys, struct mm_struct *mm)
+ {
+-	unsigned long ttbr1 = read_sysreg(ttbr1_el1);
+-	unsigned long asid = ASID(mm);
+-	unsigned long ttbr0 = phys_to_ttbr(pgd_phys);
+-
+-	/* Skip CNP for the reserved ASID */
+-	if (system_supports_cnp() && asid)
+-		ttbr0 |= TTBR_CNP_BIT;
+-
+-	/* SW PAN needs a copy of the ASID in TTBR0 for entry */
+-	if (IS_ENABLED(CONFIG_ARM64_SW_TTBR0_PAN))
+-		ttbr0 |= FIELD_PREP(TTBR_ASID_MASK, asid);
+-
+-	/* Set ASID in TTBR1 since TCR.A1 is set */
+-	ttbr1 &= ~TTBR_ASID_MASK;
+-	ttbr1 |= FIELD_PREP(TTBR_ASID_MASK, asid);
+-
+-	cpu_set_reserved_ttbr0_nosync();
+-	write_sysreg(ttbr1, ttbr1_el1);
+-	write_sysreg(ttbr0, ttbr0_el1);
++	pgd_t *root = *this_cpu_ptr(&osrec_ttbr0_root);
++	u64 asid = FIELD_PREP(TTBR_ASID_MASK, ASID(mm));
++	u64 ttbr0;
++
++	/* The per-CPU wrapper is writable only while a different root is active. */
++	cpu_set_reserved_ttbr0();
++	if (pgd_phys == __pa_symbol(idmap_pg_dir)) {
++		/* The identity map has its own four-level root. */
++		ttbr0 = phys_to_ttbr(pgd_phys);
++	} else {
++		WRITE_ONCE(root[0], __pgd(__phys_to_pte_val(pgd_phys) | PMD_TYPE_TABLE));
++		WRITE_ONCE(root[OSREC_KERNEL_SLOT], reserved_pg_dir[OSREC_KERNEL_SLOT]);
++		dsb(ishst);
++		ttbr0 = phys_to_ttbr(virt_to_phys(root));
++	}
++
++	write_sysreg(ttbr0 | asid, ttbr0_el1);
+ 	isb();
+ 	post_ttbr_update_workaround();
+ }
+--- a/arch/arm64/mm/mmu.c
++++ b/arch/arm64/mm/mmu.c
+@@ -811,6 +811,8 @@
+ 	memblock_allow_resize();
+ 
+ 	create_idmap();
++	idmap_pg_dir[OSREC_KERNEL_SLOT] = reserved_pg_dir[OSREC_KERNEL_SLOT];
++	dsb(ishst);
+ 	declare_kernel_vmas();
+ }
+ 
+--- a/arch/arm64/mm/proc.S
++++ b/arch/arm64/mm/proc.S
+@@ -470,7 +470,7 @@
+ 	mov_q	mair, MAIR_EL1_SET
+ 	mov_q	tcr, TCR_T0SZ(IDMAP_VA_BITS) | TCR_T1SZ(VA_BITS_MIN) | TCR_CACHE_FLAGS | \
+ 		     TCR_SMP_FLAGS | TCR_TG_FLAGS | TCR_KASLR_FLAGS | TCR_ASID16 | \
+-		     TCR_TBI0 | TCR_A1 | TCR_KASAN_SW_FLAGS | TCR_MTE_FLAGS
++		     TCR_TBI0 | TCR_EPD1_MASK | TCR_KASAN_SW_FLAGS | TCR_MTE_FLAGS
+ 
+ 	tcr_clear_errata_bits tcr, x9, x5
+ 

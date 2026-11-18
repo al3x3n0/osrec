@@ -12,7 +12,7 @@ from kernel_boundary_capture import physical
 MASK48 = (1 << 48) - 1
 
 
-def snapshot(remote, root, tcr, ram_range=None):
+def snapshot(remote, root, tcr, ram_range=None, va_limit=None):
     if tcr >> 14 & 3:
         raise ValueError('user-memory comparison requires a 4 KiB TTBR0 granule')
     bits = 64 - (tcr & 63)
@@ -31,17 +31,20 @@ def snapshot(remote, root, tcr, ram_range=None):
             count = 1 << (bits - shift) if level == start else 512
             data = read(table)
             for i in range(count):
+                va = prefix | i << shift
+                if va_limit is not None and va >= va_limit:
+                    break
                 d, = struct.unpack_from('<Q', data, i * 8)
                 if not d & 1:
                     continue
-                va = prefix | i << shift
                 if level < 3 and d & 2:
                     walk(d & MASK48 & ~4095, level + 1, va, privileged or bool(d & (1 << 61)))
                     continue
                 if privileged or not d & (1 << 6) or (level == 3 and not d & 2):
                     continue
                 pa = d & MASK48 & ~((1 << shift) - 1)
-                for offset in range(0, 1 << shift, 4096):
+                size = 1 << shift if va_limit is None else min(1 << shift, va_limit - va)
+                for offset in range(0, size, 4096):
                     content = read(pa + offset)
                     pages.append([hex(va + offset), hashlib.sha256(content).hexdigest()])
         walk(root & MASK48 & ~4095, start, 0)

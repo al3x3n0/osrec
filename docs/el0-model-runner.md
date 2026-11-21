@@ -45,7 +45,12 @@ The runner issues no detach or continue after reading completion. The evidence d
 
 `terminal_exit_executed_before_observation` is false once the expected completion boundary has been observed. It remains unset when a failure prevents that observation, including premature target termination.
 
-The execution interval covers startup, transformed computation, adapters and validation. Its reported host wall time is not a processor cycle count. The runner observes listed CPU fields and debugger-visible memory; it does not attest all platform controls, RAM attributes, cache/TLB state, or every intermediate exception level. `rtl_execution_verified` and `cycles_verified` remain false, and instruction/cycle counts remain unset. A model-specific integration must establish those additional claims.
+The execution interval covers startup, transformed computation, adapters and
+validation. The runner observes debugger-visible memory and CPU state at the
+two endpoints. Whole-interval EL0 verification requires model-side exception
+evidence, such as the [QEMU system exception log](el0-hardware-memory.md#execution-contract).
+The GDB-only report leaves `el0_interval_verified`, `rtl_execution_verified`
+and `cycles_verified` false. Instruction and cycle counts remain unset.
 
 ## Functional GDB reference
 

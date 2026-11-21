@@ -10,12 +10,17 @@ A full scenario milestone must also export a bounded execution that blocks and r
 
 The intended delivery artifact is a self-contained image loaded into an RTL or
 cycle-accurate processor model. Runtime execution must require no host
-interaction. **All delivered code executes at EL0**, including startup, context
-switches, architecture adapters and validation. Captured kernel privilege is
-logical state in RAM. Syscall sites enter the linked captured-kernel backend
-through internal gateways; privileged operations, device accesses and address
-translation/fault behavior require EL0 software adaptations. An EL1 monitor,
-host signal delivery or hardware IRQ service is outside this delivery contract.
+interaction. Before the measured interval, the harness provides the ELF's RAM
+backing and CPU controls. For flat modeling, user and kernel code share an
+address space, and the harness resolves execution addresses with guest
+hardware translation disabled. **All delivered code executes at EL0**,
+including checkpoint startup, user continuation, linked syscall handling,
+architecture adapters and validation. The ELF startup restores the
+checkpoint and resumes its saved user PC. Syscall sites transfer control to
+linked code within the image at EL0. Captured kernel privilege is logical
+state in RAM. Privileged operations and device effects are represented by EL0
+software that operates on the image's RAM. The testbench observes completion
+before any optional terminal exit.
 Host capture, source extraction, compilation, KLEE and artifact inspection
 remain construction/validation tools.
 
@@ -63,9 +68,14 @@ CLI defaults use entry 0x40200000 and result 0x40180000, with configurable addre
 Acceptance audits unresolved symbols, relocations, dynamic dependencies and
 external service instructions. ARMv7 remains available as a regression backend.
 
-Running on a cycle-accurate model does not by itself establish timing
-equivalence with the captured kernel. Functional replay and any later
-instruction/cycle timing contract must be stated and validated separately.
+For microarchitectural measurement, start at ELF entry with the model's cache,
+TLB and predictor initialization declared, and stop at the completion boundary.
+Record the user, captured kernel and adaptation instruction counts for the
+measured image, and check the target's exception-level trace across the
+interval. The QEMU system validation collects an exception log for this
+purpose. Timing equivalence with the original execution requires measurements
+on the intended processor model and an assessment of the instruction and
+address changes introduced by replay.
 
 ## Requirements derived from the executable
 

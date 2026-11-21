@@ -16,6 +16,28 @@ from el0_flat_lower import decode, STACK, atomic_group
 from el0_hardware import direct_ranges, memory_path, stack_path, system_path, indirect_path, indirect_resume, guarded_system_path, zero_path
 
 
+class ExceptionTrace(unittest.TestCase):
+    def test_requires_bootstrap_control_and_rejects_later_exceptions(self):
+        from el0_hardware_model import audit_exception_trace
+        entry = 0x40200000
+        bootstrap = b'Exception return from AArch64 EL1 to AArch64 EL0 PC 0x40200000\n'
+        with tempfile.TemporaryDirectory() as folder:
+            trace = Path(folder) / 'qemu-exceptions.log'
+            for raw, expected in (
+                (bootstrap, (True, 0, 0)),
+                (b'', (False, 0, 0)),
+                (bootstrap.replace(b'40200000', b'40201000'), (False, 1, 0)),
+                (bootstrap + b'Taking exception 2 [SVC] on CPU 0\n...from EL0 to EL1\n', (True, 2, 1)),
+                (bootstrap + bootstrap, (True, 1, 0)),
+            ):
+                with self.subTest(raw=raw):
+                    trace.write_bytes(raw)
+                    result = audit_exception_trace(trace, entry)
+                    self.assertEqual((result['bootstrap_to_entry_observed'],
+                                      result['unexpected_log_lines'], result['hardware_exceptions']), expected)
+                    self.assertEqual(result['sha256'], hashlib.sha256(raw).hexdigest())
+
+
 class Ranges(unittest.TestCase):
     def test_hardware_executor_cannot_receive_a_software_load_plan(self):
         from check_el0_program import make_load_plan
@@ -383,11 +405,42 @@ class FullCheckpoint(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             result = run(os.environ['OSREC_EL0_HARDWARE_IMAGE'], os.environ['OSREC_EL0_HARDWARE_PREPARED'], Path(folder) / 'run')
         self.assertTrue(result['verified'], result)
+        self.assertTrue(result['el0_interval_verified'])
         self.assertEqual(result['hardware_exceptions'], 0)
         self.assertEqual((result['result']['events'], result['result']['counters'], result['result']['uart_bytes']), (2272, 9, 92))
         self.assertLess(result['result']['transitions'], 2261577)
         if 'gateway_profile' in result:
             self.assertEqual(sum(result['gateway_profile'].values()),result['result']['transitions'])
+
+    def test_architectural_svc_at_entry_fails_whole_interval_check(self):
+        from el0_hardware_model import run
+        from kernel_source_verify import Elf
+        import struct
+
+        image = Path(os.environ['OSREC_EL0_HARDWARE_IMAGE'])
+        prepared = Path(os.environ['OSREC_EL0_HARDWARE_PREPARED'])
+        plan = json.loads((prepared / 'hardware-load-plan.json').read_text())
+        entry = int(plan['entry'], 0)
+        elf = Elf(image / 'checkpoint')
+        text = next(section for section in elf.sections
+                    if section['addr'] <= entry < section['addr'] + section['size'])
+        data = bytearray(elf.data)
+        struct.pack_into('<I', data, text['offset'] + entry - text['addr'], 0xd4000001)
+        plan['image_sha256'] = hashlib.sha256(data).hexdigest()
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'checkpoint').write_bytes(data)
+            shutil.copyfile(image / 'hardware-memory.json', root / 'hardware-memory.json')
+            shutil.copyfile(prepared / 'setup.elf', root / 'setup.elf')
+            if not plan['page_tables'].get('embedded'):
+                shutil.copyfile(prepared / 'page-tables.bin', root / 'page-tables.bin')
+            (root / 'hardware-load-plan.json').write_text(json.dumps(plan))
+            result = run(root, root, root / 'run')
+        self.assertFalse(result['verified'])
+        self.assertFalse(result['el0_interval_verified'])
+        self.assertTrue(result['exception_trace']['bootstrap_to_entry_observed'])
+        self.assertEqual(result['hardware_exceptions'], 1)
+        self.assertEqual(result['completion']['pc'], int(plan['unexpected_pc'], 0))
 
     def test_missing_kernel_alias_stops_instead_of_using_el1_services(self):
         from el0_hardware_model import run
@@ -395,6 +448,8 @@ class FullCheckpoint(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             plan = json.loads((prepared / 'hardware-load-plan.json').read_text())
+            if plan['page_tables'].get('embedded') or plan.get('original_va_aliases') == 0:
+                self.skipTest('requires external page tables with original-address aliases')
             tables = bytearray((prepared / 'page-tables.bin').read_bytes())
             # Remove the captured kernel linear-map subtree. Identity mappings
             # of the executor/result remain available to report the failure.
@@ -406,6 +461,7 @@ class FullCheckpoint(unittest.TestCase):
             shutil.copyfile(prepared / 'setup.elf', root / 'setup.elf')
             result = run(os.environ['OSREC_EL0_HARDWARE_IMAGE'], root, root / 'run')
         self.assertFalse(result['verified'])
+        self.assertFalse(result['el0_interval_verified'])
         self.assertEqual(result['hardware_exceptions'], 1)
 
 

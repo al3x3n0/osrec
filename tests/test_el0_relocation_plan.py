@@ -36,6 +36,31 @@ class CompactLayoutTests(unittest.TestCase):
                             dict(va=0x2000, pa=0x402000, bytes=4096)])
 
 
+    def test_host_page_projection_coalesces_only_identical_shared_backing(self):
+        def alias(va, pa, size, attrs):
+            return dict(va=va, pa=pa, bytes=size, attrs=attrs, domain='kernel')
+
+        rw = 1 << 53
+        ro = rw | 1 << 7
+        aliases = [alias(0x10000, 0x400000, 0x8000, rw),
+                   alias(0x18000, 0x408000, 0x1000, rw),
+                   alias(0x19000, 0x40e000, 0x1000, rw),
+                   alias(0x1a000, 0x40a000, 0x2000, ro),
+                   alias(0x1c000, 0x40c000, 0x1000, rw),
+                   alias(0x24000, 0x404000, 0x4000, rw)]
+        projection = CompactBacking(0x400000, 0x10000, 0x10000000, aliases).host_page_projection(
+            0x4000, 0x10000, 0x24000)
+        self.assertFalse(projection['initial_ram_representable'])
+        self.assertEqual(projection['compatible_captured_pages'], 8)
+        self.assertEqual(projection['blocked_captured_pages'], 9)
+        self.assertEqual(projection['host_alias_candidates'],
+                         [dict(va=0x10000, backing=0x10000000, bytes=0x8000, flags=6)])
+        self.assertEqual([row['reasons'] for row in projection['blocked_ranges']],
+                         [['incompatible-backing', 'incompatible-permissions'],
+                          ['partially-mapped-host-page'],
+                          ['outside-host-address-window']])
+
+
 class WholeCodeTests(unittest.TestCase):
     def test_unseeded_code_and_symbol_gaps_are_included_but_literals_are_not(self):
         code = SimpleNamespace(extent=lambda f: (f, f+16))

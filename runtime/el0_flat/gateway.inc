@@ -15,6 +15,33 @@
     .word \word,\kind
     .popsection
 .endm
+
+.macro flat_capture_long name,pc,word=0,kind=0
+    .balign 4
+\name:
+    sub sp,sp,#800
+    stp x0,x1,[sp,#0]
+    adrp x0,\name\()_site
+    add x0,x0,:lo12:\name\()_site
+    /* x1 has been saved, so the long address load preserves guest state. */
+    adrp x1,flat_capture_rest
+    add x1,x1,:lo12:flat_capture_rest
+    br x1
+    .pushsection .rodata,"a"
+    .balign 8
+\name\()_site:
+    .quad \pc
+    .word \word,\kind
+    .popsection
+.endm
+/* The destination's ordinary resume thunk restores the saved registers and SP. */
+.macro flat_long_branch resume
+    sub sp,sp,#800
+    stp x16,x17,[sp,#128]
+    adrp x16,\resume
+    add x16,x16,:lo12:\resume
+    br x16
+.endm
 /* Native kernel SP is live between architecture edges. Only 32 bytes below
  * it are used to preserve the entry scratch registers before switching to
  * the private runtime stack. The handler itself never runs on guest SP. */

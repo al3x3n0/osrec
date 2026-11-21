@@ -9,6 +9,10 @@ docs/slides/.build/**/*.pptx
 docs/slides/.build/**/*.inspect.ndjson
 docs/slides/.build/**/slide-*.png
 docs/slides/.build/**/validation*.json
+docs/slides/.build/**/*.layout.json
+docs/slides/.build/**/*.log
+docs/slides/.build/**/node_modules
+docs/slides/.chart-data-*/
 docs/slides/.build/superseded-limitations.png
 docs/slides/.build/node_modules
 

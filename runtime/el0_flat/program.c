@@ -118,6 +118,7 @@ static void writable_data(uint64_t pc,uint64_t pa,uint64_t bytes)
     if(lo<flat_immutable_text_count && flat_immutable_text[lo].address<pa+bytes)
         osrec_platform_stop(OSREC_STOP_UNSUPPORTED,pc,0x101,pa);
 }
+#if !OSREC_FLAT_MACOS_DIRECT_MEMORY
 static uint64_t changed_user_text(void)
 {
     /* AOT text is immutable. Remapping or changing permissions on any
@@ -130,27 +131,37 @@ static uint64_t changed_user_text(void)
     }
     return MASK64;
 }
-static void admit_user_text(uint64_t pc)
+#endif
+static int changed_pretranslated_binding(uint64_t *detail)
 {
-    if(!flat_pretranslated_memory) {
-        uint64_t bad=changed_user_text();
-        if(bad!=MASK64)osrec_platform_stop(OSREC_STOP_UNSUPPORTED,pc,0x102,bad);
-        return;
+    if((flat_program.memory.ttbr0&0x0000fffffffff000ull)!=flat_pretranslated_root || flat_program.memory.tcr!=flat_pretranslated_tcr) {
+        *detail=flat_program.memory.ttbr0;
+        return 1;
     }
-    if((flat_program.memory.ttbr0&0x0000fffffffff000ull)!=flat_pretranslated_root || flat_program.memory.tcr!=flat_pretranslated_tcr)
-        osrec_platform_stop(OSREC_STOP_UNSUPPORTED,pc,0x105,flat_program.memory.ttbr0);
 #if OSREC_TRACK_PRETRANSLATED_WRITES
     if(flat_translation_dirty) {
 #endif
     for(uint64_t i=0;i<flat_pretranslated_check_count;i++) {
         const struct pretranslated_check *check=flat_pretranslated_checks+i;
-        if((*check->address^check->value)&check->mask)
-            osrec_platform_stop(OSREC_STOP_UNSUPPORTED,pc,0x105,i);
+        if((*check->address^check->value)&check->mask){*detail=i;return 1;}
     }
 #if OSREC_TRACK_PRETRANSLATED_WRITES
     flat_translation_dirty=0;
     }
 #endif
+    return 0;
+}
+static void admit_user_text(uint64_t pc)
+{
+#if !OSREC_FLAT_MACOS_DIRECT_MEMORY
+    if(!flat_pretranslated_memory) {
+        uint64_t bad=changed_user_text();
+        if(bad!=MASK64)osrec_platform_stop(OSREC_STOP_UNSUPPORTED,pc,0x102,bad);
+        return;
+    }
+#endif
+    uint64_t changed;
+    if(changed_pretranslated_binding(&changed))osrec_platform_stop(OSREC_STOP_UNSUPPORTED,pc,0x105,changed);
 #if !OSREC_FLAT_VALIDATION
     uint64_t sp=flat_active->live->cpu.sp;int admitted=0;
     if(sp>=64 && !(sp&15))for(uint64_t i=0;flat_user_resume_ranges[i][1];i++)
@@ -266,7 +277,8 @@ static __attribute__((noinline)) flat_target step_memory(struct flat_frame *f,co
 #endif
         enter_fault(f,0x21,address,info&EXCLUSIVE?0:write);return target(c->pc);
     }
-    if(flat_program.uart_va && address>=flat_program.uart_va && address-flat_program.uart_va<4096) {
+    int uart=flat_program.uart_va && address>=flat_program.uart_va && address-flat_program.uart_va<4096;
+    if(uart) {
 #ifdef OSREC_FLAT_PROFILE
         flat_memory_profile[5]++;
 #endif
@@ -275,6 +287,10 @@ static __attribute__((noinline)) flat_target step_memory(struct flat_frame *f,co
             osrec_platform_stop(OSREC_STOP_UNSUPPORTED,c->pc,o->word,address);
         flat_memory_pending.uart=write && !off;
     } else flat_memory_pending.uart=0;
+#if OSREC_FLAT_MACOS_DIRECT_MEMORY
+    if(!uart)osrec_platform_stop(OSREC_STOP_UNSUPPORTED,c->pc,0x109,address);
+    struct flat_translation t={.data=flat_uart_registers+address-flat_program.uart_va};
+#else
     struct flat_translation t=flat_translate(&flat_program.memory,address,bytes,info&EXCLUSIVE?FLAT_READ:write?FLAT_WRITE:FLAT_READ,user);
     if(t.fault) {
 #ifdef OSREC_FLAT_PROFILE
@@ -290,6 +306,7 @@ static __attribute__((noinline)) flat_target step_memory(struct flat_frame *f,co
         if(writable.fault)osrec_platform_stop(OSREC_STOP_UNSUPPORTED,c->pc,writable.fault,address);
     }
     if(write && !(info&HINT))writable_data(c->pc,t.pa,bytes);
+#endif
     flat_memory_pending.temp=temp;flat_memory_pending.value=c->x[temp];flat_memory_pending.base=rn;flat_memory_pending.info=info;flat_memory_pending.writeback=base+offset;
     c->x[temp]=(uintptr_t)t.data;return o->native;
 }
@@ -355,9 +372,15 @@ static __attribute__((noinline)) flat_target step_other(struct flat_frame *f,con
     }
     case P_OBSERVE:
 #if OSREC_FLAT_VALIDATION
-        if(flat_observer_pending.event){struct flat_translation t=flat_translate(&flat_program.memory,flat_observer_pending.regs,8,FLAT_READ,0);
+        if(flat_observer_pending.event){
+#if OSREC_FLAT_MACOS_DIRECT_MEMORY
+            const unsigned char *data=(const void *)(uintptr_t)flat_observer_pending.regs;
+#else
+            struct flat_translation t=flat_translate(&flat_program.memory,flat_observer_pending.regs,8,FLAT_READ,0);
             if(t.fault)osrec_platform_stop(OSREC_STOP_RUNTIME,c->pc,t.fault,flat_observer_pending.regs);
-            flat_observer_pending.event->result=u64(t.data);flat_observer_pending.event->completed=1;flat_observer_pending.event=0;}
+            const unsigned char *data=t.data;
+#endif
+            flat_observer_pending.event->result=u64(data);flat_observer_pending.event->completed=1;flat_observer_pending.event=0;}
 #endif
         return o->native;
     case P_BOUNDARY:osrec_platform_stop(OSREC_STOP_BOUNDARY,c->pc,o->word,0);break;
@@ -386,11 +409,15 @@ void lk_native_zero(uint64_t pc,uint64_t address)
 {
     uint64_t dczid=flat_program.shadow->value[0xd807];
     if(dczid&16 || (dczid&15)>9)osrec_platform_stop(OSREC_STOP_UNSUPPORTED,pc,dczid,address);
+#if OSREC_FLAT_MACOS_DIRECT_MEMORY
+    __asm__ volatile("dc zva, %0" : : "r"(address) : "memory");
+#else
     unsigned bytes=4u<<(dczid&15);address&=~(uint64_t)(bytes-1);
     struct flat_translation t=flat_translate(&flat_program.memory,address,bytes,FLAT_WRITE,0);
     if(t.fault)osrec_platform_stop(OSREC_STOP_UNSUPPORTED,pc,t.fault,address);
     writable_data(pc,t.pa,bytes);
     for(unsigned i=0;i<bytes;i++)t.data[i]=0;
+#endif
 }
 void osrec_platform_set_ttbr0(uint64_t v){flat_program.memory.ttbr0=v;
 #if OSREC_TRACK_PRETRANSLATED_WRITES
@@ -404,8 +431,12 @@ void osrec_platform_dcache_clean_invalidate(uint64_t v){(void)v;}
 void osrec_platform_set_tpidrro(uint64_t v){(void)v;}
 uint64_t osrec_platform_translate(uint64_t va,int op)
 {
+#if OSREC_FLAT_MACOS_DIRECT_MEMORY
+    osrec_platform_stop(OSREC_STOP_UNSUPPORTED,flat_active->live->cpu.pc,0x10a+(unsigned)op,va);
+#else
     struct flat_translation t=flat_translate(&flat_program.memory,va,1,op&1?FLAT_WRITE:FLAT_READ,op>=2);
     return t.fault?1|((uint64_t)(t.fault<64?t.fault:0)<<1):t.pa&~4095ull;
+#endif
 }
 void osrec_platform_stop(uint64_t reason,uint64_t pc,uint64_t detail,uint64_t far)
 {flat_full_result.reason=reason;flat_full_result.pc=pc;flat_full_result.detail=detail;flat_full_result.far=far;flat_fail(FLAT_BOUNDARY);}
@@ -425,8 +456,14 @@ int flat_main(void)
 #if OSREC_FLAT_IMMUTABLE_BITMAP
     bitmap_ram_base=flat_program.memory.ram->pa;bitmap_ram_bytes=flat_program.memory.ram->bytes;
 #endif
+#if OSREC_FLAT_MACOS_DIRECT_MEMORY
+    uint64_t bad;
+    int changed=changed_pretranslated_binding(&bad);
+#else
     uint64_t bad=changed_user_text();
-    if(bad!=MASK64){flat_full_result.status=2;flat_full_result.reason=OSREC_STOP_UNSUPPORTED;
+    int changed=bad!=MASK64;
+#endif
+    if(changed){flat_full_result.status=2;flat_full_result.reason=OSREC_STOP_UNSUPPORTED;
         flat_full_result.pc=flat_initial.cpu.pc;flat_full_result.detail=0x102;flat_full_result.far=bad;return 1;}
     /* Resolve before entering: the builder always includes the initial PC. */
     flat_target entry=0;for(uint64_t i=0;i<flat_program.pc_count;i++)if(flat_program.pcs[i].pc==flat_initial.cpu.pc){entry=flat_program.pcs[i].target;break;}

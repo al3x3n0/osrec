@@ -118,7 +118,8 @@ def run(image,out,port,host='127.0.0.1',preloaded=False,memory_check='bytes',tim
     started=time.monotonic();target=None;armed=running=False;stage='connect'
     report=dict(format='osrec-el0-model-verification-v1',verified=False,label=label,
                 image_sha256=checked['image_sha256'],load_plan_sha256=plan_hash,
-                rtl_execution_verified=False,cycles_verified=False,instruction_count=None,cycle_count=None,
+                el0_interval_verified=False,rtl_execution_verified=False,
+                cycles_verified=False,instruction_count=None,cycle_count=None,
                 scope='GDB-observed initialization, EL0 boundaries and embedded functional checks',
                 cpu_fields_checked=['PC','PSTATE.M','PSTATE.IL','PSTATE.SS','completion X0'],
                 platform_controls_verified=False,memory_type_verified=False,

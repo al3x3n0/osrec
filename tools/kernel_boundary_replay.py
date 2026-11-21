@@ -60,11 +60,16 @@ def stub_source(capture):
     return '\n'.join(lines)+'\n'
 
 def elf(segments,entry):
-    """A minimal ELF64 AArch64 executable whose PT_LOAD segments are (physical address, bytes)."""
-    header_size,ph_size=64,56;offset=header_size+ph_size*len(segments);phdrs=[];body=[];size=0
-    for address,data in segments:
-        phdrs.append(struct.pack('<IIQQQQQQ',1,7,offset+size,address,address,len(data),len(data),PAGE))
-        body.append(data);size+=len(data)
+    """Build ELF64 PT_LOADs from (physical address, file bytes[, memory size])."""
+    header_size,ph_size=64,56;offset=header_size+ph_size*len(segments);phdrs=[];body=[]
+    for address,data,*extent in segments:
+        size = extent[0] if extent else len(data)
+        if size < len(data):
+            raise ValueError('ELF segment memory size is smaller than its file data')
+        pad = (address - offset) % PAGE
+        offset += pad
+        phdrs.append(struct.pack('<IIQQQQQQ',1,7,offset,address,address,len(data),size,PAGE))
+        body.extend((bytes(pad),data));offset+=len(data)
     ident=b'\x7fELF'+bytes([2,1,1,0])+bytes(8)
     header=ident+struct.pack('<HHIQQQIHHHHHH',2,183,1,entry,header_size,0,0,header_size,ph_size,len(segments),64,0,0)
     return b''.join([header,*phdrs,*body])

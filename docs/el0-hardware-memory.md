@@ -36,8 +36,12 @@ exclude every physical alias of admitted immutable code.
 The processor model establishes the hardware tables before ELF entry. Its
 initialization can use privileged operations; the delivered checkpoint does not.
 After entry, startup, user instructions, captured kernel computation, adapters
-and validation all execute at EL0. Ordinary memory operations use the hardware
-MMU after an inline range/mode check, preserving scratch registers and NZCV on
+and validation all execute at EL0. The QEMU runner retains
+`qemu-exceptions.log` and checks that its only event is the setup return from
+EL1 to the ELF entry at EL0. It also verifies EL0t at entry and completion and
+stops before the optional terminal exit. The validation report binds the log
+by SHA-256 and reports `el0_interval_verified`. Ordinary memory operations use
+the hardware MMU after an inline range/mode check, preserving scratch registers and NZCV on
 the private stack. Pre/post-index writeback is handled inline. No adaptation is
 inserted inside an exclusive window. Exclusive guards check the complete range,
 write permission and alignment before its load. The original single/paired

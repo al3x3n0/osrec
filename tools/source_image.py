@@ -474,6 +474,18 @@ def record(r,svc_vector,stop,limit,timeout,symbols=None,counters=None,result_at=
     return calls,end
 
 
+def qemu_boot_image(image_dir, manifest):
+    image = image_dir / 'image.elf'
+    if manifest.get('segment_only'):
+        from source_image_load import check
+        if check(image)['image_sha256'] != manifest['image_sha256']:
+            raise ValueError('ELF differs from the source-image manifest')
+        # virt's generic loader reserves a DTB at the start of RAM. Its ELF
+        # kernel loader allows the complete PT_LOAD range to occupy that space.
+        return ['-kernel', str(image)]
+    return ['-device', f'loader,file={image},cpu-num=0']
+
+
 def run_image(image_dir,out,limit,timeout,count=(),memory=False,clock_package=None,trace=(),trace_limit=32):
     image_dir=Path(image_dir).resolve();out=Path(out);out.mkdir(parents=True,exist_ok=False)
     m=json.load(open(image_dir/'manifest.json'));port=free_port()
@@ -508,7 +520,7 @@ def run_image(image_dir,out,limit,timeout,count=(),memory=False,clock_package=No
         mmio_ranges=[(int(p['va'],16),int(p['va'],16)+PAGE) for p in m['pages'] if p['kind']=='device']
     command=[QEMU,'-M','virt-9.2,secure=off,virtualization='+('off' if el0 else 'on'),'-cpu','cortex-a53','-accel','tcg','-smp','1','-m','%dM'%m['image_ram_mb'],'-nodefaults',
              '-display','none','-monitor','none','-serial','file:%s'%(out/'console.txt'),'-semihosting-config','enable=off',
-             '-device','loader,file=%s,cpu-num=0'%(image_dir/'image.elf'),'-S','-gdb','tcp:127.0.0.1:%d'%port]
+             *qemu_boot_image(image_dir,m),'-S','-gdb','tcp:127.0.0.1:%d'%port]
     with open(out/'qemu.stderr.log','wb') as err:
         p=subprocess.Popen(command,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=err)
         try:
@@ -607,6 +619,7 @@ def main():
     b.add_argument('--lower-kernel',type=lambda v:int(v,0),default=0,help='lower the kernel into the user half; the value moves the linear map off address 0 first (va_shift.lower)')
     b.add_argument('--execution',choices=['el1','el0-minios'],default='el1',help='kernel execution runtime')
     b.add_argument('--el0-dispatch',choices=['traps','branches'],default='traps',help='EL0 architecture-edge dispatch; branches use stack-free shadow-register veneers where supported')
+    b.add_argument('--segment-only',action='store_true',help='declare all required RAM in ELF PT_LOAD for shared-root EL0 images')
     r=sub.add_parser('run');r.add_argument('--image',required=True);r.add_argument('--out',required=True)
     r.add_argument('--limit',type=int,default=10000);r.add_argument('--timeout',type=int,default=120)
     r.add_argument('--count',action='append',default=[],help='kernel function whose entries are counted (e.g. __switch_to)')
@@ -623,10 +636,12 @@ def main():
     a=p.parse_args()
     if a.command=='build':
         if a.execution!='el0-minios' and a.el0_dispatch!='traps':p.error('--el0-dispatch requires --execution el0-minios')
+        if a.segment_only and a.execution!='el0-minios':p.error('--segment-only requires --execution el0-minios')
         if a.execution=='el0-minios':
             if a.closure or a.state!='full' or a.relocate:p.error('el0-minios currently requires whole text, full state and no physical relocation')
             from source_image_el0 import build as build_el0
-            print(json.dumps(build_el0(a.dump,a.vmlinux,a.profile,a.out,a.dwarf_db,a.lower_kernel,a.va_profile,a.el0_dispatch)))
+            print(json.dumps(build_el0(a.dump,a.vmlinux,a.profile,a.out,a.dwarf_db,a.lower_kernel,a.va_profile,a.el0_dispatch,
+                                       segment_only=a.segment_only)))
         else:print(json.dumps(build(a.dump,a.vmlinux,a.profile,a.closure,a.out,a.state,a.relocate,a.dwarf_db,a.relocate_linear,a.va_profile,a.shift_kernel,a.lower_kernel)))
     elif a.command=='run':
         rep=run_image(a.image,a.out,a.limit,a.timeout,a.count,a.memory,a.native_counters,a.trace,a.trace_limit);print(json.dumps(dict(calls=len(rep['calls']),end=rep['end'],counter_reads=rep.get('counter_reads'),callstack_samples=rep.get('callstack_samples',0))))

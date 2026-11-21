@@ -27,13 +27,35 @@ RAM_BASE, RAM_END = 0x40000000, 0xc0000000
 RESULT_NAMES = ('magic', 'version', 'status', 'events', 'expected', 'transitions',
                 'reason', 'pc', 'detail', 'far', 'counters', 'uart_bytes',
                 'first_mismatch', 'missing_pc', 'elapsed', 'reserved')
+PSTATE_NON_EL0T = 31 | (3 << 20)  # M, IL and SS
 
 
 def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def prepare(image, out, llvm=LLVM, _tables_only=False):
+def platform_registers(va_bits, root, zero_bytes):
+    # 4 KiB TTBR0, normal WB walks, inner shareable. TTBR1 stays disabled.
+    tcr = (64 - va_bits) | (1 << 8) | (1 << 10) | (3 << 12) | (16 << 16) | (1 << 23) | (2 << 30) | (2 << 32)
+    return dict(MAIR_EL1=0xff, TCR_EL1=tcr, TTBR0_EL1=root, TTBR1_EL1=0,
+                CPACR_EL1=3 << 20, SCTLR_EL1=0x30d01805 | ((1 << 14) if zero_bytes else 0))
+
+
+def audit_exception_trace(path, entry):
+    raw = path.read_bytes()
+    lines = raw.splitlines()
+    expected = f'Exception return from AArch64 EL1 to AArch64 EL0 PC {entry:#x}'.encode()
+    # The generated setup has exactly one exception return. Require it as a
+    # positive control, so missing or unrecognized logging cannot pass.
+    bootstrap_observed = bool(lines and lines[0] == expected)
+    remainder = lines[int(bootstrap_observed):]
+    return dict(file=path.name, sha256=hashlib.sha256(raw).hexdigest(),
+                bootstrap_to_entry_observed=bootstrap_observed,
+                unexpected_log_lines=len(remainder),
+                hardware_exceptions=sum(line.startswith(b'Taking exception ') for line in remainder))
+
+
+def prepare(image, out, llvm=LLVM, _tables_only=False, _validate_only=False):
     image, out = Path(image).resolve(), Path(out).resolve()
     metadata = json.loads((image / 'hardware-memory.json').read_text())
     manifest = json.loads((image / 'manifest.json').read_text())
@@ -92,7 +114,9 @@ def prepare(image, out, llvm=LLVM, _tables_only=False):
         raise ValueError('ELF RAM initialization mode differs from metadata')
     if elf_ram and (pretranslated or native_mode or not metadata.get('alias_free_memory')):
         raise ValueError('ELF RAM initialization requires alias-free memory with logical stacks')
-    embedded = elf_ram or pretranslated
+    embedded = pretranslated or (elf_ram if elf_ram and elf_ram['table_capacity'] else None)
+    if bool(embedded) != ('flat_embedded_page_tables' in symbols):
+        raise ValueError('embedded page-table reservation differs from mapping metadata')
     native_entry=metadata.get('native_syscall_entry')
     if bool(native_entry)!=bool(manifest.get('native_syscall_sites',0)):
         raise ValueError('native syscall entry mode differs between manifest and metadata')
@@ -144,17 +168,26 @@ def prepare(image, out, llvm=LLVM, _tables_only=False):
             raise ValueError('descriptor tracking must start dirty')
     if symbols['flat_phys']['size'] != metadata['ram_bytes']:
         raise ValueError('canonical RAM extent differs from mapping metadata')
-    if elf_ram:
-        from pretranslate_el0_image import file_offset, ram_load_segments
+    if elf_ram or pretranslated:
+        from pretranslate_el0_image import merged_ram_extents, ram_load_segments, verify_merged_ram
         ram_end = backing + metadata['ram_bytes']
-        actual = [(s['address'],s['file_offset'],s['file_bytes'],s['memory_bytes'],s['flags'])
-                  for s in checked['load_segments'] if s['address']<ram_end and backing<s['address']+s['memory_bytes']]
-        expected = [(va,offset,filesz,memsz,flags) for _,flags,offset,va,_,filesz,memsz,_ in
-                    ram_load_segments(elf,backing,metadata['ram_bytes'],symbols['flat_payload']['value'],
-                                      elf_ram['initial_extents'])]
-        if actual!=expected:
-            raise ValueError('canonical RAM loads differ from packed ELF extents; run pretranslate_el0_image.py')
-        table_capacity = elf_ram['table_capacity']
+        loads = [s for s in checked['load_segments']
+                 if s['address'] < ram_end and backing < s['address']+s['memory_bytes']]
+        extents = merged_ram_extents(elf)
+        payload = symbols['flat_payload']['value']
+        if extents is not None:
+            if extents != (elf_ram or pretranslated)['initial_extents']:
+                raise ValueError('merged RAM extent note differs from mapping metadata')
+            verify_merged_ram(elf, backing, metadata['ram_bytes'], payload, loads, extents)
+        elif elf_ram:
+            actual = [(s['address'],s['file_offset'],s['file_bytes'],s['memory_bytes'],s['flags']) for s in loads]
+            expected = [(va,offset,filesz,memsz,flags) for _,flags,offset,va,_,filesz,memsz,_ in
+                        ram_load_segments(elf,backing,metadata['ram_bytes'],payload,elf_ram['initial_extents'])]
+            if actual!=expected:
+                raise ValueError('canonical RAM loads differ from packed ELF extents; run pretranslate_el0_image.py')
+    if elf_ram and embedded:
+        from pretranslate_el0_image import file_offset
+        table_capacity = embedded['table_capacity']
         table_offset = file_offset(elf,table_base,table_capacity)
         if table_base%PAGE or table_capacity<=0 or table_capacity%PAGE or not any(
                 s['flags']==4 and s['address']<=table_base and
@@ -218,6 +251,8 @@ def prepare(image, out, llvm=LLVM, _tables_only=False):
     validate_exclusion_buckets(elf,checked,metadata)
     from el0_dispatch import validate_dispatch_tables
     validate_dispatch_tables(elf,checked,manifest)
+    if _validate_only:
+        return
     # Tables has a historical monitor-arena limit. Use the same implementation
     # at relative addresses, then relocate only table descriptors when writing.
     va_bits = 47 if metadata.get('alias_free_memory') else 48
@@ -273,10 +308,7 @@ def prepare(image, out, llvm=LLVM, _tables_only=False):
             raise ValueError('ELF lacks matching '+name+'; run pretranslate_el0_image.py')
     out.mkdir(parents=True, exist_ok=False)
     (out / 'page-tables.bin').write_bytes(raw)
-    # 4 KiB TTBR0, normal WB walks, inner shareable. TTBR1 stays disabled.
-    tcr = (64 - va_bits) | (1 << 8) | (1 << 10) | (3 << 12) | (16 << 16) | (1 << 23) | (2 << 30) | (2 << 32)
-    registers = dict(MAIR_EL1=0xff, TCR_EL1=tcr, TTBR0_EL1=table_base + tables.root,
-                     TTBR1_EL1=0, CPACR_EL1=3 << 20, SCTLR_EL1=0x30d01805 | ((1<<14) if zero_bytes else 0))
+    registers = platform_registers(va_bits, table_base + tables.root, zero_bytes)
     source = '.text\n.global _start\n_start:\n    msr daifset,#15\n'
     for name, value in registers.items():
         source += '    ldr x0,=0x%x\n    msr %s,x0\n' % (value, name.lower()) if name != 'SCTLR_EL1' else ''
@@ -380,10 +412,12 @@ def run(image, prepared, out, timeout=180, qemu='qemu-system-aarch64', plugin=No
         if sha(path) != expected:
             raise ValueError('hardware artifact changed: ' + str(path))
     out.mkdir(parents=True, exist_ok=False)
+    exception_log = out / 'qemu-exceptions.log'
     port = free_port()
     command = [qemu, '-M', 'virt-9.2,secure=off,virtualization=off', '-cpu', 'cortex-a53',
                '-accel', 'tcg', '-smp', '1', '-m', '2048M', '-nodefaults', '-display', 'none',
                '-monitor', 'none', '-serial', 'none', '-semihosting-config', 'enable=off',
+               '-d', 'int', '-D', str(exception_log),
                '-device', 'loader,file=' + str(image / 'checkpoint'),
                '-device', 'loader,file=' + str(prepared / 'setup.elf') + ',cpu-num=0',
                '-S', '-gdb', 'tcp:127.0.0.1:%d' % port]
@@ -402,9 +436,9 @@ def run(image, prepared, out, timeout=180, qemu='qemu-system-aarch64', plugin=No
             remote.breakpoint(unexpected)
             remote.resume()
             pc = remote.wait(timeout)
-            if pc != entry or remote.register('cpsr') & 15:
-                raise ValueError('hardware setup failed before EL0 entry: '+json.dumps(remote.registers(('pc','cpsr','x0','x1','x2'))))
             entry_state = remote.registers(('pc', 'cpsr'))
+            if pc != entry or entry_state['cpsr'] & PSTATE_NON_EL0T:
+                raise ValueError('hardware setup failed before EL0 entry: '+json.dumps(remote.registers(('pc','cpsr','x0','x1','x2'))))
             remote.breakpoint(entry, False)
             remote.breakpoint(completion)
             remote.resume()
@@ -437,7 +471,10 @@ def run(image, prepared, out, timeout=180, qemu='qemu-system-aarch64', plugin=No
     memory_counts=struct.unpack('<8Q',memory_profile) if memory_profile is not None else None
     system_counts=[dict(word=hex(word),metadata=hex(metadata),count=count) for word,metadata,count in
                    struct.iter_unpack('<3Q',system_profile) if count] if system_profile is not None else None
-    verified = (pc == completion and not state['cpsr'] & 15 and state['x0'] == 0 and
+    trace = audit_exception_trace(exception_log, entry)
+    el0_interval_verified = (pc == completion and not state['cpsr'] & PSTATE_NON_EL0T and
+                             trace['bootstrap_to_entry_observed'] and not trace['unexpected_log_lines'])
+    verified = (el0_interval_verified and state['x0'] == 0 and
                 result['magic'] == 0x324c55464652534f and result['version'] == 2 and result['status'] == 1 and
                 result['first_mismatch'] == (1 << 64) - 1 and not result['missing_pc'] and
                 (profile is None or sum(profile.values()) == result['transitions']) and
@@ -448,14 +485,16 @@ def run(image, prepared, out, timeout=180, qemu='qemu-system-aarch64', plugin=No
                   verification_scope='workload-results' if plan.get('runtime_validation',True) else 'execution-completion',
                   entry=entry_state, completion=state, result=result,
                   image_sha256=plan['image_sha256'], mapping_sha256=plan['mapping_sha256'],
-                  page_tables_sha256=plan['page_tables']['sha256'], hardware_exceptions=int(pc == unexpected),
-                  runtime_el1_services=False, host_calls_before_completion=0,
+                  page_tables_sha256=plan['page_tables']['sha256'], hardware_exceptions=trace['hardware_exceptions'],
+                  el0_interval_verified=el0_interval_verified, exception_trace=trace,
+                  execution_interval='ELF entry up to the completion breakpoint, before terminal exit',
+                  runtime_el1_services=False, host_calls_before_completion=0 if el0_interval_verified else None,
                   functional_model='QEMU system Cortex-A53', seconds=round(time.monotonic() - started, 3),
                   cycles_verified=False, rtl_execution_verified=False)
     if plan.get('pretranslated_memory') or plan.get('elf_ram_initialization'):
         report['elf_ram_initialization']=True
-        report['embedded_page_tables']=True
-        report['external_page_tables_loaded']=False
+        report['embedded_page_tables']=bool(plan['page_tables'].get('embedded'))
+        report['external_page_tables_loaded']=not report['embedded_page_tables']
     if plan.get('native_syscall_entry'):
         report['native_syscall_entry']=plan['native_syscall_entry']
     if profile is not None:

@@ -6,7 +6,11 @@ from source_image_el0 import instruction_ranges
 
 
 def audit(binary):
-    image=Elf(binary);data=image.data
+    return audit_elf(Elf(binary))
+
+
+def audit_elf(image):
+    data=image.data
     if struct.unpack_from('<HH',data,16)!=(2,183):raise ValueError('requires an arm64 ET_EXEC')
     symbols={s['name']:s for s in image.symbols if s['shndx']}
     hardware='flat_direct_read' in symbols
@@ -29,12 +33,18 @@ def audit(binary):
     end=symbols['flat_completed']['value'];exit_pc=end+4
     if struct.unpack('<I',image.read(end,4))[0]!=0xd2800ba8:raise ValueError('terminal exit must select syscall 93')
     ranges=[(s['addr'],s['addr']+s['size']) for s in image.sections if s['flags']&4 and s['size']]
-    if max(hi for lo,hi in ranges)-min(lo for lo,hi in ranges)>=1<<27:
+    whole=symbols.get('flat_whole_kernel_text')
+    direct=symbols.get('flat_macos_direct_memory')
+    if whole and struct.unpack('<Q',image.read(whole['value'],8))[0]!=1:
+        raise ValueError('invalid whole-kernel text marker')
+    if whole and any(name.startswith('__AArch64') and 'Thunk_' in name for name in symbols):
+        raise ValueError('whole-kernel ELF contains a register-clobbering linker veneer')
+    if (not whole or direct) and max(hi for lo,hi in ranges)-min(lo for lo,hi in ranges)>=1<<27:
         raise ValueError('code span permits branch veneers that could clobber guest registers')
     allowed={0xda10,0xda20,0xda21};exit_sites=[];system=[];zero_sites=[];instructions=0
     for lo,hi in instruction_ranges(image,ranges):
-        for pc in range(lo,hi,4):
-            word,=struct.unpack('<I',image.read(pc,4));instructions+=1
+        for pc,(word,) in zip(range(lo,hi,4),struct.iter_unpack('<I',image.read(lo,hi-lo))):
+            instructions+=1
             trap=word&0xffe0001f
             if trap in (0xd4000001,0xd4000002,0xd4000003,0xd4200000,0xd4400000):
                 if word!=0xd4000001 or pc!=exit_pc:raise ValueError('unexpected trap/service instruction at '+hex(pc))

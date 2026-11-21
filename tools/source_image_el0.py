@@ -17,6 +17,7 @@ import shutil
 from pathlib import Path
 
 from kernel_sysregs import encodings
+from va_constants import move_immediate
 
 PAGE = 4096
 MONITOR_PA = 0x71000000
@@ -30,6 +31,9 @@ BRK_SITE = 0xd4200000 | (0xf00 << 5)
 BRK_BOUNDARY = 0xd4200000 | (0xf01 << 5)
 NOP = 0xd503201f
 MASK48 = (1 << 48) - 1
+FIXED_CPU_REGISTERS = {'AIDR', 'AIDR_EL1', 'CLIDR', 'CLIDR_EL1', 'CTR_EL0',
+                       'DCZID_EL0', 'MIDR_EL1', 'MPIDR_EL1', 'REVIDR_EL1',
+                       'MVFR0_EL1', 'MVFR1_EL1', 'MVFR2_EL1'}
 
 
 def instruction_ranges(image, sections):
@@ -46,7 +50,21 @@ def instruction_ranges(image, sections):
     return sorted(ranges)
 
 
-def rewrite(insn, dczid=None, *, shadow_tls=False):
+def fixed_system_reads(cpu):
+    """Values fixed by the logical EL1 mode or the captured single CPU model."""
+    captured = dict(cpu.get('sysregs_all', {}), **cpu['sysregs'])
+    return dict(CurrentEL=4, **{name: value for name, value in captured.items()
+                               if name in FIXED_CPU_REGISTERS or name.startswith('ID_')})
+
+
+def system_read_moves(values):
+    """{MRS register key: the single move into x0, if one exists}."""
+    keys, _ = encodings(values)
+    return {key: word for name, key in keys.items()
+            if (word := move_immediate(values[name])) is not None}
+
+
+def rewrite(insn, constant_moves=None, *, shadow_tls=False):
     """Return (replacement, kind). An unrecognised trapped op is an explicit stop.
 
     NZCV and FP retain their hardware meaning. The user thread register can
@@ -54,14 +72,18 @@ def rewrite(insn, dczid=None, *, shadow_tls=False):
     reads retain the existing source-image clock limitation. Barriers and BTI are
     legal at EL0. All other system operations go through the shadow core.
     """
-    if dczid is not None and 0 <= dczid <= 0xffff and insn & 0xffffffe0 == 0xd53b00e0:
-        # DCZID_EL0 is read-only. Use the captured value, including the DZP bit.
-        return 0xd2800000 | (dczid << 5) | (insn & 31), 'inline sysreg'
     if insn in {0xd503211f, 0xd503215f, 0xd503219f, 0xd50321df,
                 0xd503233f, 0xd503237f, 0xd50323bf, 0xd50323ff, 0xd50320ff}:
         return NOP, 'pac-hint'
     if insn & 0xfff00000 in (0xd5300000, 0xd5100000):
         key = insn >> 5 & 0xffff
+        if constant_moves and insn & 0xfff00000 == 0xd5300000 and key in constant_moves:
+            # ORR-immediate Rd=31 writes SP. An MRS to XZR discards the result.
+            rd = insn & 31
+            move = constant_moves[key]
+            if rd == 31 and move & 0x7f800000 == 0x32000000:
+                return NOP, 'inline sysreg'
+            return move | rd, 'inline sysreg'
         if key in {0xda10, 0xda20, 0xda21} or (key == 0xde82 and not shadow_tls):
             return insn, None
         if insn & 0xfff00000 == 0xd5300000 and key in {0xdf01, 0xdf02}:
@@ -137,7 +159,25 @@ def site_page_index(sites):
     return base, [bisect.bisect_left(addresses, page) for page in range(base, end + PAGE, PAGE)]
 
 
-def build(dump, vmlinux, profile_path, out, dwarf_db=None,lower_kernel=0,va_profile=None,dispatch='traps'):
+def reserve_load_ranges(segments, ranges):
+    """Cover RAM and BSS with PT_LOAD memory tails, preserving the file bytes."""
+    runs = dict(segments)
+    sizes = {address: len(data) for address, data in runs.items()}
+    for start, end in ranges:
+        addresses = sorted(pa for pa in runs if start <= pa < end)
+        if not addresses or addresses[0] != start:
+            runs[start] = b''
+            sizes[start] = 0
+            addresses.insert(0, start)
+        for address, limit in zip(addresses, addresses[1:] + [end]):
+            if address + sizes[address] > limit:
+                raise ValueError(f'ELF load segment exceeds the reserved memory at {address:#x}')
+            sizes[address] = limit - address
+    return [(address, runs[address], sizes[address]) for address in sorted(runs)]
+
+
+def build(dump, vmlinux, profile_path, out, dwarf_db=None,lower_kernel=0,va_profile=None,dispatch='traps',
+          segment_only=False):
     from source_image import Ram, text_ranges, boundary_extents, LLVM, ROOT, DTB, ATTRS, CONTIGUOUS, NT
     from kernel_boundary_replay import elf
 
@@ -154,12 +194,15 @@ def build(dump, vmlinux, profile_path, out, dwarf_db=None,lower_kernel=0,va_prof
         raise ValueError('the EL0 monitor requires 4 KiB granules')
     from kernel_replay_tables import KERNEL_BASE, TCR_A1, TCR_EPD1, captured_roots
     shared = bool(tcr & TCR_EPD1)
+    if segment_only and not shared:
+        raise ValueError('segment-only loading requires a shared-root capture')
     if shared:
         if lower_kernel or tcr & TCR_A1:
             raise ValueError('the shared root requires TTBR0 ASIDs and an already low-linked kernel')
         _, guest_kernel_entry, _ = captured_roots(ram)
     fast_sysregs = shared and dispatch == 'branches'
-    dczid = ram.state['cpu'].get('sysregs_all', {}).get('DCZID_EL0') if fast_sysregs else None
+    fixed_reads = fixed_system_reads(ram.state['cpu']) if fast_sysregs else {}
+    constant_moves = system_read_moves(fixed_reads) if fixed_reads else {}
     out = Path(out).resolve()
     out.mkdir(parents=True, exist_ok=False)
     image, text = text_ranges(vmlinux)
@@ -217,7 +260,7 @@ def build(dump, vmlinux, profile_path, out, dwarf_db=None,lower_kernel=0,va_prof
                 if boundary(va + k):
                     replacement, kind = BRK_BOUNDARY, 'boundary'
                 else:
-                    replacement, kind = rewrite(original, dczid, shadow_tls=fast_sysregs)
+                    replacement, kind = rewrite(original, constant_moves, shadow_tls=fast_sysregs)
                     if lowering and va+k in lowering['code']:
                         replacement=lowering['code'][va+k];kind='lowered code'
                 if kind:
@@ -473,6 +516,10 @@ def build(dump, vmlinux, profile_path, out, dwarf_db=None,lower_kernel=0,va_prof
         run.extend(data)
     if run:
         segments.append((address, bytes(run)))
+    if segment_only:
+        monitor_size = (ms['osrec_monitor_end'] - monitor_va + PAGE - 1) & -PAGE
+        segments = reserve_load_ranges(segments, [(ram.base, ram.base + ram.size),
+                                                  (MONITOR_PA, MONITOR_PA + monitor_size)])
     checkpoint = elf(segments, MONITOR_PA)
     manifest = dict(format='osrec-source-image-v1', execution='el0-minios',
                     ram=ram.state['ram'],
@@ -483,9 +530,9 @@ def build(dump, vmlinux, profile_path, out, dwarf_db=None,lower_kernel=0,va_prof
                     shadow_pa=hex(ms['osrec_shadow'] - monitor_va + MONITOR_PA),
                     context_pointer_pa=hex(ms['osrec_active_context'] - monitor_va + MONITOR_PA),
                     monitor_va=hex(monitor_va),monitor_pa=hex(MONITOR_PA),
-                    lowered=lowering['summary'] if lowering else None, shared_root=shared,
+                    lowered=lowering['summary'] if lowering else None, shared_root=shared, segment_only=segment_only,
                     dispatch=dispatch, branch_sites=len(calls),
-                    inline_system_reads={'DCZID_EL0': dczid} if counts['inline sysreg'] else {},
+                    inline_system_reads=fixed_reads if counts['inline sysreg'] else {},
                     kernel_tls_shadow=fast_sysregs,
                     branch_veneers=dict(va=hex(call_base),pa=hex(BRANCH_PA),size=call_size,
                                         state_va=hex(call_alias+(ms['osrec_branch_state']&4095))) if calls else None,
@@ -496,6 +543,9 @@ def build(dump, vmlinux, profile_path, out, dwarf_db=None,lower_kernel=0,va_prof
         from source_image_symbols import symbolize
         checkpoint, manifest['symbols'] = symbolize(out, checkpoint, manifest, kernel=image, monitor=monitor)
     (out / 'image.elf').write_bytes(checkpoint)
+    if segment_only:
+        from source_image_load import check
+        (out / 'load-plan.json').write_text(json.dumps(check(out / 'image.elf'), indent=2) + '\n')
     manifest['image_sha256'] = hashlib.sha256(checkpoint).hexdigest()
     (out / 'manifest.json').write_text(json.dumps(manifest, indent=1) + '\n')
     return {k: manifest[k] for k in ('execution', 'rewrite', 'site_count', 'table_pages', 'stop')}
@@ -532,14 +582,19 @@ def relink(image_dir,out):
     stride,count=struct.unpack_from('<HH',raw,54);segments=[]
     for i in range(count):
         kind,flags,offset,va,pa,size,memsize,align=struct.unpack_from('<IIQQQQQQ',raw,phoff+i*stride)
-        if kind==1 and not MONITOR_PA<=pa<MONITOR_PA+MONITOR_SIZE:segments.append((pa,raw[offset:offset+size]))
+        if kind==1 and not MONITOR_PA<=pa<MONITOR_PA+MONITOR_SIZE:
+            segments.append((pa,raw[offset:offset+size],memsize))
     code=(out/'monitor.bin').read_bytes();code+=bytes(-len(code)%PAGE)
-    segments.append((MONITOR_PA,code));segments.sort()
+    monitor_size = (symbols['osrec_monitor_end'] - monitor_va + PAGE - 1) & -PAGE if m.get('segment_only') else len(code)
+    segments.append((MONITOR_PA,code,monitor_size));segments.sort()
     checkpoint = elf(segments, MONITOR_PA)
     if m.get('shared_root'):
         from source_image_symbols import symbolize
         checkpoint, m['symbols'] = symbolize(out, checkpoint, m, monitor=monitor)
     (out/'image.elf').write_bytes(checkpoint)
+    if m.get('segment_only'):
+        from source_image_load import check
+        (out / 'load-plan.json').write_text(json.dumps(check(out / 'image.elf'), indent=2) + '\n')
     m.update(stop=hex(symbols['osrec_stopped']),shadow_pa=hex(symbols['osrec_shadow']-monitor_va+MONITOR_PA),
              context_pointer_pa=hex(symbols['osrec_active_context']-monitor_va+MONITOR_PA),relinked_from=str(image_dir),
              image_sha256=hashlib.sha256(checkpoint).hexdigest())

@@ -1,13 +1,8 @@
 /* A separately supplied static ELF. Linux constructs argc/argv/auxv; the
  * application then exercises real captured-kernel memory and file syscalls. */
 #include <stdint.h>
+#include "syscall.h"
 extern void _start(void);
-static long syscall6(long nr,long a,long b,long c,long d,long e,long f)
-{
-    register long x0 __asm__("x0")=a,x1 __asm__("x1")=b,x2 __asm__("x2")=c,x3 __asm__("x3")=d;
-    register long x4 __asm__("x4")=e,x5 __asm__("x5")=f,x8 __asm__("x8")=nr;
-    __asm__ volatile("svc #0":"+r"(x0):"r"(x1),"r"(x2),"r"(x3),"r"(x4),"r"(x5),"r"(x8):"memory","cc");return x0;
-}
 static int equal(const char *a,const char *b){while(*a && *a==*b){a++;b++;}return *a==*b;}
 int program_main(long argc,char **argv)
 {

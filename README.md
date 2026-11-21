@@ -37,6 +37,12 @@ inline user-memory translation, syscall entry, memory completion and result
 observation and UART register buffering reduce gateway entries by about 99.9% on the complete workload. It matches with no hardware exceptions or runtime EL1 services; model initialization
 establishes the mappings before entering the EL0 executable.
 
+On Apple Silicon, the [macOS ELF loader](docs/el0-macos.md) runs a self-contained
+checkpoint directly on a hardware vCPU using Hypervisor.framework. For flat
+and alias-free images, the harness supplies the address space and the ELF runs
+at EL0 with guest translation disabled. The loader collects the completion
+record before terminal exit.
+
 A [user-binary builder](docs/el0-user-binary.md) also combines a reusable captured-kernel capsule with a supplied static AArch64 ELF. Construction runs the kernel's real `execveat`; delivery starts the new program at its ELF entry and handles its syscalls through captured kernel code, entirely at EL0. The example passes native and QEMU application checks, matches stdout and exit status on Linux, and rebuilds byte-identically from the same inputs. The initial contract admits static non-PIE binaries with immutable executable pages; general scheduling, devices and dynamic loading remain outside it. See the [demo report](docs/el0-native-demo.md) for evidence and limits.
 
 This repository contains host-side capture and replay demonstrations, an optional LLVM analysis planner, and a live LiteOS-A QEMU demo. LiteOS-A is the first kernel target, at revision `4ac7f3aed67000b47bc14d6fe79d63ada708d780`. The demo boots a reduced real kernel on Cortex-A7, captures PID 1 syscalls and exports standalone native replay executables. Scheduling/interrupt reproduction and general kernel-state discovery remain future work.

@@ -448,6 +448,82 @@ registers across a patched `MSR SP_EL0` and the following syscall return.
 See `build/el0-shared-root-pinned-state-branches-profile-20261118a` and
 `build/el0-shared-root-pinned-state-branches-overhead-20261118a/breakdown.json`.
 
+### Constant MRS reads and runtime accounting
+
+Shared-root branch dispatch emits a single move at the original `MRS`
+site when the logical kernel mode or captured read-only CPU register
+establishes a constant value. The encoder supports `MOVZ`, `MOVN`, and
+the logical-immediate `MOV` alias, including 32-bit writes that zero-extend
+to the original 64-bit destination. A discarded result preserves SP.
+Mutable registers keep their live-state path. The pinned build has 76
+in-place constant reads, up from 4, and this workload visits only the
+previously inlined `DCZID_EL0` sites.
+
+The shared-root profiler counts direct replacements and their branch patch
+bodies as kernel payload. It counts the monitor and trapping kernel sites
+as runtime. All executed instructions are included in the guest total.
+The pinned build measured 1,204,678 runtime instructions over 3,335,542
+kernel visits, or 0.3612 per visit. The full replay still executed 5,406,649
+instructions. See `build/el0-shared-root-pinned-constant-mrs-profile-20261118a/counts.json`.
+
+```sh
+python3 tools/source_image_profile.py \
+  --image build/el0-shared-root-pinned-constant-mrs-20261118a \
+  --bundle build/linux-svc-machine-checkpoint-low-pinned-20261118a/checkpoint \
+  --application build/linux-svc-machine-checkpoint-low-pinned-20261118a/init \
+  --plugin build/qemu-plugins/libinstruction_profile.dylib \
+  --out build/my-source-image-profile
+```
+
+### ELF loaders that allocate exactly the load segments
+
+Add `--segment-only` to the shared-root image build. Each `PT_LOAD` maps
+`p_memsz` bytes at `p_paddr`, copies `p_filesz` bytes from `p_offset`, and
+zero-fills the remaining bytes. `p_vaddr` equals `p_paddr` and the file and
+memory offsets meet the 4 KiB alignment requirement. Memory tails cover
+the whole captured RAM bank and the monitor's stack and BSS. The pinned
+ELF has 94 load segments, a 17.3 MiB file, and 516.1 MiB of mapped RAM.
+
+Start one AArch64 Cortex-A53 in non-secure EL1h with the MMU off, at the
+ELF entry. The bootstrap installs TTBR0, the EL1 vectors, and the monitor
+stack. Provide a PL011 console at physical `0x09000000`. On QEMU `virt`,
+`source_image.py run` uses `-kernel image.elf` for this format so the first
+RAM segment can occupy the address used by the generic loader's DTB.
+
+```sh
+python3 tools/source_image.py build --execution el0-minios --el0-dispatch branches \
+  --segment-only --dump build/kernel-state-low-pinned-20261118a \
+  --vmlinux build/linux-kernel-low-boot-20261118a/vmlinux \
+  --profile integrations/linux_aarch64/source-image/fd-control.json \
+  --out build/my-segment-only-image
+python3 tools/source_image.py run --image build/my-segment-only-image \
+  --out build/my-segment-only-qemu --memory
+python3 tools/run_source_image_unicorn.py \
+  --image build/my-segment-only-image/image.elf \
+  --out build/my-segment-only-unicorn
+```
+
+The reference loader uses Unicorn 2.1.4 with the CPU MMU. Its callbacks
+provide PL011 transmit and EL1 exception entry for SVC, BRK, and the
+checkpoint's LDTR/STTR translation faults. The ELF needs only its load
+segments for RAM. For differential checks, pass the source-image directory
+as `--image` and the native recording as `--reference`.
+
+The segment-only build writes `load-plan.json` beside the ELF. It records
+the image hash, entry point, and physical address, file extent, memory
+extent, and permissions for each segment. The build and both runners use
+the same preflight to check guest RAM coverage, monitor BSS, the staged
+page copies, and file backing for every table reachable from the generated
+TTBR0 roots. It verifies veneer code and its state aliases in both
+execution views. The preflight also runs on a standalone ELF with
+`python3 tools/source_image_load.py image.elf`.
+
+QEMU and Unicorn both matched the native run's 2,136 syscall records and
+2,135 user-memory snapshots. QEMU's footprint recorded 1,870,237 RAM
+accesses, all within `PT_LOAD` ranges. See
+`build/el0-shared-root-pinned-segment-only-unicorn-20261118a/report.json`
+and `build/el0-shared-root-pinned-segment-only-profile-20261118a/footprint/coverage.json`.
+
 ### Checkpoint symbols and callstacks
 
 Shared-root builds put kernel function names, monitor symbols, and named

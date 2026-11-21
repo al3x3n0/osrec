@@ -7,6 +7,10 @@ kernel operation**, with a **10% target**. A ratio of 0.20:1 means 20%; the
 the metric and thresholds. The execution interval is the budgeted window;
 startup and final validation remain separately reported.
 
+A separate [fixed-mapping Linux-user IPC experiment](el0-linux-user-ipc.md)
+measures 0.3311 runtime instructions per kernel instruction at 10 million
+kernel instructions. It uses a prepared capture and a different workload.
+
 For the measured 3,041,214 kernel operations, the ceiling permits **608,242**
 runtime instructions and the target permits **304,121**. Run the acceptance
 check with:
@@ -198,10 +202,15 @@ per instruction. The run uses one vCPU.
 
 [`el0_instruction_profile.py`](../tools/el0_instruction_profile.py) adds zero-size
 provenance symbols to a throwaway assembly copy. It checks identical program
-headers and loaded code/data, allowing only ELF section-table coordinates in
-the file header to differ. The original ELF executes with the resulting PC
-map; no guest instructions are inserted. Both boundary-hit counts and workload
-validation must pass before a report is accepted.
+header layout and loaded code/data. The header coordinates and clustered
+RAM file offsets can move when symbols are added to the annotated copy.
+The original ELF executes with the resulting PC map. Both boundary-hit counts
+and workload validation must pass before a report is accepted.
+
+Pass `--user-entry <linked-pc>` to `map` to count from the first relocated user
+instruction through the instruction before `flat_completed`. This includes
+final validation and reports the whole ELF window alongside it. The instruction
+budget uses the separate `flat_run` interval.
 
 - [Measured counts](../build/el0-instruction-profile-20261113a/counts.json)
 - [Image identity, PC-map hash and interval addresses](../build/el0-instruction-profile-20261113a/profile-plan.json)

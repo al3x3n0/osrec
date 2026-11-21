@@ -70,7 +70,8 @@ class GatewayLayout(unittest.TestCase):
         lines=['#include "gateway.inc"','.text']
         for i,name in enumerate(sizes):
             lines+=['.global begin%d,end%d'%(i,i),'begin%d:'%i,
-                    '%s probe%d,0,0'%(name,i) if name in ('flat_capture','flat_native_capture') else '%s probe%d,done,0'%(name,i),
+                    '%s probe%d,0,0'%(name,i) if name in ('flat_capture','flat_capture_long','flat_native_capture')
+                    else 'flat_long_branch done' if name=='flat_long_branch' else '%s probe%d,done,0'%(name,i),
                     'end%d:'%i]
         lines+=['done: ret']
         with tempfile.TemporaryDirectory() as folder:

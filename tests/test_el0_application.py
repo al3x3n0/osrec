@@ -135,19 +135,71 @@ class KernelPreparation(unittest.TestCase):
         self.assertEqual(shared_directory_aliases(p,root),[])
 
 class CoverageExpansion(unittest.TestCase):
+    def test_native_macos_delivery_uses_native_loader_and_whole_kernel(self):
+        with tempfile.TemporaryDirectory() as name:
+            out=Path(name)
+            user=out/'user'
+            def emit(package,kernel,user,reference,image,extra,coverage,**options):
+                self.assertTrue(options['whole_kernel_text'])
+                self.assertTrue(options['no_model_page_tables'])
+                image.mkdir()
+                return {'whole_kernel_text':True}
+            def build(command,**kwargs):
+                self.assertIn('MACOS_NATIVE=1',command)
+                (out/'runtime-attempt-0').mkdir()
+            def validate(image,destination,*,user_elf,reference):
+                self.assertEqual(user_elf,user)
+                self.assertEqual(reference,out/'calls.json')
+                destination.mkdir()
+                return {'verified':True,'hypervisor':False}
+            with patch('el0_application.export',side_effect=emit),patch('el0_application.subprocess.run',side_effect=build),\
+                 patch('el0_macos_native.run',side_effect=validate) as native,patch('el0_macos.run') as hypervisor:
+                _,reports,_=lower_application(out,out,out,user,out,'test-image',True,
+                                              macos_cc='/usr/bin/clang',macos_native=True)
+            self.assertFalse(reports['macos']['hypervisor'])
+            native.assert_called_once()
+            hypervisor.assert_not_called()
+            self.assertTrue((out/'macos-validation').is_dir())
+
+    def test_default_export_includes_whole_kernel_without_workload_coverage(self):
+        with tempfile.TemporaryDirectory() as name:
+            out=Path(name)
+            (out/'coverage.log').write_text('0x800080000000: ret\n')
+            def emit(package,kernel,user,reference,image,extra,coverage,*,whole_kernel_text):
+                self.assertTrue(whole_kernel_text)
+                self.assertEqual(extra,[])
+                self.assertIsNone(coverage)
+                image.mkdir()
+                return {'whole_kernel_text':True}
+            def build(command,**kwargs):
+                (out/'runtime-attempt-0').mkdir()
+            with patch('el0_application.export',side_effect=emit),patch('el0_application.subprocess.run',side_effect=build),\
+                 patch('check_el0_program.run',return_value={'verified':True}),\
+                 patch('check_el0_program.run_qemu',return_value={'verified':True}):
+                result=lower_application(out,out,out,out/'user',out,'test-image',True)
+            self.assertTrue(result[0]['whole_kernel_text'])
+            self.assertEqual(result[2],[])
+
     def lower(self,reports):
         with tempfile.TemporaryDirectory() as name:
             out=Path(name);pc=0x80008026dd20;original=pc|0xffff000000000000
             code=SimpleNamespace(text=(original-64,original+512),containing=lambda p:original-64,
                                  extent=lambda p:(original-64,original+512),name=lambda p:'filemap_map_pages')
             extras=[]
+            runtimes=[]
             def emit(package,kernel,user,reference,image,extra,coverage):
                 image.mkdir();extras.append(list(extra));return {'source_instructions':100}
-            with patch('el0_application.export',side_effect=emit),patch('el0_application.subprocess.run'),\
+            def build(command,**kwargs):
+                runtime=next(arg.rsplit('/',1)[-1] for arg in command if arg.startswith('OUT='))
+                (out/runtime).mkdir()
+                runtimes.append(runtime)
+            with patch('el0_application.export',side_effect=emit),patch('el0_application.subprocess.run',side_effect=build),\
                  patch('check_el0_program.run',side_effect=reports),patch('check_el0_program.run_qemu',return_value={'verified':True}),\
                  patch('kernel_code_closure.Code',return_value=code):
-                result=lower_application(out,out,out,out/'user',out,'test-image',True)
+                result=lower_application(out,out,out,out/'user',out,'test-image',True,kernel_slice=True)
                 self.assertTrue((out/'program').is_dir())
+                self.assertTrue((out/'runtime').is_dir())
+                self.assertEqual(runtimes,[f'runtime-attempt-{attempt}' for attempt in range(len(extras))])
                 return result,extras
     def test_missing_function_expands_and_reruns_from_same_state(self):
         result,extras=self.lower([{'verified':False,'result':{'reason':256,'missing_pc':0x80008026dd20}},

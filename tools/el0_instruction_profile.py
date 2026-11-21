@@ -42,6 +42,8 @@ def assess_budget(counts, specification=None):
 def check_budget(profile):
     profile = Path(profile)
     counts = json.loads((profile/'counts.json').read_text())
+    if 'execution_interval_bounds' in counts:
+        raise ValueError('the instruction budget requires the flat_run interval')
     specification = json.loads(BUDGET.read_text())
     result = assess_budget(counts[specification['window']], specification)
     (profile/'budget.json').write_text(json.dumps(result, indent=2)+'\n')
@@ -169,31 +171,43 @@ def symbols(data):
         for offset in range(s[4], s[4]+s[5], s[9]):
             name, info, other, section, value, length = struct.unpack_from('<IBBHQQ', data, offset)
             start = strings+name
-            yield data[start:data.index(b'\0', start)].decode(), value
+            end = data.find(b'\0', start)
+            if end < 0:
+                raise ValueError('unterminated ELF symbol name')
+            yield data[start:end].decode(), value
 
 
-def make_map(image, annotated, out, llvm):
+def make_map(image, annotated, out, llvm, user_entry=None):
     image, annotated, out = (Path(p).resolve() for p in (image, annotated, out))
     original = (image / 'checkpoint').read_bytes()
     marked = (annotated / 'checkpoint').read_bytes()
     original_segments, marked_segments = segments(original), segments(marked)
-    if original_segments != marked_segments:
+    def layout(header):
+        kind, flags, offset, *rest = header
+        # Clustered RAM and its extent note are appended after the symbol table.
+        return (kind, flags, None if kind in (1, 4) else offset, *rest)
+
+    if list(map(layout, original_segments)) != list(map(layout, marked_segments)):
         raise ValueError('annotated ELF changed program headers')
     hashes = []
-    for kind, flags, offset, va, pa, filesz, memsz, align in original_segments:
-        if kind != 1:
+    for header, marked_header in zip(original_segments, marked_segments):
+        kind, flags, offset, va, pa, filesz, memsz, align = header
+        if kind not in (1, 4):
             continue
-        a, b = original[offset:offset+filesz], marked[offset:offset+filesz]
-        if offset == 0:
+        marked_offset = marked_header[2]
+        a = memoryview(original)[offset:offset+filesz]
+        b = memoryview(marked)[marked_offset:marked_offset+filesz]
+        if kind == 1 and offset == marked_offset == 0:
             # ELF program/section-table coordinates change with added symbols
             # and with the post-link program-header table appended at EOF.
             # These bytes are never used for the PC map, and we run the ORIGINAL ELF.
-            b = bytearray(b)
-            b[32:40] = a[32:40]
-            b[40:48] = a[40:48]; b[60:64] = a[60:64]
-        if a != b:
+            equal = a[:32] == b[:32] and a[48:60] == b[48:60] and a[64:] == b[64:]
+        else:
+            equal = a == b
+        if not equal:
             raise ValueError('annotated ELF changed loaded code/data at %x' % va)
-        hashes.append(dict(address=hex(va), file_bytes=filesz, memory_bytes=memsz, sha256=digest(a)))
+        if kind == 1:
+            hashes.append(dict(address=hex(va), file_bytes=filesz, memory_bytes=memsz, sha256=digest(a)))
     rows, syms = {}, {}
     for name, value in symbols(marked):
         if name.startswith(MARKER):
@@ -204,13 +218,19 @@ def make_map(image, annotated, out, llvm):
             rows[value] = old | flags
         elif name in ('_start', 'flat_run', 'flat_main', 'flat_completed', 'flat_memory_profile'):
             syms[name] = value
-    disassembly = subprocess.check_output([str(Path(llvm) / 'llvm-objdump'), '-d', '--no-show-raw-insn',
-                                          '--disassemble-symbols=flat_main', str(image / 'checkpoint')], text=True)
-    calls = re.findall(r'^\s*([0-9a-f]+):\s+bl\s+0x[0-9a-f]+ <flat_run>', disassembly, re.M)
-    if len(calls) != 1:
-        raise ValueError('expected exactly one flat_run call')
-    boundaries = dict(start=syms['_start'], begin=syms['flat_run'],
-                      end=int(calls[0], 16)+4, stop=syms['flat_completed'])
+    stop = syms['flat_completed']
+    if user_entry is None:
+        disassembly = subprocess.check_output([str(Path(llvm) / 'llvm-objdump'), '-d', '--no-show-raw-insn',
+                                              '--disassemble-symbols=flat_main', str(image / 'checkpoint')], text=True)
+        calls = re.findall(r'^\s*([0-9a-f]+):\s+bl\s+0x[0-9a-f]+ <flat_run>', disassembly, re.M)
+        if len(calls) != 1:
+            raise ValueError('expected exactly one flat_run call')
+        begin, end = syms['flat_run'], int(calls[0], 16)+4
+    else:
+        if user_entry % 4 or not rows.get(user_entry, 0) & 8:
+            raise ValueError('profile entry is not a linked user source site')
+        begin, end = user_entry, stop
+    boundaries = dict(start=syms['_start'], begin=begin, end=end, stop=stop)
     out.mkdir(parents=True, exist_ok=False)
     with (out / 'pc-map.bin').open('wb') as stream:
         for row in sorted(rows.items()):
@@ -219,7 +239,7 @@ def make_map(image, annotated, out, llvm):
                   loaded_code_data_identical=True, load_segments=hashes, pc_map_entries=len(rows),
                   pc_map_sha256=digest((out/'pc-map.bin').read_bytes()), boundaries=boundaries,
                   guest_profile_enabled='flat_memory_profile' in syms,
-                  identity_note='Only ELF program/section-table header coordinates may differ; measurement executes the original ELF.')
+                  identity_note='ELF table coordinates and load file offsets may differ; measurement executes the original ELF.')
     (out / 'profile-plan.json').write_text(json.dumps(report, indent=2)+'\n')
     return report
 
@@ -229,7 +249,9 @@ def report(profile, validation, counters):
     plan = json.loads((profile/'profile-plan.json').read_text())
     checked = json.loads(Path(validation).read_text())
     raw = struct.unpack('<20Q', Path(counters).read_bytes())
-    if raw[:5] != (0x3150434952534f, 1, 1, 1, 1) or raw[5] != 0:
+    boundaries = plan.get('boundaries', {})
+    ends_at_stop = 'end' in boundaries and boundaries['end'] == boundaries['stop']
+    if raw[:6] != (0x3150434952534f, 1, 1, 1, int(not ends_at_stop), 0):
         raise ValueError('invalid counts/window boundaries (completion is stopped before execution)')
     if not checked['verified'] or checked['image_sha256'] != plan['image_sha256']:
         raise ValueError('measurement did not validate the intended image')
@@ -245,13 +267,21 @@ def report(profile, validation, counters):
     for i, name in enumerate(('whole_elf', 'execution_interval')):
         counts = dict(zip(NAMES, raw[8+6*i:14+6*i]))
         counts['total_instructions'] = sum(counts[k] for k in NAMES[:3])
-        counts['runtime_per_kernel_source_visit'] = counts['runtime_adapter']/counts['kernel_source_visits']
-        counts['runtime_per_native_kernel_instruction'] = counts['runtime_adapter']/counts['native_kernel']
+        runtime = counts['runtime_adapter']
+        source, payload = counts['kernel_source_visits'], counts['native_kernel']
+        counts['runtime_per_kernel_source_visit'] = runtime/source if source else None
+        counts['runtime_per_native_kernel_instruction'] = runtime/payload if payload else None
         result[name] = counts
-    result['instruction_budget'] = assess_budget(result['execution_interval'])
+    if ends_at_stop:
+        result['execution_interval_bounds'] = 'user entry through the instruction before flat_completed'
+    else:
+        result['instruction_budget'] = assess_budget(result['execution_interval'])
     result['validation'] = dict(events=checked['result']['events'], counters=checked['result']['counters'],
                                 uart_bytes=checked['result']['uart_bytes'], gateways=checked['result']['transitions'],
-                                hardware_exceptions=checked['hardware_exceptions'])
+                                hardware_exceptions=checked['hardware_exceptions'],
+                                el0_interval_verified=checked.get('el0_interval_verified', False))
+    if 'exception_trace' in checked:
+        result['validation']['exception_trace'] = checked['exception_trace']
     (profile/'counts.json').write_text(json.dumps(result, indent=2)+'\n')
     return result
 
@@ -287,6 +317,8 @@ if __name__ == '__main__':
     a = sub.add_parser('annotate'); a.add_argument('--image', required=True); a.add_argument('--out', required=True)
     m = sub.add_parser('map'); m.add_argument('--image', required=True); m.add_argument('--annotated', required=True); m.add_argument('--out', required=True)
     m.add_argument('--llvm', default='/opt/homebrew/opt/llvm@16/bin')
+    m.add_argument('--user-entry', type=lambda value: int(value, 0),
+                   help='begin at this relocated user-entry PC and stop before flat_completed')
     r = sub.add_parser('report'); r.add_argument('--profile', required=True); r.add_argument('--validation', required=True); r.add_argument('--counters', required=True)
     v = sub.add_parser('run'); v.add_argument('--profile', required=True); v.add_argument('--prepared', required=True); v.add_argument('--out', required=True)
     v.add_argument('--plugin', required=True); v.add_argument('--timeout', type=int, default=600)

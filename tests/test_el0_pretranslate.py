@@ -16,9 +16,28 @@ ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'tools'))
 from el0_pretranslate import user_aliases,user_proofs
 from el0_instruction_profile import segments
 from kernel_source_verify import Elf
-from pretranslate_el0_image import finalize
+from pretranslate_el0_image import finalize, merge_ram_loads, program_headers, verify_merged_ram
 
 LLVM=Path('/opt/homebrew/opt/llvm@16/bin');QEMU=shutil.which('qemu-system-aarch64')
+
+
+class SegmentClustering(unittest.TestCase):
+    def test_budget_keeps_largest_gap_in_zero_fill_and_checks_merged_bytes(self):
+        page = 4096
+        backing = 0x40000000
+        source = b'a' * page + b'b' * page + b'c' * page
+        extents = [[page, page, 0], [3 * page, page, page], [8 * page, page, 2 * page]]
+        data = bytearray(source)
+        loads = merge_ram_loads(data, source, backing, 10 * page, extents, budget=3)
+        self.assertEqual([(va-backing, size, mem) for _, _, _, va, _, size, mem, _ in loads],
+                         [(0, 0, page), (page, 3*page, 7*page), (8*page, page, 2*page)])
+        segments = [dict(address=va, flags=flags, file_offset=offset, file_bytes=size, memory_bytes=mem)
+                    for _, flags, offset, va, _, size, mem, _ in loads]
+        elf = SimpleNamespace(data=data, sections=[dict(type=1, addr=0x1000, offset=0, size=len(source))])
+        verify_merged_ram(elf, backing, 10 * page, 0x1000, segments, extents)
+        data[segments[1]['file_offset'] + page] = 1
+        with self.assertRaisesRegex(ValueError, 'canonical RAM loads differ from merged ELF extents'):
+            verify_merged_ram(elf, backing, 10 * page, 0x1000, segments, extents)
 
 
 class Proofs(unittest.TestCase):
@@ -142,11 +161,24 @@ flat_phys: .space 12288
             headers=segments((out/'checkpoint').read_bytes());base=syms['flat_phys']
             for offset in (0,4096,8192):
                 self.assertEqual(sum(h[0]==1 and h[3]<=base+offset<h[3]+h[6] for h in headers),1)
-            result=subprocess.run([QEMU,'-M','virt-9.2,secure=off,virtualization=off','-cpu','cortex-a53',
-                                   '-nodefaults','-display','none','-monitor','none','-serial','none',
-                                   '-semihosting-config','enable=on,target=native','-device',
-                                   'loader,file='+str(out/'checkpoint')+',cpu-num=0'],capture_output=True,text=True,timeout=30)
-            self.assertEqual(result.returncode,0,result.stderr)
+            command = [QEMU,'-M','virt-9.2,secure=off,virtualization=off','-cpu','cortex-a53',
+                       '-nodefaults','-display','none','-monitor','none','-serial','none',
+                       '-semihosting-config','enable=on,target=native','-device',
+                       'loader,file='+str(out/'checkpoint')+',cpu-num=0']
+            result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            # Repackage the already-finalized image without relinking.
+            with patch('pretranslate_el0_image.prepare', return_value=dict(
+                    address=syms['flat_embedded_page_tables'], bytes=8, data=struct.pack('<Q', 0x5678))):
+                merged = finalize(out, merge_segments=True)
+            self.assertEqual(finalize(out, merge_segments=True), merged)
+            self.assertLess(merged['load_segments'], report['load_segments'])
+            self.assertEqual(merged['ram_load_segments'], 2)
+            for kind, _, offset, va, _, _, _, _ in program_headers((out/'checkpoint').read_bytes()):
+                if kind == 1:
+                    self.assertEqual((offset-va) % 4096, 0)
+            result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
 
 
 @unittest.skipUnless(os.environ.get('OSREC_EL0_EMBEDDED_RAM_IMAGE'),'set embedded RAM image for linked checks')

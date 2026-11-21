@@ -198,8 +198,8 @@ flat_run:
     %s
 '''
             for name, marker, operation in (('original', '', 'ret'),
-                                             ('marked', '__osrec_ip_5_0:', 'ret'),
-                                             ('changed', '__osrec_ip_5_0:', 'nop')):
+                                             ('marked', '__osrec_ip_a_0:', 'ret'),
+                                             ('changed', '__osrec_ip_a_0:', 'nop')):
                 image = root/name; image.mkdir()
                 (image/'program.S').write_text(source % (marker, operation))
                 subprocess.run([str(LLVM/'clang'), '--target=aarch64-none-elf', '-nostdlib',
@@ -208,6 +208,29 @@ flat_run:
             plan = make_map(root/'original', root/'marked', root/'profile', LLVM)
             self.assertTrue(plan['loaded_code_data_identical'])
             self.assertEqual(plan['pc_map_entries'], 1)
+            user_entry = plan['boundaries']['begin']
+            user_plan = make_map(root/'original', root/'marked', root/'user-profile', LLVM, user_entry=user_entry)
+            self.assertEqual(user_plan['boundaries']['begin'], user_entry)
+            self.assertEqual(user_plan['boundaries']['end'], plan['boundaries']['stop'])
+            with_moved_load = root/'moved'
+            with_moved_load.mkdir()
+            data = bytearray((root/'marked/checkpoint').read_bytes())
+            index, load = next((i, h) for i, h in enumerate(segments(data)) if h[0] == 1 and h[1] & 1)
+            _, _, offset, va, _, filesz, _, align = load
+            phoff, = struct.unpack_from('<Q', data, 32)
+            stride, count = struct.unpack_from('<HH', data, 54)
+            headers = data[phoff:phoff+stride*count]
+            data.extend(bytes((va-len(data)) % align))
+            struct.pack_into('<Q', headers, index*stride+8, len(data))
+            data.extend(data[offset:offset+filesz])
+            data.extend(bytes((-len(data)) % 8))
+            struct.pack_into('<Q', data, 32, len(data))
+            data.extend(headers)
+            (with_moved_load/'checkpoint').write_bytes(data)
+            moved_plan = make_map(root/'original', with_moved_load, root/'moved-profile', LLVM, user_entry=user_entry)
+            self.assertEqual(moved_plan['pc_map_sha256'], user_plan['pc_map_sha256'])
+            with self.assertRaisesRegex(ValueError, 'not a linked user source site'):
+                make_map(root/'original', root/'marked', root/'invalid-entry', LLVM, user_entry=user_entry+1)
             with self.assertRaisesRegex(ValueError, 'changed loaded code/data'):
                 make_map(root/'original', root/'changed', root/'invalid', LLVM)
 

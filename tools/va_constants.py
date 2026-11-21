@@ -16,6 +16,7 @@ reproduce the original words), and list near-misses (a value within 64 KiB of an
 allowed offsets) for review.
 """
 import argparse,collections,json,struct,sys
+from functools import cache
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from source_image import Ram,text_ranges
@@ -35,6 +36,41 @@ def bitmask(n,immr,imms):
     v=0
     for i in range(64//esize):v|=elem<<(i*esize)
     return v
+
+
+@cache
+def logical_moves(width):
+    """Single ORR-immediate encodings with a zero source and destination x0/w0."""
+    mask = (1 << width) - 1
+    opcode = ORR_IMM if width == 64 else ORR_IMM & 0x7fffffff
+    words = {}
+    for n in range(2 if width == 64 else 1):
+        for rotate in range(64):
+            for size in range(64):
+                value = bitmask(n, rotate, size)
+                if value is not None:
+                    words.setdefault(value & mask, opcode | n << 22 | rotate << 16 | size << 10 | 31 << 5)
+    return words
+
+
+def move_immediate(value):
+    """Encode one MOV alias into x0, including W0 writes that zero-extend to X0."""
+    if not 0 <= value <= M64:
+        return None
+    widths = (64, 32) if value < 1 << 32 else (64,)
+    for width in widths:
+        mask = (1 << width) - 1
+        for opcode, imm in ((MOVZ, value), (MOVN, value ^ mask)):
+            halfword = max(0, (imm & -imm).bit_length() - 1) // 16
+            shift = 16 * halfword
+            if not imm & ~(0xffff << shift):
+                opcode = opcode if width == 64 else opcode & 0x7fffffff
+                return opcode | halfword << 21 | (imm >> shift) << 5
+    for width in widths:
+        word = logical_moves(width).get(value)
+        if word is not None:
+            return word
+    return None
 
 
 def evaluate(expr,params):

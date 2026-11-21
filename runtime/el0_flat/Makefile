@@ -12,6 +12,12 @@ CFLAGS += -flto
 # Preserve the flat_* model/debug ABI even when LTO folds its C references.
 LINKFLAGS += -flto '-Wl,--undefined-glob=flat_*'
 endif
+ifneq ($(IMAGE_CONFIG),)
+ifneq ($(findstring OSREC_FLAT_WHOLE_KERNEL 1,$(shell cat "$(IMAGE_CONFIG)")),)
+WHOLE_KERNEL_LINKER_SCRIPT := $(ROOT)/runtime/el0_flat/whole-kernel.ld
+LINKFLAGS += -Wl,-T,$(WHOLE_KERNEL_LINKER_SCRIPT)
+endif
+endif
 ifeq ($(PROFILE),1)
 CPPFLAGS += -DOSREC_FLAT_PROFILE
 endif
@@ -54,6 +60,17 @@ $(OUT)/gateway-check: $(GATEWAY_TEST_OBJECTS)
 check-gateway: $(OUT)/gateway-check
 	$(OUT)/gateway-check
 PROGRAM_OBJECTS := $(addprefix $(OUT)/,gateway.o gateway-asm.o memory.o bytes.o emulate-program.o lower-program.o program.o start.o)
+ELF_IMAGE_BASE := 0x40200000
+PROGRAM_SOURCE := $(IMAGE)/program.S
+ifeq ($(MACOS_NATIVE),1)
+ELF_IMAGE_BASE := 0x7002000000
+CFLAGS += -ffixed-x18
+LINKFLAGS += -Wl,-z,separate-code,-z,max-page-size=16384
+LLVM_OBJDUMP ?= $(if $(findstring /,$(firstword $(CC))),$(dir $(firstword $(CC)))llvm-objdump,llvm-objdump)
+PROGRAM_SOURCE := $(OUT)/program-macos.S
+$(PROGRAM_SOURCE): $(IMAGE)/program.S $(IMAGE)/manifest.json $(IMAGE)/initial.bin $(ROOT)/tools/el0_macos_x18.py | $(OUT)
+	python3 "$(ROOT)/tools/el0_macos_x18.py" --image "$(IMAGE)" --out "$@" --objdump "$(LLVM_OBJDUMP)"
+endif
 $(PROGRAM_OBJECTS): $(OUT)/build-config $(IMAGE_CONFIG) validation.h
 ifneq ($(strip $(IMAGE)),)
 $(addprefix $(IMAGE)/,image.o payload.o program-asm.o text.o): $(OUT)/build-config $(IMAGE_CONFIG)
@@ -62,18 +79,18 @@ ifeq ($(PRETRANSLATE),1)
 .PHONY: pretranslated
 program: pretranslated
 pretranslated: $(IMAGE)/checkpoint
-	python3 $(ROOT)/tools/pretranslate_el0_image.py --image "$(IMAGE)"
+	python3 $(ROOT)/tools/pretranslate_el0_image.py --image "$(IMAGE)" $(if $(filter 1,$(MERGE_SEGMENTS)),--merge-segments)
 endif
 $(IMAGE)/image.o: $(IMAGE)/image.c program.h memory.h
 	cd "$(IMAGE)" && $(CC) $(CPPFLAGS) $(CFLAGS) -c image.c -o image.o
 $(IMAGE)/payload.o: $(IMAGE)/state.S $(wildcard $(IMAGE)/*.bin)
 	cd "$(IMAGE)" && $(CC) $(CPPFLAGS) -c state.S -o payload.o
-$(IMAGE)/program-asm.o: $(IMAGE)/program.S gateway.inc
-	cd "$(IMAGE)" && $(CC) $(CPPFLAGS) -c program.S -o program-asm.o
+$(IMAGE)/program-asm.o: $(PROGRAM_SOURCE) gateway.inc
+	cd "$(IMAGE)" && $(CC) $(CPPFLAGS) -c "$(abspath $(PROGRAM_SOURCE))" -o program-asm.o
 $(IMAGE)/text.o: $(IMAGE)/text.c program.h
 	cd "$(IMAGE)" && $(CC) $(CPPFLAGS) $(CFLAGS) -c text.c -o text.o
-$(IMAGE)/checkpoint: $(PROGRAM_OBJECTS) $(addprefix $(IMAGE)/,image.o payload.o program-asm.o text.o)
-	cd "$(IMAGE)" && $(CC) $(LINKFLAGS) -fuse-ld=lld -nostdlib -static -Wl,--no-undefined,--build-id=none,-e,_start,--image-base=0x40200000,-z,noexecstack,-Map,checkpoint.map $(PROGRAM_OBJECTS) image.o payload.o program-asm.o text.o -o checkpoint
+$(IMAGE)/checkpoint: $(PROGRAM_OBJECTS) $(addprefix $(IMAGE)/,image.o payload.o program-asm.o text.o) $(WHOLE_KERNEL_LINKER_SCRIPT)
+	cd "$(IMAGE)" && $(CC) $(LINKFLAGS) -fuse-ld=lld -nostdlib -static -Wl,--no-undefined,--build-id=none,-e,_start,--image-base=$(ELF_IMAGE_BASE),-z,noexecstack,-Map,checkpoint.map $(PROGRAM_OBJECTS) image.o payload.o program-asm.o text.o -o checkpoint
 else
 program:
 	@echo 'IMAGE must name an exported checkpoint directory'; exit 1

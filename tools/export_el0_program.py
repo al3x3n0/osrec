@@ -12,7 +12,7 @@ from kernel_code_closure import Code
 from kernel_source_verify import Elf
 from source_image_el0 import instruction_ranges
 from el0_flat_lower import *
-from el0_hardware import COMPACT_ACCESS_WIDTHS,COMPACT_WIDTH_BOUNDS,COMPACT_WIDTH_BOUNDS_ENCODING,compact_width_ranges
+from el0_hardware import COMPACT_ACCESS_WIDTHS,COMPACT_WIDTH_BOUNDS,COMPACT_WIDTH_BOUNDS_ENCODING,PCREL,compact_width_ranges
 
 MASK48=(1<<48)-1
 ROOT=Path(__file__).resolve().parents[1]
@@ -46,11 +46,12 @@ class Package:
 def text_metadata(out,p,user_elf,extra_immutable=()):
     """Derive immutable physical text and admitted user executable mappings."""
     selected=set();missing=set()
-    for line in (Path(out)/'program.S').open():
-        match=re.match(r'\.Lp([0-9a-f]+):',line)
-        if match:selected.add(int(match[1],16))
-        match=re.match(r'    \.quad 0x([0-9a-f]+),0,0,0x[0-9a-f]+,0x0,9,',line)
-        if match:missing.add(int(match[1],16))
+    with (Path(out)/'program.S').open() as stream:
+        for line in stream:
+            match=re.match(r'\.Lp([0-9a-f]+):',line)
+            if match:selected.add(int(match[1],16))
+            match=re.match(r'    \.quad 0x([0-9a-f]+),0,0,0x[0-9a-f]+,0x0,9,',line)
+            if match:missing.add(int(match[1],16))
     pages={pc&~4095 for pc in selected-missing}
     def merge(values):
         spans=[]
@@ -90,11 +91,20 @@ def captured_kernel_words(package, code, functions, executable, whole_kernel_tex
     return words
 
 
-def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_memory=False,native_kernel_stack=False,pretranslated_memory=False,validation=True,trust_syscall_abi=False,track_pretranslated_writes=False,whole_kernel_text=False,compact_proven_loads=False,compact_dynamic_memory=False,dataflow_memory=False,alias_free_memory=False,elf_ram_initialization=False):
+def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_memory=False,native_kernel_stack=False,pretranslated_memory=False,validation=True,trust_syscall_abi=False,track_pretranslated_writes=False,whole_kernel_text=False,compact_proven_loads=False,compact_dynamic_memory=False,dataflow_memory=False,alias_free_memory=False,elf_ram_initialization=False,no_model_page_tables=False,macos_direct_memory=False):
     if validation and trust_syscall_abi:raise ValueError('--trust-syscall-abi requires --no-validation')
+    if macos_direct_memory:
+        if not validation or (compact_proven_loads or compact_dynamic_memory or track_pretranslated_writes or dataflow_memory):
+            raise ValueError('native macOS direct memory requires workload validation and fixed host aliases')
+        hardware_memory=pretranslated_memory=True
+    sectioned_kernel=whole_kernel_text and not macos_direct_memory
     if track_pretranslated_writes and not pretranslated_memory:raise ValueError('--track-pretranslated-writes requires --pretranslated-memory')
     if elf_ram_initialization and not alias_free_memory:
         raise ValueError('--elf-ram-initialization requires --alias-free-memory')
+    if no_model_page_tables and not elf_ram_initialization:
+        raise ValueError('--no-model-page-tables requires --elf-ram-initialization')
+    if sectioned_kernel and (pretranslated_memory or native_kernel_stack):
+        raise ValueError('whole kernel text uses the shared logical-stack gateways')
     if dataflow_memory and (not compact_dynamic_memory or not validation):
         raise ValueError('--dataflow-memory requires --compact-dynamic-memory and runtime validation')
     if alias_free_memory:
@@ -111,6 +121,11 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
     if pretranslated_memory:native_kernel_stack=True
     if native_kernel_stack and not hardware_memory:raise ValueError('native kernel SP requires hardware aliases')
     p=Package(Path(package).resolve());out=Path(out).resolve();vmlinux=Path(vmlinux).resolve();oracle=Path(oracle).resolve()
+    if macos_direct_memory:
+        from el0_pretranslate import user_aliases
+        from el0_relocation_plan import MACOS_PAGE,macos_direct_aliases
+        initial_aliases,initial_checks=user_aliases(p,with_checks=True)
+        macos_direct_aliases(p.h[2],p.h[3],p.maps,initial_aliases)
     dczid=struct.unpack_from('<Q',p.shadow,104+8192+0xd807*8)[0]
     zero_bytes=4<<(dczid&15) if not dczid&16 and dczid&15<=9 else 0
     manifest=json.loads((p.path/'manifest.json').read_text());record=json.loads((oracle/'calls.json').read_text())
@@ -124,25 +139,28 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
     def native_pc(pc):
         i=bisect.bisect_right(native_starts,pc)-1
         return native_kernel_stack and i>=0 and pc<native_ranges[i][1]
-    table=symbols['sys_call_table'];roots=set()
-    for call in record['calls']:
-        n=call['number']
-        if 0<=n<table['size']//8:roots.add(code.containing(struct.unpack('<Q',code.elf.read(table['value']+8*n,8))[0]))
-    for name in ('vectors','el0t_64_sync','el0_svc','ret_to_user'):roots.add(code.containing(symbols[name]['value']))
-    for pc in extra:roots.add(code.containing(pc|0xffff000000000000))
-    if coverage:
-        # A translated-code listing broadens the static function set only.
-        # Its instruction order, branch outcomes and values are never replayed.
-        for line in Path(coverage).read_text().splitlines():
-            match=re.match(r'0x([0-9a-fA-F]+):',line)
-            if match:
-                pc=int(match[1],16)
-                if 0x800080000000<=pc<0x800082000000:roots.add(code.containing(pc|0xffff000000000000))
-    functions=set();pending=list(code.starts if whole_kernel_text else roots)
-    while pending:
-        f=pending.pop()
-        if f is None or f in functions:continue
-        functions.add(f);calls,taken,data=code.edges(f);pending.extend((calls|taken)-functions)
+    if whole_kernel_text:
+        functions=set(code.starts)
+    else:
+        table=symbols['sys_call_table'];roots=set()
+        for call in record['calls']:
+            n=call['number']
+            if 0<=n<table['size']//8:roots.add(code.containing(struct.unpack('<Q',code.elf.read(table['value']+8*n,8))[0]))
+        for name in ('vectors','el0t_64_sync','el0_svc','ret_to_user'):roots.add(code.containing(symbols[name]['value']))
+        for pc in extra:roots.add(code.containing(pc|0xffff000000000000))
+        if coverage:
+            # A translated-code listing broadens the static function set only.
+            # Its order, branch outcomes and values are never replayed.
+            for line in Path(coverage).read_text().splitlines():
+                match=re.match(r'0x([0-9a-fA-F]+):',line)
+                if match:
+                    pc=int(match[1],16)
+                    if 0x800080000000<=pc<0x800082000000:roots.add(code.containing(pc|0xffff000000000000))
+        functions=set();pending=list(roots)
+        while pending:
+            f=pending.pop()
+            if f is None or f in functions:continue
+            functions.add(f);calls,taken,data=code.edges(f);pending.extend((calls|taken)-functions)
     executable=instruction_ranges(code.elf,[(s['addr'],s['addr']+s['size']) for s in code.elf.sections if s['flags']&4 and s['addr'] and not s['name'].startswith('.init')])
     absent_kernel_text=[]
     words=captured_kernel_words(p,code,functions,executable,whole_kernel_text,absent_kernel_text);metadata={}
@@ -161,7 +179,10 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
     aliases_user=[];descriptor_checks=[];pretranslated_user=set();extra_immutable=set();device_sites=set();watched=[]
     if pretranslated_memory:
         from el0_pretranslate import Bindings,user_aliases,user_proofs
-        aliases_user,descriptor_checks=user_aliases(p,with_checks=True)
+        if macos_direct_memory:
+            aliases_user,descriptor_checks=initial_aliases,initial_checks
+        else:
+            aliases_user,descriptor_checks=user_aliases(p,with_checks=True)
         if track_pretranslated_writes:watched=[[pa,4096] for pa in sorted({at&-4096 for at,mask,value in descriptor_checks})]
         for s in user.sections:
             if s['flags']&2 and not s['flags']&1 and s['size']:
@@ -218,6 +239,10 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
                 (op.kind==MEMORY and op.length==1 and op.info&31==31 and not op.info&(USER|EXCLUSIVE|(1<<44)))):
             if native_pc(pc) or pc in pretranslated_user or op.kind==STACK:
                 op=Op(NATIVE,w,w);native_stack_words+=1
+        if (macos_direct_memory and pc not in device_sites and not m&0x60000000 and
+                (op.kind==MEMORY and not op.info&PCREL or native_pc(pc) and w&~31==0xd50b7420)):
+            if op.kind!=NATIVE:
+                op=Op(NATIVE,w,w,length=op.length);native_ram_words+=1
         if pc not in compact_loads and not tracked_write and not compact_dynamic_memory and pretranslated_memory and not m and (
                 pc in pretranslated_user or
                 native_pc(pc) and pc not in device_sites and op.kind==MEMORY and not op.info&(USER|ALIGNED|(1<<44)) or
@@ -250,15 +275,22 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
         from el0_hardware import direct_ranges
         memory_immutable=immutable_spans({p.pa(pc)&-4096 for pc in pcs}|extra_immutable)
         _,memory_reads,memory_writes=direct_ranges(p.maps,p.h[2],p.h[3],sorted(memory_immutable+watched))
+        if macos_direct_memory:
+            memory_reads=sorted(memory_reads+[(row['va'],row['va']+row['bytes']) for row in aliases_user])
         cache_ranges_aligned=all(not (lo|hi)&4095 for lo,hi in memory_reads+memory_writes)
         for pc,op,m in ops:
-            if m or not native_pc(pc) or op.kind!=MEMORY:continue
+            if m or op.kind!=MEMORY or not (native_pc(pc) or macos_direct_memory and pc in user_pcs):continue
             proof=literal_proof(pc,op,p.pa,lambda pa,size:p.memory[pa-p.h[2]:pa-p.h[2]+size],
                                 memory_immutable,p.h[2],p.h[3],memory_reads)
             if proof:literal_proofs[pc]=proof
             elif not compact_dynamic_memory and cache_ranges_aligned and page_cache_eligible(op,native_sp(pc)):page_caches.add(pc)
         from el0_memory_elision import user_load_groups
         user_groups=user_load_groups({pc:(op,m) for pc,op,m in ops if op.kind==MEMORY})
+    if macos_direct_memory:
+        for pc,o,_ in ops:
+            if o.kind==MEMORY and pc not in device_sites and pc not in literal_proofs:
+                raise ValueError(f'native macOS direct memory cannot lower the RAM instruction at {pc:#x}')
+        host_bindings=macos_direct_aliases(p.h[2],p.h[3],p.maps,aliases_user,memory_immutable)
     dispatch_plans={}
     native_syscall_sites=[];native_syscall_stack_range=None
     if pretranslated_memory and not validation:
@@ -288,7 +320,14 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
                 bits=14 if w&0x7e000000==0x36000000 else 19
                 candidates.add((pc+sign(w>>5&((1<<bits)-1),bits)*4)&((1<<64)-1))
         for domain,is_kernel in [('flat_kernel_direct',True),('flat_user_direct',False)]:
-            pc_indices[domain]=(domain+'_index',*pc_index_layout([pc for pc in candidates if native_pc(pc)==is_kernel]))
+            domain_pcs=[pc for pc in candidates if native_pc(pc)==is_kernel]
+            if macos_direct_memory and not is_kernel:
+                domain_pcs=[pc for pc in domain_pcs if pc in user_pcs]
+            pc_indices[domain]=(domain+'_index',*pc_index_layout(domain_pcs))
+    # Keep each body next to its resume thunks. Inter-section jumps use an
+    # explicit register-preserving edge instead of a linker-generated veneer.
+    def text_section(pc):
+        return '.text.osrec.%x' % (pc >> 16) if pc in pc_set else '.text.osrec.missing'
     def label(pc):
         if pc not in words or pc in skipped:missing.add(pc)
         return '.Lp%x'%pc
@@ -296,10 +335,18 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
     def thunk(name,to,private=False):
         pc=int(re.search(r'([0-9a-f]+)$',name)[1],16)
         macro='flat_native_resume' if native_sp(pc) and not private else 'flat_resume'
-        return '.pushsection .text.resumes,"ax"\n%s %s,%s,0\n.popsection\n'%(macro,name,to)
+        section=text_section(pc)+'.resumes' if sectioned_kernel else '.text.resumes'
+        return '.pushsection %s,"ax"\n%s %s,%s,0\n.popsection\n'%(section,macro,name,to)
     def capture(pc,name,site_pc,word,kind,private=False):
-        macro='flat_native_capture' if native_sp(pc) and not private else 'flat_capture'
+        if sectioned_kernel:
+            macro='flat_capture_long'
+        else:
+            macro='flat_native_capture' if native_sp(pc) and not private else 'flat_capture'
         return '%s %s,0x%x,0x%x,%d\n'%(macro,name,site_pc,word,kind)
+    def jump(pc,target,to=label):
+        if sectioned_kernel and text_section(pc)!=text_section(target):
+            return '    flat_long_branch %s\n'%resume(target),5
+        return '    b %s\n'%to(target),1
     for pc,o,m in ops:
         if o.kind in (MEMORY,STACK):resume(pc+o.length*4)
     def constant(reg,value):
@@ -309,16 +356,18 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
     def control(pc,w,to=label,specialize=True):
         if w&0xfc000000 in (0x14000000,0x94000000):
             target=(pc+sign(w&0x3ffffff,26)*4)&((1<<64)-1)
-            destination=copy_label(pc,target) if specialize and pc in call_copies else to(target)
-            return (constant(30,pc+4) if w&(1<<31) else '')+'    b %s\n'%destination
+            branch='    b %s\n'%copy_label(pc,target) if specialize and pc in call_copies else jump(pc,target,to)[0]
+            return (constant(30,pc+4) if w&(1<<31) else '')+branch
         if w&0xff000010==0x54000000:
             target=pc+sign(w>>5&0x7ffff,19)*4;inv=(w&~(0x7ffff<<5))^1
-            if w&15>=14:return '    b %s\n'%to(target)
-            return '    .inst 0x%x\n    b %s\n'%((inv&~(0x7ffff<<5))|(2<<5),to(target))
+            branch,length=jump(pc,target,to)
+            if w&15>=14:return branch
+            return '    .inst 0x%x\n'%((inv&~(0x7ffff<<5))|((length+1)<<5))+branch
         if w&0x7e000000 in (0x34000000,0x36000000):
             bits=14 if w&0x7e000000==0x36000000 else 19;mask=(1<<bits)-1
             target=pc+sign(w>>5&mask,bits)*4;inv=(w^(1<<24))&~(mask<<5)
-            return '    .inst 0x%x\n    b %s\n'%(inv|(2<<5),to(target))
+            branch,length=jump(pc,target,to)
+            return '    .inst 0x%x\n'%(inv|((length+1)<<5))+branch
         return '    .inst 0x%08x\n'%w
     mmio=list(struct.iter_unpack('<5Q',(oracle/'mmio.bin').read_bytes()))
     uart_va=(min(a for pc,a,s,w,v in mmio)&~4095) if mmio else 0
@@ -327,12 +376,23 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
     (out/'runtime-config.h').write_text(
         '/* Generated export/build contract. */\n'
         '#define OSREC_FLAT_VALIDATION %d\n'
-        '#define OSREC_FLAT_IMMUTABLE_BITMAP %d\n' % (validation,pretranslated_memory))
+        '#define OSREC_FLAT_IMMUTABLE_BITMAP %d\n' % (validation,pretranslated_memory) +
+        ('#define OSREC_FLAT_WHOLE_KERNEL 1\n' if sectioned_kernel else '') +
+        ('#define OSREC_FLAT_MACOS_DIRECT_MEMORY 1\n' if macos_direct_memory else ''))
     if track_pretranslated_writes:
         with (out/'runtime-config.h').open('a') as config:config.write('#define OSREC_TRACK_PRETRANSLATED_WRITES 1\n')
     with (out/'program.S').open('w') as stream:
         stream.write('#include "gateway.inc"\n.text\n')
+        active_section=None
+        inline_hardware=hardware_memory and not sectioned_kernel
         for pc in pcs:
+            if sectioned_kernel:
+                section=text_section(pc)
+                if section!=active_section:
+                    if active_section is not None:
+                        stream.write('    flat_long_branch %s\n'%resume(pc))
+                    stream.write('.section %s,"ax"\n'%section)
+                    active_section=section
             w=words[pc];stream.write('.Lp%x:\n'%pc)
             if pc not in descriptions:
                 if pretranslated_memory and pc in groups:
@@ -343,7 +403,7 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
                     value=((pc&~4095)+(delta<<12)) if w&(1<<31) else pc+delta
                     stream.write(constant(w&31,value&((1<<64)-1)))
                 else:stream.write(control(pc,w))
-                if pc+4 not in words:stream.write('    b %s\n'%label(pc+4))
+                if pc+4 not in words:stream.write(jump(pc,pc+4)[0])
             else:
                 idx,o,m=descriptions[pc]
                 # A checked store may allocate the bytes below the old SP.
@@ -374,7 +434,7 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
                     stream.write(thunk('.Lr%x'%pc,'.Lp%x'%pc))
                     continue
                 inline=''
-                if hardware_memory and o.kind in (STACK,SYSTEM):
+                if inline_hardware and o.kind in (STACK,SYSTEM):
                     from el0_hardware import stack_path,system_path
                     inline=stack_path(o) if o.kind==STACK else system_path(o.word,m,page_offsets=True)
                 if inline:
@@ -388,7 +448,7 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
                     if o.kind==STACK:stream.write(thunk('.Lnr%x'%pc,'.Lp%x'%pc))
                     stream.write(thunk('.Lr%x'%pc,'.Lp%x'%pc))
                     continue
-                if hardware_memory and o.kind==MEMORY:
+                if inline_hardware and o.kind==MEMORY and not macos_direct_memory:
                     from el0_hardware import memory_path
                     if pc in page_caches:
                         from el0_memory_elision import page_cache_probe
@@ -405,7 +465,7 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
                     if inline_uart and pc not in user_pcs and not o.info&USER:
                         from el0_uart import uart_path
                         stream.write(uart_path(pc,o,label(pc+o.length*4),uart_va,native_sp=native_sp(pc)))
-                if hardware_memory and o.kind==INDIRECT:
+                if inline_hardware and o.kind==INDIRECT:
                     if pc in dispatch_plans:
                         from el0_dispatch import dispatch_path
                         stream.write(dispatch_path(dispatch_plans[pc],compact=pretranslated_memory and native_pc(pc)))
@@ -414,7 +474,7 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
                     stream.write(indirect_path(pc,o.word,table=domain+'_pcs' if native_kernel_stack else 'flat_direct_pcs',
                                                count=domain+'_count' if native_kernel_stack else 'flat_direct_pc_count',cache=True,
                                                index=pc_indices.get(domain),compact=pretranslated_memory and native_pc(pc)))
-                if hardware_memory and o.kind==SYSTEM:
+                if inline_hardware and o.kind==SYSTEM:
                     if pretranslated_memory and native_pc(pc):
                         from el0_return import user_return_path
                         stream.write(user_return_path(pc,o.word,m,pc_indices.get('flat_user_direct'),len(descriptor_checks),validation=validation,tracked=track_pretranslated_writes))
@@ -422,8 +482,9 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
                     stream.write(lowered_branch_path(pc,o.word,m,label))
                     stream.write(guarded_system_path(pc,o.word,m,label(pc+4)))
                     stream.write(counter_path(pc,o.word,m,label(pc+4)))
-                    stream.write(zero_path(pc,o.word,m,label(pc+4),zero_bytes,compact=compact_table_mode))
-                if hardware_memory and o.kind==SVC:
+                    if not macos_direct_memory:
+                        stream.write(zero_path(pc,o.word,m,label(pc+4),zero_bytes,compact=compact_table_mode))
+                if inline_hardware and o.kind==SVC:
                     if pretranslated_memory and not validation:
                         from el0_syscall import native_syscall_path
                         inline=native_syscall_path(pc,o.word,m,pc_indices.get('flat_kernel_direct'),native_syscall_stack_range)
@@ -432,7 +493,7 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
                     elif validation and not native_kernel_stack:
                         from el0_syscall import syscall_path
                         stream.write(syscall_path(pc,o.word,m))
-                if hardware_memory and not alias_free_memory and o.kind==OBSERVE:
+                if inline_hardware and not alias_free_memory and o.kind==OBSERVE:
                     from el0_hardware import observe_path
                     stream.write(observe_path(pc,'.Ln%x'%pc))
                 stream.write(capture(pc,'.Lc%x'%pc,pc,w,idx*2))
@@ -456,7 +517,7 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
                         for dest,to in exits.items():
                             stream.write(to+':\n'+capture(pc,'.Lex%x_%x'%(pc,dest),dest,0,idx*2+1,private=private_store));label(dest)
                     else:stream.write('    .inst 0x%08x\n'%o.native)
-                    if hardware_memory and o.kind==MEMORY and not private_store:
+                    if inline_hardware and o.kind==MEMORY and not private_store and not macos_direct_memory:
                         from el0_hardware import memory_finish_path
                         stream.write(memory_finish_path(pc,o,label(pc+4*o.length),native_sp=native_sp(pc)))
                     stream.write(capture(pc,'.Ld%x'%pc,pc+4*o.length,0,idx*2+1,private=private_store))
@@ -471,6 +532,8 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
             from el0_call_analysis import write_call_trees
             write_call_trees(stream,call_plan,words,descriptions,label,constant,control,page_offsets=True)
         # Missing targets are real coverage boundaries, never replay-selected paths.
+        if sectioned_kernel:
+            stream.write('.section .text.osrec.missing,"ax"\n')
         for pc in sorted(missing):
             if pc in descriptions:continue
             idx=len(ops);o=Op(COVERAGE,words.get(pc,0));ops.append((pc,o,0));descriptions[pc]=(idx,o,0)
@@ -481,7 +544,7 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
             stream.write(dispatch_data(dispatch_plans))
         stream.write('.section .rodata,"a"\n.balign 8\n.global flat_pcs\nflat_pcs:\n')
         for pc in sorted(set(pcs)|missing):stream.write('    .quad 0x%x,%s\n'%(pc,resume(pc)))
-        if hardware_memory:
+        if inline_hardware:
             from el0_hardware import indirect_resume
             stream.write('.global flat_direct_pc_count\nflat_direct_pc_count:\n.quad %d\n'%(len(set(pcs)|missing)))
             stream.write('.global flat_direct_pcs\nflat_direct_pcs:\n')
@@ -498,6 +561,8 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
                 for name,base,bits in pc_indices.values():stream.write('.quad 0x%x,0x%x,%s\n'%(base,1<<bits,name))
                 for domain,(name,base,bits) in pc_indices.items():
                     selected=[pc for pc in sorted(set(pcs)|missing) if native_pc(pc)==(domain=='flat_kernel_direct')]
+                    if macos_direct_memory and domain=='flat_user_direct':
+                        selected=[pc for pc in selected if pc in user_pcs]
                     stream.write(pc_index_data(name,selected,(base,bits)))
             stream.write('.pushsection .text.resumes,"ax"\n')
             for pc in sorted(set(pcs)|missing):stream.write(indirect_resume('.Li%x'%pc,label(pc),compact=pretranslated_memory and native_pc(pc)))
@@ -561,7 +626,7 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
             hardware['immutable_page_bitmap']=dict(bytes=len(bitmap),page_bytes=4096,sha256=hashlib.sha256(bitmap).hexdigest())
             if page_caches:hardware['fixed_page_memory_cache']=dict(sites=len(page_caches),page_bytes=4096)
             hardware['pretranslated_memory']=dict(user_aliases=aliases_user,device_sites=sorted(device_sites),
-                user_native_sites=sorted(pretranslated_user),table_capacity=4<<20,
+                user_native_sites=sorted(pretranslated_user),table_capacity=0 if macos_direct_memory else 4<<20,
                 descriptor_checks=descriptor_checks,
                 contract='initial resident bindings are fixed; new demand mappings use checked accesses; native kernel RAM faults stop')
             if track_pretranslated_writes:hardware['pretranslated_memory']['watched_pages']=[pa for pa,size in watched]
@@ -584,7 +649,7 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
                 dst.write(chunk);left-=len(chunk)
             extents.append((lo,hi-lo,offset))
     if elf_ram_initialization:
-        hardware['elf_ram_initialization']=dict(initial_extents=extents,table_capacity=4<<20)
+        hardware['elf_ram_initialization']=dict(initial_extents=extents,table_capacity=0 if no_model_page_tables else 4<<20)
     if pretranslated_memory:
         hardware['pretranslated_memory']['initial_extents']=extents
     if elf_ram_initialization or pretranslated_memory:
@@ -618,8 +683,18 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
         align=128 if hardware_memory and name=='flat_shadow' else 16
         data+='.balign %d\n.global %s\n%s:\n.incbin "%s"\n'%(align,name,name,file)
     data+='.section .rodata,"a"\n'
+    if whole_kernel_text:
+        data+='.balign 8\n.global flat_whole_kernel_text\nflat_whole_kernel_text:\n.quad 1\n'
+    if macos_direct_memory:
+        data+='.balign 8\n.global flat_macos_direct_memory\nflat_macos_direct_memory:\n.quad 1\n.size flat_macos_direct_memory,8\n'
+        data+='.balign 8\n.global flat_host_aliases\nflat_host_aliases:\n'
+        data+=''.join('.quad 0x%x,flat_phys+0x%x,0x%x,%d\n' %
+                      (row['va'],row['backing'],row['bytes'],row['flags']) for row in host_bindings)
+        data+='.size flat_host_aliases,.-flat_host_aliases\n'
     for name,file in [('flat_payload','ram.bin'),('flat_maps','maps.bin'),('flat_expected','expected.bin'),('flat_counters','counters.bin'),('flat_expected_uart','uart.bin'),('osrec_kernel_ranges','ranges.bin'),('osrec_veneer_origins','origins.bin')]:
         data+='.balign 16\n.global %s\n%s:\n.incbin "%s"\n'%(name,name,file)
+        if no_model_page_tables and name=='flat_payload':
+            data+='.size flat_payload,.-flat_payload\n'
     for name,value in [('osrec_kernel_range_count',p.h[5]),('osrec_veneer_count',p.h[8]),('osrec_veneer_base',p.h[7]),('flat_expected_uart_bytes',len(uart))]:data+='.global %s\n%s:\n.quad 0x%x\n'%(name,name,value)
     if hardware_memory:
         data+='.balign 8\n.global flat_shadow_header_alignment\nflat_shadow_header_alignment:\n.quad 128\n'
@@ -675,11 +750,11 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
         data+=''.join('.quad flat_phys+0x%x,0x%x,0x%x\n'%(pa-p.h[2],mask,value) for pa,mask,value in descriptor_checks)
     if elf_ram_initialization:
         data+='.balign 8\n.global flat_elf_ram_initialization\nflat_elf_ram_initialization:\n.quad 1\n'
-    if elf_ram_initialization or pretranslated_memory:
+    if (pretranslated_memory and not macos_direct_memory) or (elf_ram_initialization and not no_model_page_tables):
         data+='.balign 4096\n.global flat_embedded_page_tables\nflat_embedded_page_tables:\n.space %d\n'%(4<<20)
     data+='.section .note.GNU-stack,"",%progbits\n';(out/'state.S').write_text(data)
     s='#include "program.h"\nextern unsigned char flat_shadow[],flat_payload[],flat_maps[],flat_expected[],flat_counters[];\nextern const struct flat_pc flat_pcs[]; extern const struct flat_op flat_ops[];\n'
-    s+='unsigned char flat_phys[%d] __attribute__((aligned(4096)));\n'%p.h[3]
+    s+='unsigned char flat_phys[%d] __attribute__((aligned(%d)));\n'%(p.h[3],MACOS_PAGE if macos_direct_memory else 4096)
     s+='unsigned char flat_uart_registers[4096],flat_uart[4096];\n'
     if validation:s+='struct flat_event flat_events[%d];\n'%(count+1024)
     s+='static const struct flat_ram ram[]={{0x%x,%d,flat_phys},{0x9000000,4096,flat_uart_registers}};\n'%(p.h[2],p.h[3])
@@ -724,6 +799,7 @@ def export(package,vmlinux,user_elf,oracle,out,extra=(),coverage=None,hardware_m
         (out/'dataflow-memory.json').write_text(json.dumps(dict(format='osrec-dataflow-memory-v1',
             complete=False,analysis=flow_report,sites=[dict(pc=pc,**proof) for pc,proof in sorted(flow_sites.items())]),indent=2)+'\n')
     report['indirect_dispatch_sites']=len(dispatch_plans)
+    if macos_direct_memory:report['macos_direct_memory']=True
     if native_syscall_sites:
         report['native_syscall_sites']=len(native_syscall_sites)
         report['syscall_backend']='inline-native'
@@ -746,15 +822,18 @@ if __name__=='__main__':
     a.add_argument('--dataflow-memory',action='store_true',help='experimental checked dataflow lowering of user memory accesses; requires compact dynamic memory')
     a.add_argument('--alias-free-memory',action='store_true',help='inline compact RAM conversion with logical guest stacks and no original VA mappings; requires hardware memory')
     a.add_argument('--elf-ram-initialization',action='store_true',help='load RAM and model page tables directly from the ELF; requires alias-free memory and post-link finalization')
+    a.add_argument('--no-model-page-tables',action='store_true',help='with --elf-ram-initialization, emit only the RAM loads for a flat address-space harness')
     a.add_argument('--compact-dynamic-memory',action='store_true',help='convert live kernel memory operands to compact backing; user mappings stay live; implies compact proven loads')
     a.add_argument('--compact-proven-loads',action='store_true',help='rewrite statically proven single-target integer user loads to ELF backing; partial relocation only')
     a.add_argument('--whole-kernel-text',action='store_true',help='include every resident persistent ELF-identified kernel instruction; report absent ranges; not a completeness claim for unknown executable dump pages')
     a.add_argument('--hardware-memory',action='store_true',help='inline static kernel RAM accesses; requires the generated hardware page-table load plan')
     a.add_argument('--native-kernel-stack',action='store_true',help='execute kernel SP instructions directly; hardware aliases and mapped native kernel stacks required')
     a.add_argument('--pretranslated-memory',action='store_true',help='embed resolved mappings and RAM into ELF; requires post-link tools/pretranslate_el0_image.py')
+    a.add_argument('--macos-direct-memory',action='store_true',
+                   help='emit native accesses and preinstalled macOS aliases for a compatible fixed capture')
     a.add_argument('--track-pretranslated-writes',action='store_true',help='experimental: guard all native stores and cache descriptor validation until watched writes')
     a.add_argument('--no-validation',action='store_true',help='execution-only production image: omit event/result validation and saved-return context comparisons')
     a.add_argument('--trust-syscall-abi',action='store_true',help='with --no-validation, retain direct user-memory proofs under the captured syscall/fault return ABI')
     p=a.parse_args()
     if p.trust_syscall_abi and not p.no_validation:a.error('--trust-syscall-abi requires --no-validation')
-    print(json.dumps(export(p.package,p.vmlinux,p.user_elf,p.oracle,p.out,p.extra_pc,p.coverage,p.hardware_memory,p.native_kernel_stack,p.pretranslated_memory,validation=not p.no_validation,trust_syscall_abi=p.trust_syscall_abi,track_pretranslated_writes=p.track_pretranslated_writes,whole_kernel_text=p.whole_kernel_text,compact_proven_loads=p.compact_proven_loads,compact_dynamic_memory=p.compact_dynamic_memory,dataflow_memory=p.dataflow_memory,alias_free_memory=p.alias_free_memory,elf_ram_initialization=p.elf_ram_initialization),indent=2))
+    print(json.dumps(export(p.package,p.vmlinux,p.user_elf,p.oracle,p.out,p.extra_pc,p.coverage,p.hardware_memory,p.native_kernel_stack,p.pretranslated_memory,validation=not p.no_validation,trust_syscall_abi=p.trust_syscall_abi,track_pretranslated_writes=p.track_pretranslated_writes,whole_kernel_text=p.whole_kernel_text,compact_proven_loads=p.compact_proven_loads,compact_dynamic_memory=p.compact_dynamic_memory,dataflow_memory=p.dataflow_memory,alias_free_memory=p.alias_free_memory,elf_ram_initialization=p.elf_ram_initialization,no_model_page_tables=p.no_model_page_tables,macos_direct_memory=p.macos_direct_memory),indent=2))

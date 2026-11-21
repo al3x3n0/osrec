@@ -5,7 +5,7 @@ The kernel subcommand creates a reusable code/state capsule. Build runs real
 captured-kernel execveat during construction, records a native reference, and
 uses the existing EL0 AOT exporter. No host loader enters the delivery image.
 """
-import argparse,hashlib,json,mmap,shutil,struct,subprocess,sys,uuid
+import argparse,hashlib,json,mmap,platform,shlex,shutil,struct,subprocess,sys,uuid
 from pathlib import Path
 from export_el0_program import Package,export
 from export_native_checkpoint import sparse_runs
@@ -298,7 +298,11 @@ def describe_process(package,user,info,kernel):
         if kind==0 and not -(1<<27)<=target-pc<(1<<27):raise ValueError('SVC gateway is out of range')
         rows.append(struct.pack('<QIIQ',pc,word,kind,target))
     hook=kernel['result_hook'];image=Elf(Path(kernel['_directory'])/'kernel.elf')
-    word=struct.unpack('<I',image.read(hook|0xffff000000000000,4))[0]
+    try:
+        hook_bytes=image.read(hook,4)  # Low-linked kernels already use the recorded VA.
+    except ValueError:
+        hook_bytes=image.read(hook|0xffff000000000000,4)
+    word=struct.unpack('<I',hook_bytes)[0]
     if word&0xfc000000!=0x94000000:raise ValueError('invalid syscall observation hook')
     displacement=word&0x3ffffff
     if displacement&(1<<25):displacement-=1<<26
@@ -307,52 +311,104 @@ def describe_process(package,user,info,kernel):
     return dict(user_elf_sha256=info['sha256'],user_sites=len(sites),syscall_sites=sum(k==0 for pc,w,k in sites),
                 gateway_base=hex(base),gateway_size=size,result_hook=hex(hook),vma_layout_sha256=digest(package/'vma.bin'))
 
-def lower_application(package,reference,kernel,user,out,toolchain,validate):
-    """Expand whole-function coverage only at explicit missing-code boundaries.
+def lower_application(package,reference,kernel,user,out,toolchain,validate,*,macos_cc=None,extra_pcs=(),kernel_slice=False,
+                      merge_segments=False,macos_native=False,macos_direct_memory=False):
+    """Link the resident kernel, or expand an explicitly requested slice.
 
     Every attempt starts from the same prepared RAM and input records. No
     observed result or control-flow trace supplies runtime computation.
     """
     from check_el0_program import run,run_qemu
     from kernel_code_closure import Code
-    coverage=kernel/'coverage.log';extra=set();attempts=[];code=None
-    for attempt in range(12):
+    coverage=kernel/'coverage.log' if kernel_slice else None;extra=set(extra_pcs);attempts=[];code=None
+    export_options = (dict(hardware_memory=True, alias_free_memory=True, elf_ram_initialization=True,
+                           no_model_page_tables=True) if macos_cc else {})
+    if macos_direct_memory:
+        export_options = dict(macos_direct_memory=True)
+    if not kernel_slice:
+        export_options['whole_kernel_text']=True
+    for attempt in range(12 if kernel_slice else 1):
         image=out/('program-attempt-%d'%attempt)
-        exported=export(package,kernel/'kernel.elf',user,reference,image,extra=sorted(extra),coverage=coverage if coverage.is_file() else None)
-        command=['docker','run','--rm','--network','none','--mount','type=bind,src='+str(ROOT)+',dst=/src,readonly',
-                 '--mount','type=bind,src='+str(out)+',dst=/out','-w','/src/runtime/el0_flat',toolchain,'make','CC=clang-19',
-                 'OUT=/out/runtime','IMAGE=/out/'+image.name,'program','observer']
+        runtime=out/('runtime-attempt-%d'%attempt)
+        exported=export(package,kernel/'kernel.elf',user,reference,image,extra=sorted(extra),
+                        coverage=coverage if coverage and coverage.is_file() else None,**export_options)
+        if macos_cc:
+            command=['make','-C',str(ROOT/'runtime/el0_flat'),'CC='+shlex.quote(macos_cc)+' --target=aarch64-none-elf',
+                     'OUT='+str(runtime),'IMAGE='+str(image),'LTO=1','PRETRANSLATE=1','program']
+            if macos_native:
+                command.append('MACOS_NATIVE=1')
+            if merge_segments:
+                command.append('MERGE_SEGMENTS=1')
+        else:
+            command=['docker','run','--rm','--network','none','--mount','type=bind,src='+str(ROOT)+',dst=/src,readonly',
+                     '--mount','type=bind,src='+str(out)+',dst=/out','-w','/src/runtime/el0_flat',toolchain,'make','CC=clang-19',
+                     'OUT=/out/'+runtime.name,'IMAGE=/out/'+image.name,'program','observer']
         print('Building EL0 code coverage attempt %d'%attempt,file=sys.stderr,flush=True)
         with (out/('build-%d.log'%attempt)).open('wb') as log:
-            subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=900)
+            subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=900 if kernel_slice else 3600)
         verification={}
         if validate:
-            verification['native']=run(image,out/('native-validation-%d'%attempt),out/'runtime/flat-observe')
-            result=verification['native']['result']
-            if not verification['native']['verified']:
+            if macos_cc:
+                if macos_native:
+                    from el0_macos_native import run as run_macos
+                else:
+                    from el0_macos import run as run_macos
+                checked=run_macos(image/'checkpoint',out/('macos-validation-%d'%attempt),
+                                  user_elf=user,reference=reference/'calls.json')
+                verification['macos']=checked
+            else:
+                checked=run(image,out/('native-validation-%d'%attempt),runtime/'flat-observe')
+                verification['native']=checked
+            if not checked['verified']:
+                result=checked.get('result',{})
+                if not kernel_slice or result.get('reason')!=0x100:
+                    raise ValueError('EL0 continuation stopped: '+json.dumps(checked))
                 pc=result['missing_pc'];code=code or Code(kernel/'kernel.elf');original=pc|0xffff000000000000
                 f=code.containing(original)
-                if result['reason']!=0x100 or pc%4 or pc in extra or f is None or not code.text[0]<=original<code.text[1] or not original<code.extent(f)[1]:
+                if pc%4 or pc in extra or f is None or not code.text[0]<=original<code.text[1] or not original<code.extent(f)[1]:
                     raise ValueError('EL0 native continuation stopped: '+json.dumps(result))
                 attempts.append(dict(attempt=attempt,missing_pc=hex(pc),function=code.name(f)))
                 write_json(out/'coverage-expansions.json',attempts);extra.add(pc)
                 print('Including captured function '+code.name(f)+' at '+hex(pc),file=sys.stderr,flush=True)
                 continue
-            verification['qemu']=run_qemu(image,out/'qemu-validation')
+            if not macos_cc:
+                verification['qemu']=run_qemu(image,out/'qemu-validation')
+            else:
+                (out/('macos-validation-%d'%attempt)).rename(out/'macos-validation')
         else:
             from audit_el0_image import audit
             from check_el0_program import load_plan
-            checked=audit(image/'checkpoint');write_json(out/'audit.json',checked);load_plan(image,checked)
+            checked=audit(image/'checkpoint');write_json(out/'audit.json',checked)
+            if not macos_cc:
+                load_plan(image,checked)
         image.rename(out/'program')
+        runtime.rename(out/'runtime')
         return exported,verification,attempts
     raise ValueError('kernel code coverage did not converge in 12 complete attempts; see coverage-expansions.json')
 
-def build_application(libkernel,user_elf,out,args=(),expect_exit=0,toolchain='osrec-kbuild-clang19:latest',validate=True,baseline=False):
+def build_application(libkernel,user_elf,out,args=(),expect_exit=0,toolchain='osrec-kbuild-clang19:latest',validate=True,baseline=False,
+                      *,macos_cc=None,extra_pcs=(),kernel_slice=False,merge_segments=False,macos_native=False,
+                      macos_direct_memory=False):
     # Complete preflight before opening an output directory or running the ELF.
     info=inspect_user(user_elf);kernel,m=load_kernel(libkernel);user=Path(user_elf).resolve();out=Path(out).resolve()
     if len(args)>128 or any('\0' in a or len(a.encode())>65536 for a in args):raise ValueError('invalid program arguments')
     if not 0<=expect_exit<=255:raise ValueError('expected exit status must be in 0..255')
     if baseline and m['constructor_abi']<2:raise ValueError('--linux-baseline requires a capsule rebuilt with constructor ABI 2')
+    if extra_pcs and not kernel_slice:raise ValueError('--extra-pc requires --kernel-slice')
+    if macos_native and macos_cc is None:raise ValueError('native macOS delivery requires a cross compiler')
+    if macos_direct_memory and (not macos_native or not validate):
+        raise ValueError('--macos-direct-memory requires a validated --macos-native-cc build')
+    if merge_segments and macos_cc is None:raise ValueError('--merge-segments requires a macOS cross compiler for ELF RAM initialization')
+    if macos_cc is not None:
+        if sys.platform!='darwin' or platform.machine()!='arm64':
+            raise ValueError('macOS delivery requires Apple Silicon macOS')
+        compiler=shutil.which(macos_cc)
+        if not compiler:
+            raise ValueError('macOS cross compiler is not executable: '+macos_cc)
+        macos_cc=compiler
+        if validate:
+            loader='native-loader' if macos_native else 'loader'
+            subprocess.run(['make','-C',str(ROOT/'runtime/el0_macos'),loader],check=True,timeout=60)
     p=Package(kernel/'template')
     if any(s['va']<hi and lo<s['va']+s['bytes'] for s in info['segments'] for lo,hi in struct.iter_unpack('<QQ',p.ranges)):
         raise ValueError('user ELF overlaps captured kernel address space')
@@ -376,12 +432,17 @@ def build_application(libkernel,user_elf,out,args=(),expect_exit=0,toolchain='os
     if not last or last['number'] not in (93,94) or last['arguments'][0]&255!=expect_exit:
         raise ValueError('user program did not terminate with expected exit status '+str(expect_exit))
     baseline_report=linux_baseline(kernel,user,args,reference,out,expect_exit) if baseline else None
-    exported,verification,attempts=lower_application(package,reference,kernel,user,out,toolchain,validate)
+    exported,verification,attempts=lower_application(package,reference,kernel,user,out,toolchain,validate,
+                                                     macos_cc=macos_cc,extra_pcs=extra_pcs,kernel_slice=kernel_slice,
+                                                     merge_segments=merge_segments,macos_native=macos_native,
+                                                     macos_direct_memory=macos_direct_memory)
+    target='macos-native' if macos_native else 'macos-flat' if macos_cc else 'linux'
     report=dict(format='osrec-el0-user-application-v1',user_sha256=info['sha256'],arguments=list(args),expected_exit=expect_exit,
                 prepared_state_sha256=identity,kernel_assets=m['assets'],
                 linux_baseline=baseline_report,
                 initialization='captured-kernel execveat plus executable-page population; user starts at ELF entry',
                 prepared=prepared,reference=recorded,code=exported,coverage_expansions=attempts,executable='program/checkpoint',
+                coverage_seed_pcs=[hex(pc) for pc in extra_pcs],delivery_target=target,
                 verified=bool(verification) and all(v['verified'] for v in verification.values()),
                 reference_kind='native captured-kernel execution with deterministic RAM inputs; not a fresh live-Linux oracle',
                 delivery_execution_level=0)
@@ -397,7 +458,21 @@ if __name__=='__main__':
     b.add_argument('--arg',action='append',default=[]);b.add_argument('--expect-exit',type=int,default=0)
     b.add_argument('--toolchain',default='osrec-kbuild-clang19:latest');b.add_argument('--no-validate',action='store_true')
     b.add_argument('--linux-baseline',action='store_true',help='also compare unmodified user ELF exit/stdout on the Linux host')
+    macos=b.add_mutually_exclusive_group()
+    macos.add_argument('--macos-flat-cc',help='AArch64 ELF cross compiler for flat macOS delivery and validation')
+    macos.add_argument('--macos-native-cc',help='AArch64 ELF cross compiler for native macOS process delivery and validation')
+    b.add_argument('--macos-direct-memory',action='store_true',
+                   help='use fixed native host data aliases for compatible captured mappings')
+    b.add_argument('--merge-segments',action='store_true',help='cluster the preloaded ELF RAM segments in the flat build')
+    b.add_argument('--kernel-slice',action='store_true',help='select a workload-specific kernel closure instead of all resident kernel text')
+    b.add_argument('--extra-pc',action='append',type=lambda value:int(value,0),default=[],
+                   help='include the whole captured kernel function containing this PC')
     options=parser.parse_args()
     if options.command=='kernel':result=kernel_capsule(options.package,options.vmlinux,options.dwarf_db,options.constructor,options.out,options.coverage,options.counter_base,options.uart_va)
-    else:result=build_application(options.libkernel,options.user_elf,options.out,options.arg,options.expect_exit,options.toolchain,not options.no_validate,options.linux_baseline)
+    else:result=build_application(options.libkernel,options.user_elf,options.out,options.arg,options.expect_exit,options.toolchain,
+                                  not options.no_validate,options.linux_baseline,
+                                  macos_cc=options.macos_native_cc or options.macos_flat_cc,
+                                  extra_pcs=options.extra_pc,kernel_slice=options.kernel_slice,
+                                  merge_segments=options.merge_segments,macos_native=options.macos_native_cc is not None,
+                                  macos_direct_memory=options.macos_direct_memory)
     print(json.dumps({key:result[key] for key in ('format','verified','executable','architecture') if key in result},indent=2))

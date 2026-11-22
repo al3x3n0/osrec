@@ -1,0 +1,521 @@
+--- a/runtime/linuxkernel_el0/native.c
++++ b/runtime/linuxkernel_el0/native.c
+@@ -43,6 +43,15 @@
+ struct lk_el0_native {
+     struct package_header h;
+     struct lk_el0_kernel *kernel;
++    uint64_t fixed_tpidr_el1, fixed_dczid_el0;
++    uint64_t fixed_guest_x18, fixed_saved_x16;
++    uint64_t fixed_saved_x17, fixed_saved_x15;
++    uint64_t fixed_svc_pc, fixed_return_thunk;
++    uint64_t fixed_event_limit;
++    struct lk_el0_event *events;
++    uint64_t event_capacity,event_count;
++    struct lk_el0_event *pending_event;
++    uint64_t pending_regs;
+     struct osrec_shadow shadow;
+     struct osrec_context initial, *context;
+     struct lk_el0_fp fp;
+@@ -71,8 +80,6 @@
+     unsigned char *executable_bytes;
+     size_t executables;
+     unsigned application,prepared,kernel_visible;
+-    struct lk_el0_event *events,*pending_event;
+-    uint64_t event_capacity,event_count,pending_regs;
+     struct vma_config vma;
+     struct interval *vmas;
+     size_t vma_count;
+@@ -433,6 +440,11 @@
+ #define FIXED_CODE_VA 0x800085000000ull
+ #define FIXED_CODE_SIZE (4u << 20)
+ #define FIXED_SLOT_WORDS 12u
++#define SHADOW_BASE 18u
++#define FIXED_EL0_PSTATE (0xf0000000ull | (1ull<<12))
++#define FIXED_DAIF_MASK 0x3c0ull
++#define FIXED_PAN_MASK (1ull<<22)
++#define FIXED_GATE_WORDS 12u
+
+ static uint32_t direct_branch(uint64_t pc,uint64_t target)
+ {
+@@ -488,15 +500,12 @@
+ static uint32_t *emit_observer(struct lk_el0_native *n,uint32_t *out)
+ {
+     uint32_t *start=out;
+-    *out++=0xa9bf47f0u; /* stp x16, x17, [sp, #-16]! */
+-    out=load_address(out,16,&n->pending_regs);
+-    *out++=load_q(17,16,0);
++    *out++=0xf81f0ff1u; /* str x17, [sp, #-16]! */
++    *out++=load_q(17,SHADOW_BASE,offsetof(struct lk_el0_native,pending_regs));
+     uint32_t *no_pending=out++;
+-    *out++=store_q(31,16,0);
+-    size_t delta=offsetof(struct lk_el0_native,pending_regs)-offsetof(struct lk_el0_native,pending_event);
+-    *out++=0xd1000210u|(delta<<10); /* sub x16, x16, #delta */
+-    *out++=load_q(30,16,0);
+-    *out++=store_q(31,16,0);
++    *out++=store_q(31,SHADOW_BASE,offsetof(struct lk_el0_native,pending_regs));
++    *out++=load_q(30,SHADOW_BASE,offsetof(struct lk_el0_native,pending_event));
++    *out++=store_q(31,SHADOW_BASE,offsetof(struct lk_el0_native,pending_event));
+     uint32_t *no_event=out++;
+     *out++=load_q(17,17,0);
+     *out++=store_q(17,30,offsetof(struct lk_el0_event,result));
+@@ -504,11 +513,259 @@
+     *out++=store_q(17,30,offsetof(struct lk_el0_event,completed));
+     *no_pending=cbz(17,no_pending,out);
+     *no_event=cbz(30,no_event,out);
+-    *out++=0xa8c147f0u; /* ldp x16, x17, [sp], #16 */
+-    out=load_address(out,30,(const uint64_t *)(uintptr_t)(n->app.hook+4));
++    *out++=0xf84107f1u; /* ldr x17, [sp], #16 */
++    uint32_t *load_lr=out++;
+     *out=direct_branch((uintptr_t)out,n->app.target);
++    ++out;
++    if((uintptr_t)out%8)*out++=0;
++    *load_lr=0x5800001eu|((uint32_t)(out-load_lr)<<5); /* ldr x30, return_pc */
++    uint64_t return_pc=n->app.hook+4;
++    memcpy(out,&return_pc,sizeof return_pc);
++    out+=2;
+     patch_instruction(n,n->app.hook,direct_branch(n->app.hook,(uintptr_t)start));
+-    return out+1;
++    return out;
++}
++
++
++static void expect_word(struct lk_el0_native *n,uint64_t pc,uint32_t expected)
++{
++    uint64_t attrs=0,pa=translate(n,pc,0,&attrs);
++    uint32_t *word=pa&1?NULL:physical(n,pa+(pc&4095),4);
++    if(!word || *word!=expected)
++        stop(OSREC_STOP_UNSUPPORTED,pc,expected,pa);
++}
++
++/* x18 is an anchor in this capture. Preserve its guest value separately
++ * at every executed use from the audited IPC instruction trace. */
++static uint32_t *prepare_fixed_x18(struct lk_el0_native *n,uint32_t *out)
++{
++    const size_t guest=offsetof(struct lk_el0_native,fixed_guest_x18);
++    const size_t saved=offsetof(struct lk_el0_native,fixed_saved_x16);
++    static const struct {
++        uint64_t pc;
++        uint32_t original, replacement;
++        int reads_x18, writes_x18;
++    } sites[]={
++        {0x80008029f198ull,0x2a0c03f2u,0x2a0c03f0u,0,1}, /* mov w18, w12 */
++        {0x80008029f1a0ull,0x92401e52u,0x92401e10u,1,1}, /* and x18, x18, #0xff */
++        {0x80008029f1acull,0x4a120222u,0x4a100222u,1,0}, /* eor w2, w17, w18 */
++        {0x8000802ef620ull,0x121e7852u,0x121e7850u,0,1}, /* and w18, w2, #... */
++        {0x8000802fccccull,0x52804012u,0x52804010u,0,1}, /* mov w18, #512 */
++    };
++    expect_word(n,0x800080011368ull,0xa9094ff2u);
++    expect_word(n,0x8000800113c8ull,0xaa1f03f2u);
++    expect_word(n,0x800080012120ull,0xa9494ff2u);
++    /* Guest userspace x18 is zero in the fixed IPC trace. */
++    patch_instruction(n,0x800080011368ull,0xa9094fffu);
++    patch_instruction(n,0x8000800113c8ull,store_q(31,SHADOW_BASE,guest));
++    patch_instruction(n,0x800080012120ull,0xa9494fffu);
++    for(size_t i=0;i<sizeof sites/sizeof *sites;i++) {
++        uint64_t pc=sites[i].pc;
++        expect_word(n,pc,sites[i].original);
++        patch_instruction(n,pc,direct_branch(pc,(uintptr_t)out));
++        *out++=store_q(16,SHADOW_BASE,saved);
++        if(sites[i].reads_x18)*out++=load_q(16,SHADOW_BASE,guest);
++        *out++=sites[i].replacement;
++        if(sites[i].writes_x18)*out++=store_q(16,SHADOW_BASE,guest);
++        *out++=load_q(16,SHADOW_BASE,saved);
++        *out=direct_branch((uintptr_t)out,pc+4);
++        ++out;
++    }
++    return out;
++}
++
++
++/* The copied sequences use only local branches and offsets from x18.
++ * The low-address syscall gateways supply a site and a return landing pad. */
++static uint32_t *emit_fixed_entry(struct lk_el0_native *n,uint32_t *out)
++{
++    const uint32_t *begin,*end,*ssbs,*branch;
++    __asm__ volatile(
++        "b 9f\n"
++        "1:\n"
++        "str x15,[x18,%c[saved15]]\n"
++        "ldr x16,[x18,%c[count]]\n"
++        "ldr x17,[x18,%c[limit]]\n"
++        "sub x17,x17,x16\n"
++        "cbz x17,8f\n"
++        "mov x17,%c[event_size]\n"
++        "ldr x15,[x18,%c[events]]\n"
++        "madd x17,x16,x17,x15\n"
++        "add x16,x16,#1\n"
++        "str x16,[x18,%c[count]]\n"
++        "stp xzr,x8,[x17]\n"
++        "stp x0,x1,[x17,#16]\n"
++        "stp x2,x3,[x17,#32]\n"
++        "stp x4,x5,[x17,#48]\n"
++        "stp xzr,xzr,[x17,#64]\n"
++        "ldr x16,[x18,%c[site]]\n"
++        "str x16,[x17,#80]\n"
++        "str x17,[x18,%c[pending_event]]\n"
++        "add x16,x16,#4\n"
++        "str x16,[x18,%c[elr]]\n"
++        "mrs x16,nzcv\n"
++        "3: nop\n" /* Optional SSBS from the captured user PSTATE. */
++        "str x16,[x18,%c[spsr]]\n"
++        "mov x16,#0x56000000\n"
++        "str x16,[x18,%c[esr]]\n"
++        "mov x16,sp\n"
++        "str x16,[x18,%c[sp_el0]]\n"
++        "ldr x16,[x18,%c[sp_el1]]\n"
++        "mov sp,x16\n"
++        "sub x16,x16,#0x150\n"
++        "str x16,[x18,%c[pending_regs]]\n"
++        "mov x16,#0x3c0\n"
++        "str x16,[x18,%c[daif]]\n"
++        "mov x16,#1\n"
++        "str x16,[x18,%c[mode]]\n"
++        "ldr x16,[x18,%c[entries]]\n"
++        "add x16,x16,#1\n"
++        "str x16,[x18,%c[entries]]\n"
++        "ldr x15,[x18,%c[saved15]]\n"
++        "ldp x16,x17,[x18,%c[saved16]]\n"
++        "4: nop\n" /* Direct branch to the captured EL0 vector. */
++        "8:\n"
++        "ldr x15,[x18,%c[saved15]]\n"
++        "ldp x16,x17,[x18,%c[saved16]]\n"
++        "brk #0xf07\n"
++        "2:\n"
++        "9:\n"
++        "adr %0,1b\n"
++        "adr %1,2b\n"
++        "adr %2,3b\n"
++        "adr %3,4b\n"
++        : "=&r"(begin),"=&r"(end),"=&r"(ssbs),"=&r"(branch)
++        : [saved15] "i"(offsetof(struct lk_el0_native,fixed_saved_x15)),
++          [saved16] "i"(offsetof(struct lk_el0_native,fixed_saved_x16)),
++          [count] "i"(offsetof(struct lk_el0_native,event_count)),
++          [limit] "i"(offsetof(struct lk_el0_native,fixed_event_limit)),
++          [event_size] "i"(sizeof(struct lk_el0_event)),
++          [events] "i"(offsetof(struct lk_el0_native,events)),
++          [site] "i"(offsetof(struct lk_el0_native,fixed_svc_pc)),
++          [pending_event] "i"(offsetof(struct lk_el0_native,pending_event)),
++          [pending_regs] "i"(offsetof(struct lk_el0_native,pending_regs)),
++          [elr] "i"(offsetof(struct lk_el0_native,shadow.elr)),
++          [spsr] "i"(offsetof(struct lk_el0_native,shadow.spsr)),
++          [esr] "i"(offsetof(struct lk_el0_native,shadow.esr)),
++          [sp_el0] "i"(offsetof(struct lk_el0_native,shadow.sp_el0)),
++          [sp_el1] "i"(offsetof(struct lk_el0_native,shadow.sp_el1)),
++          [daif] "i"(offsetof(struct lk_el0_native,shadow.daif)),
++          [mode] "i"(offsetof(struct lk_el0_native,shadow.mode)),
++          [entries] "i"(offsetof(struct lk_el0_native,shadow.entries)));
++    _Static_assert(sizeof(struct lk_el0_event)==88 &&
++                   offsetof(struct lk_el0_event,result)==64 &&
++                   offsetof(struct lk_el0_event,pc)==80,"IPC event layout");
++    size_t slots=(uintptr_t)end/4-(uintptr_t)begin/4;
++    memcpy(out,begin,slots*sizeof *out);
++    if(n->context->pstate&(1ull<<12))
++        out[((uintptr_t)ssbs-(uintptr_t)begin)/4]=0xb2740210u; /* orr x16,x16,#0x1000 */
++    uint32_t *jump=out+((uintptr_t)branch-(uintptr_t)begin)/4;
++    *jump=direct_branch((uintptr_t)jump,n->shadow.vbar+0x400);
++    return out+slots;
++}
++
++static uint32_t *emit_fixed_return(struct lk_el0_native *n,uint32_t *out)
++{
++    const uint32_t *begin,*end,*ssbs;
++    uint64_t psr=FIXED_EL0_PSTATE|FIXED_DAIF_MASK|FIXED_PAN_MASK;
++    __asm__ volatile(
++        "b 9f\n"
++        "1:\n"
++        "stp x16,x17,[x18,%c[saved16]]\n"
++        "ldr x16,[x18,%c[site]]\n"
++        "ldr x17,[x18,%c[elr]]\n"
++        "sub x17,x17,x16\n"
++        "sub x17,x17,#4\n"
++        "cbnz x17,8f\n"
++        "ldr x17,[x18,%c[spsr]]\n"
++        "movz x16,%c[psr_low]\n"
++        "movk x16,%c[psr_high],lsl #16\n"
++        "bic x16,x17,x16\n"
++        "cbnz x16,8f\n"
++        "3: tbnz x17,#12,8f\n" /* Reject any change to the user SSBS bit. */
++        "and x16,x17,#0x3c0\n"
++        "str x16,[x18,%c[daif]]\n"
++        "ubfx x16,x17,#22,#1\n"
++        "str x16,[x18,%c[pan]]\n"
++        "mov x16,sp\n"
++        "str x16,[x18,%c[sp_el1]]\n"
++        "ldr x16,[x18,%c[sp_el0]]\n"
++        "mov sp,x16\n"
++        "str xzr,[x18,%c[mode]]\n"
++        "str xzr,[x18,%c[guest_x18]]\n"
++        "ldr x16,[x18,%c[emulated]]\n"
++        "add x16,x16,#1\n"
++        "str x16,[x18,%c[emulated]]\n"
++        "msr nzcv,x17\n"
++        "ldr x16,[x18,%c[thunk]]\n"
++        "br x16\n"
++        "8:\n"
++        "ldp x16,x17,[x18,%c[saved16]]\n"
++        "brk #0xf08\n"
++        "2:\n"
++        "9:\n"
++        "adr %0,1b\n"
++        "adr %1,2b\n"
++        "adr %2,3b\n"
++        : "=&r"(begin),"=&r"(end),"=&r"(ssbs)
++        : [saved16] "i"(offsetof(struct lk_el0_native,fixed_saved_x16)),
++          [site] "i"(offsetof(struct lk_el0_native,fixed_svc_pc)),
++          [elr] "i"(offsetof(struct lk_el0_native,shadow.elr)),
++          [spsr] "i"(offsetof(struct lk_el0_native,shadow.spsr)),
++          [psr_low] "i"(psr&65535),[psr_high] "i"(psr>>16),
++          [daif] "i"(offsetof(struct lk_el0_native,shadow.daif)),
++          [pan] "i"(offsetof(struct lk_el0_native,shadow.pan)),
++          [sp_el0] "i"(offsetof(struct lk_el0_native,shadow.sp_el0)),
++          [sp_el1] "i"(offsetof(struct lk_el0_native,shadow.sp_el1)),
++          [mode] "i"(offsetof(struct lk_el0_native,shadow.mode)),
++          [guest_x18] "i"(offsetof(struct lk_el0_native,fixed_guest_x18)),
++          [emulated] "i"(offsetof(struct lk_el0_native,shadow.emulated)),
++          [thunk] "i"(offsetof(struct lk_el0_native,fixed_return_thunk)));
++    size_t slots=(uintptr_t)end/4-(uintptr_t)begin/4;
++    memcpy(out,begin,slots*sizeof *out);
++    if(n->context->pstate&(1ull<<12))
++        out[((uintptr_t)ssbs-(uintptr_t)begin)/4]^=1u<<24; /* TBNZ to TBZ */
++    return out+slots;
++}
++
++static uint32_t pair_q(unsigned first,unsigned second,size_t offset,int load)
++{
++    return (load?0xa9400000u:0xa9000000u)|((offset/8)<<15)|
++           (second<<10)|(SHADOW_BASE<<5)|first;
++}
++
++static void emit_fixed_gateways(struct lk_el0_native *n,const uint32_t *entry)
++{
++    const size_t saved=offsetof(struct lk_el0_native,fixed_saved_x16);
++    const size_t site=offsetof(struct lk_el0_native,fixed_svc_pc);
++    _Static_assert(offsetof(struct lk_el0_native,fixed_saved_x16)<512 &&
++                   offsetof(struct lk_el0_native,fixed_svc_pc)<512 &&
++                   offsetof(struct lk_el0_native,fixed_saved_x17)==
++                       offsetof(struct lk_el0_native,fixed_saved_x16)+8 &&
++                   offsetof(struct lk_el0_native,fixed_return_thunk)==
++                       offsetof(struct lk_el0_native,fixed_svc_pc)+8,"paired gateway offsets");
++    const size_t first=(n->app.count+1)&~1ull;
++    if(first+n->app.count*FIXED_GATE_WORDS>n->app.size/4)
++        stop(OSREC_STOP_UNSUPPORTED,n->context->pc,n->app.count,n->app.size);
++    uint32_t *gateways=n->gateways;
++    for(size_t i=0;i<n->app.count;i++) {
++        const struct application_site *a=n->app_sites+i;
++        if(a->kind || a->word!=0xd4000001u)
++            stop(OSREC_STOP_UNSUPPORTED,a->pc,a->word,a->kind);
++        uint32_t *slot=gateways+first+i*FIXED_GATE_WORDS;
++        gateways[i]=direct_branch(a->gateway,(uintptr_t)slot);
++        slot[0]=pair_q(16,17,saved,0);
++        slot[1]=0x58000010u|(7u<<5); /* ldr x16, slot[8] */
++        slot[2]=0x10000011u|(4u<<5); /* adr x17, slot[6] */
++        slot[3]=pair_q(16,17,site,0);
++        slot[4]=0x58000010u|(6u<<5); /* ldr x16, slot[10] */
++        slot[5]=0xd61f0200u;         /* br x16 */
++        slot[6]=pair_q(16,17,saved,1);
++        slot[7]=direct_branch((uintptr_t)(slot+7),a->pc+4);
++        uint64_t address=(uintptr_t)entry;
++        memcpy(slot+8,&a->pc,sizeof a->pc);
++        memcpy(slot+10,&address,sizeof address);
++    }
+ }
+
+ static void prepare_fixed_code(struct lk_el0_native *n)
+@@ -523,7 +780,13 @@
+     __asm__ volatile("mrs %0, dczid_el0":"=r"(dczid));
+     int native_zva=(n->shadow.known[0xd807/8]&(1u<<(0xd807%8))) &&
+                    dczid==n->shadow.value[0xd807] && !(dczid&16);
+-    size_t used=0;
++    n->fixed_tpidr_el1=n->shadow.value[0xc684];
++    n->fixed_dczid_el0=n->shadow.value[0xd807];
++    if(n->context->x[SHADOW_BASE] || n->context->pc!=0x201160ull ||
++       n->app.count!=15 || n->app.hook!=0x8000812f584cull ||
++       n->app.target!=0x8000800190d8ull || n->fixed_return_pc!=0x80008001217cull)
++        stop(OSREC_STOP_UNSUPPORTED,n->context->pc,SHADOW_BASE,n->context->x[SHADOW_BASE]);
++    size_t used=(size_t)(prepare_fixed_x18(n,n->fixed_code)-n->fixed_code);
+     for(uint64_t i=0;i<n->h.sites;i++) {
+         const struct osrec_site *site=&n->sites[i];
+         uint64_t pc=site->va;
+@@ -560,37 +823,62 @@
+             continue;
+         }
+         uint64_t *addr=set_mask || clear_mask?&n->shadow.daif:shadow_register(&n->shadow,key,read);
++        if(read && addr && key==0xc684)addr=&n->fixed_tpidr_el1;
++        if(read && addr && key==0xd807)addr=&n->fixed_dczid_el0;
+         if(!addr)continue;
+         if(read && rt==31) {
+             patch_instruction(n,pc,0xd503201fu);
+             continue;
+         }
++        if(rt==SHADOW_BASE)continue;
++        size_t offset=(uintptr_t)addr-(uintptr_t)n;
++        int direct=offset<32768 && !(offset%8);
++        if(direct && clear_mask && ((word>>8)&15u)==15) {
++            patch_instruction(n,pc,store_q(31,SHADOW_BASE,offset));
++            continue;
++        }
++        if(direct && !set_mask && !clear_mask && key!=0xc213 && (read || key!=0xda11)) {
++            patch_instruction(n,pc,read?load_q(rt,SHADOW_BASE,offset):store_q(rt,SHADOW_BASE,offset));
++            continue;
++        }
+         if(used>FIXED_CODE_SIZE/4-FIXED_SLOT_WORDS)
+             stop(OSREC_STOP_UNSUPPORTED,pc,word,used);
+         uint32_t *start=n->fixed_code+used,*out=start;
+         if(read) {
+-            out=load_address(out,rt,addr);
+-            *out++=0xf9400000u|(rt<<5)|rt;
++            if(direct)*out++=load_q(rt,SHADOW_BASE,offset);
++            else {
++                out=load_address(out,rt,addr);
++                *out++=load_q(rt,rt,0);
++            }
+             if(key==0xc213)*out++=0xd3400000u|(42u<<16)|(41u<<10)|(rt<<5)|rt;
+         } else {
+-            unsigned a=rt==16?17:16,b=rt==16 || rt==17?18:17;
++            unsigned a=rt==16?17:16,b=rt==16 || rt==17?19:17;
+             *out++=0xa9bf0000u|(b<<10)|(31u<<5)|a; /* STP a,b,[sp,#-16]! */
+-            out=load_address(out,a,addr);
++            if(!direct)out=load_address(out,a,addr);
++            unsigned base=direct?SHADOW_BASE:a;
++            size_t displacement=direct?offset:0;
+             unsigned value=rt;
+             if(set_mask || clear_mask) {
+                 value=b;
+-                *out++=0xf9400000u|(a<<5)|b;
+-                for(unsigned j=0;j<4;j++)if(word&(1u<<(8+j))) {
+-                    unsigned bit=6+j;
+-                    *out++=(set_mask?(0xb2400000u|((64-bit)<<16)):
+-                                     (0x92400000u|((63-bit)<<16)|(62u<<10)))|(b<<5)|b;
++                unsigned mask=(word>>8)&15u;
++                if(set_mask && mask==15) {
++                    *out++=0xd2807800u|b; /* mov xB, #0x3c0 */
++                } else {
++                    *out++=load_q(b,base,displacement);
++                    if(mask==3) {
++                        *out++=(set_mask?0xb27a0400u:0x9278f400u)|(b<<5)|b;
++                    } else for(unsigned j=0;j<4;j++)if(mask&(1u<<j)) {
++                        unsigned bit=6+j;
++                        *out++=(set_mask?(0xb2400000u|((64-bit)<<16)):
++                                         (0x92400000u|((63-bit)<<16)|(62u<<10)))|(b<<5)|b;
++                    }
+                 }
+             } else if(key==0xda11) {
+                 value=b;*out++=0x92400000u|(58u<<16)|(3u<<10)|(rt<<5)|b;
+             } else if(key==0xc213) {
+                 value=b;*out++=0xd3400000u|(22u<<16)|(22u<<10)|(rt<<5)|b;
+             }
+-            *out++=0xf9000000u|(a<<5)|value;
++            *out++=store_q(value,base,displacement);
+             *out++=0xa8c10000u|(b<<10)|(31u<<5)|a; /* LDP a,b,[sp],#16 */
+         }
+         *out=direct_branch((uintptr_t)out,pc+4);
+@@ -599,7 +887,14 @@
+     }
+     if(used>FIXED_CODE_SIZE/4-24)
+         stop(OSREC_STOP_UNSUPPORTED,n->app.hook,used,0);
+-    uint32_t *end=emit_observer(n,n->fixed_code+used);
++    uint32_t *entry=emit_observer(n,n->fixed_code+used);
++    if(entry>n->fixed_code+FIXED_CODE_SIZE/4-128 || !n->fixed_return_pc || !n->events)
++        stop(OSREC_STOP_UNSUPPORTED,n->context->pc,n->fixed_return_pc,0);
++    n->fixed_event_limit=n->event_capacity<1000000?n->event_capacity:1000000;
++    uint32_t *return_code=emit_fixed_entry(n,entry);
++    uint32_t *end=emit_fixed_return(n,return_code);
++    emit_fixed_gateways(n,entry);
++    patch_instruction(n,n->fixed_return_pc,direct_branch(n->fixed_return_pc,(uintptr_t)return_code));
+     if(mprotect(n->fixed_code,FIXED_CODE_SIZE,PROT_READ|PROT_EXEC))
+         stop(OSREC_STOP_UNSUPPORTED,n->context->pc,errno,FIXED_CODE_VA);
+     __builtin___clear_cache((char *)n->fixed_code,(char *)end);
+@@ -634,16 +929,16 @@
+         ((uint32_t *)g)[i]=0xd4200000u|(0xf03u<<5);
+         __builtin___clear_cache((char *)(uintptr_t)a->pc,(char *)(uintptr_t)(a->pc+4));
+     }
+-    if(mprotect(g,n->app.size,PROT_READ|PROT_EXEC))stop(OSREC_STOP_RUNTIME,n->context->pc,errno,n->app.base);
+-    __builtin___clear_cache(g,(char *)g+n->app.size);
+     uint64_t attrs=0,pa=translate(n,n->app.hook,0,&attrs);
+     uint32_t *p=pa&1?NULL:physical(n,pa+(n->app.hook&4095),4);
+     if(!p || *p!=(uint32_t)n->app.word)stop(OSREC_STOP_UNSUPPORTED,n->app.hook,n->app.word,pa);
+-    prepare_fixed_code(n);
+     uint64_t return_pc=n->shadow.vbar+0x197c;
+     const struct osrec_site *return_site=osrec_find_site(n->sites,n->h.sites,return_pc);
+     if(return_site && !return_site->reserved && return_site->insn==0xd69f03e0u)
+         n->fixed_return_pc=return_pc;
++    prepare_fixed_code(n);
++    if(mprotect(g,n->app.size,PROT_READ|PROT_EXEC))stop(OSREC_STOP_RUNTIME,n->context->pc,errno,n->app.base);
++    __builtin___clear_cache(g,(char *)g+n->app.size);
+     n->executable_bytes=metadata_alloc(n->executables*PAGE);
+     if(!n->executable_bytes)stop(OSREC_STOP_RUNTIME,n->context->pc,ENOMEM,0);
+     for(size_t i=0;i<n->executables;i++)
+@@ -771,48 +1066,6 @@
+     if(p->sa_handler==SIG_DFL){sigaction(sig,p,NULL);syscall(SYS_tgkill,getpid(),syscall(SYS_gettid),sig);return;}
+     if(p->sa_flags&SA_SIGINFO)p->sa_sigaction(sig,info,context);else p->sa_handler(sig);
+ }
+-#define FIXED_EL0_PSTATE (0xf0000000ull | (1ull<<12))
+-#define FIXED_DAIF_MASK 0x3c0ull
+-#define FIXED_PAN_MASK (1ull<<22)
+-
+-static int fixed_syscall_transition(struct lk_el0_native *n,mcontext_t *frame)
+-{
+-    struct osrec_shadow *s=&n->shadow;
+-    uint64_t pc=frame->pc;
+-    if(s->mode==OSREC_USER) {
+-        if(!in_gateways(n,pc) || pc%4)return 0;
+-        uint64_t index=(pc-n->app.base)/4;
+-        if(index>=n->app.count || n->app_sites[index].kind)return 0;
+-        const struct application_site *site=n->app_sites+index;
+-        struct lk_el0_event *e=event(n);
+-        if(e) {
+-            e->pc=site->pc;e->number=frame->regs[8];
+-            for(unsigned i=0;i<6;i++)e->arguments[i]=frame->regs[i];
+-        }
+-        n->pending_event=e;
+-        n->pending_regs=s->sp_el1-0x150;
+-        s->entries++;
+-        s->elr=site->pc+4;
+-        s->spsr=frame->pstate&FIXED_EL0_PSTATE;
+-        s->esr=(0x15ull<<26)|(1ull<<25)|((site->word>>5)&65535u);
+-        s->sp_el0=frame->sp;
+-        s->daif=FIXED_DAIF_MASK;
+-        s->mode=OSREC_KERNEL;
+-        frame->sp=s->sp_el1;frame->pc=s->vbar+0x400;frame->pstate=s->spsr;
+-        return 1;
+-    }
+-    if(pc!=n->fixed_return_pc || (s->spsr&~(FIXED_EL0_PSTATE|FIXED_DAIF_MASK|FIXED_PAN_MASK)))
+-        return 0;
+-    s->emulated++;
+-    s->daif=s->spsr&FIXED_DAIF_MASK;
+-    s->pan=(s->spsr>>22)&1;
+-    s->sp_el1=frame->sp;
+-    s->mode=OSREC_USER;
+-    frame->pstate=s->spsr&FIXED_EL0_PSTATE;
+-    frame->pc=s->elr;frame->sp=s->sp_el0;
+-    return 1;
+-}
+-
+ static void handler(int sig,siginfo_t *info,void *context)
+ {
+     struct lk_el0_native *n=running;
+@@ -820,15 +1073,13 @@
+     ucontext_t *u=context;
+     if(n->handling)stop(OSREC_STOP_RUNTIME,u->uc_mcontext.pc,sig,(uintptr_t)info->si_addr);
+     n->handling=1;
+-    if(sig==SIGTRAP && n->prepared && !n->starting && fixed_syscall_transition(n,&u->uc_mcontext)) {
+-        n->handling=0;return;
+-    }
+     uint64_t esr=0;
+     struct fpsimd_context *fp=fpsimd(u,&esr);
+     if(!fp)stop(OSREC_STOP_RUNTIME,u->uc_mcontext.pc,0x4650,0);
+     if(n->starting) {
+         n->starting=0;
+         to_signal(n,u);
++        if(n->prepared)u->uc_mcontext.regs[SHADOW_BASE]=(uintptr_t)n;
+         memcpy(fp->vregs,n->fp.v,sizeof n->fp.v);
+         fp->fpsr=n->fp.fpsr;fp->fpcr=n->fp.fpcr;
+         n->handling=0;return;
+@@ -899,6 +1150,7 @@
+         stop(OSREC_STOP_RUNTIME,c->pc,0xf02,0);
+     }
+     n->signal_fp=NULL;
++    if(n->prepared)c->x[SHADOW_BASE]=n->fixed_guest_x18;
+     if(n->prepared && n->application) {
+         n->application=0;
+         validate_application(n);

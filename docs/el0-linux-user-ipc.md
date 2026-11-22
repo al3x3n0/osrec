@@ -1,9 +1,9 @@
 # Fixed-mapping IPC replay in QEMU Linux-user
 
-The 640-iteration IPC workload completed with **0.3311 runtime instructions per
-kernel instruction** at 10 million kernel instructions. The full run dispatched
-10,779,406 kernel instructions, 3,579,622 runtime instructions and 97,373
-application instructions.
+The 640-iteration IPC workload completed with **9.70% runtime instruction
+overhead** at 10 million kernel instructions, down from 33.11% in the previous
+run. The full run dispatched 10,779,406 kernel instructions, 1,055,672 runtime
+instructions and 97,373 application instructions.
 
 | Replay variant | Runtime instructions per kernel instruction at 10M kernel instructions |
 | --- | ---: |
@@ -11,7 +11,8 @@ application instructions.
 | Fixed mappings and in-place FPSIMD state | 29.5688 |
 | Inline register operations and direct memory accesses | 1.7859 |
 | Inline result observer and native sign tests | 0.7696 |
-| In-place syscall transitions | **0.3311** |
+| In-place signal-frame syscall transitions | 0.3311 |
+| Direct syscall transitions and inline shadow-register accesses | **0.0970** |
 
 The prepared capture populates all ELF load segments before execution. The
 Linux-user process retains the user and kernel mappings throughout the replay.
@@ -19,14 +20,17 @@ The final variant rejects any call to the address translator or mapping
 synchronizer during execution. Captured EL1 register operations use EL0
 instructions and shadow state. Memory instructions access the installed
 addresses directly. The result observer uses the captured syscall's return
-slot, and the syscall transitions update the existing signal frame in place.
+slot to complete the event ledger.
 
 The experiment assumes a trusted application, fixed mapping permissions, and
 the captured kernel's syscall frame layout. It specializes the observed return
 site and uses native `DC ZVA` when the capture and emulator agree on
-`DCZID_EL0`. Signal delivery remains for syscall entry and return and for UART
-MMIO. The final run issued 16,678 `rt_sigreturn` calls during the measured
-interval. These were the only host syscall requests observed by the plugin.
+`DCZID_EL0`. The direct transition patch uses the fixed IPC trace to reserve
+`x18` as a pointer to replay state and preserves the guest register value at
+its traced uses. Syscall gateways branch to the captured EL0 vector. The
+return stub restores user state and branches through the matching gateway.
+The measured interval included 35 `rt_sigreturn` calls for UART MMIO, down
+from 16,678. These were the only host syscall requests observed by the plugin.
 
 ## Replay inputs and accounting
 
@@ -38,11 +42,11 @@ interval. These were the only host syscall requests observed by the plugin.
 - The plugin counts instructions in the original kernel executable ranges as
   kernel instructions, except breakpoint replacements. It counts the user
   executable ranges separately and attributes the remaining instructions,
-  including inline veneers outside kernel text, to runtime. Replacing
-  breakpoints with executable instructions can increase the kernel count.
+  including inline veneers outside kernel text, to runtime. It charges the
+  lowered return instruction at `0x80008001217c` to runtime in both variants.
   QEMU's own instructions and the host kernel are outside the measurement.
 
-All five replay artifacts matched the native reference byte for byte. This
+The direct run matched all five recorded replay artifacts byte for byte. This
 includes 8,322 syscall entries, 8,321 returns, 35 UART operations, and the
 `OSREC_IPC_PASS` console line. The final `exit(0)` reached the expected
 boundary. No user fault appeared in the ledger.
@@ -60,33 +64,60 @@ boundary. No user fault appeared in the ledger.
 Use an isolated checkout and a Linux AArch64 build environment. Build the
 standard archive before applying the [experiment patch](../tools/experiments/linux-user-fixed-ipc.patch).
 Build the experimental object explicitly so the standard checkpoint preparation
-tool can still link to the original backend.
+tool can still link to the original backend. The
+[direct transition patch](../tools/experiments/linux-user-ipc-direct-transitions.patch)
+layers on top of that patch. Its register and vector assumptions are specific
+to the prepared capture below.
 
 ```sh
 make -C runtime/linuxkernel_el0 CC=clang-19 OUT=/work/linuxkernel /work/linuxkernel/liblinuxkernel-el0.a
 git apply tools/experiments/linux-user-fixed-ipc.patch
-clang-19 -O2 -g -fPIC -Wall -Wextra -Werror -mgeneral-regs-only \
-  -Iinclude -Iruntime/el0 -Iruntime/linuxkernel_el0 -DOSREC_LOWERED -DOSREC_NATIVE \
-  -c runtime/linuxkernel_el0/native.c -o /work/fixed-ipc.o
-clang-19 -O2 -mgeneral-regs-only -Iinclude -Iruntime/el0 -Itools \
-  -static -Wl,-Ttext-segment=0x600000000000 tools/linuxkernel_prepare_application.c \
-  /work/fixed-ipc.o /work/linuxkernel/liblinuxkernel-el0.a -o /work/fixed-ipc-reader
+
+build_ipc_reader() {
+  clang-19 -O2 -g -std=c11 -fPIC -fno-builtin -Wall -Wextra -Werror \
+    -mgeneral-regs-only -mbranch-protection=none \
+    -Iinclude -Iruntime/el0 -Iruntime/linuxkernel_el0 -DOSREC_LOWERED -DOSREC_NATIVE \
+    -c runtime/linuxkernel_el0/native.c -o "/work/$1.o"
+  clang-19 -O2 -mgeneral-regs-only -Iinclude -Itools -Iruntime/el0 \
+    -static -Wl,-Ttext-segment=0x600000000000 tools/linuxkernel_prepare_application.c \
+    "/work/$1.o" /work/linuxkernel/liblinuxkernel-el0.a -o "/work/$1"
+}
+
+build_ipc_reader fixed-ipc-reader
+git apply tools/experiments/linux-user-ipc-direct-transitions.patch
+build_ipc_reader direct-ipc-reader
 ```
 
 The [plugin](../tools/qemu_plugins/linux_user_ipc.c) expects
 `/work/kernel-ranges.bin` and `/work/user-ranges.bin`. Each contains
 little-endian pairs of 64-bit executable range bounds, using the lowered
 capture's kernel addresses and the user ELF addresses. Place the prepared
-checkpoint in `/work/prepared` and set `QEMU_INCLUDE` to the directory
-containing QEMU 10.0.13's `qemu-plugin.h`.
+checkpoint in `/work/prepared` and verify its inputs before running the
+direct reader. Set `QEMU_INCLUDE` to the directory containing QEMU 10.0.13's
+`qemu-plugin.h`.
 
 ```sh
+set -e
+sha256sum -c - <<'EOF'
+48439bb5d55dccc0c8961c3e799bbd6a57a7111f3215aa8d1a61f2542509b99c  /work/prepared/application.bin
+a65c916c9c0a4155e514ba22b67cb53575fc8dae354451357b9aeee09ddfb9ea  /work/prepared/native.bin
+707b7a591dda95e3db92bb6fb6c379f33a08948208d8e8e1a9e7961171984fc3  /work/prepared/memory.bin
+31915f7517ec0863387c7360d22ed4a347024e5caa6a9a64ef8985fa9110b6b2  /work/prepared/vma.bin
+EOF
+
 clang-19 -O2 -shared -fPIC -Wall -Wextra -Werror -I"$QEMU_INCLUDE" \
   $(pkg-config --cflags --libs glib-2.0) tools/qemu_plugins/linux_user_ipc.c \
   -o /work/linux-user-ipc.so
-mkdir -p /work/profile-direct-transitions-ipc
-qemu-aarch64 -s 524288 -cpu cortex-a53 -plugin /work/linux-user-ipc.so \
-  /work/fixed-ipc-reader record /work/prepared /work/profile-direct-transitions-ipc \
-  124338841 1024 0x80008000e000 0x800080059b50 \
-  >/work/profile-direct-transitions-ipc/stdout.json
+
+for variant in fixed direct; do
+  report="/work/profile-$variant-ipc"
+  mkdir -p "$report"
+  qemu-aarch64 -s 524288 -cpu cortex-a53 -plugin "/work/linux-user-ipc.so,out=$report" \
+    "/work/$variant-ipc-reader" record /work/prepared "$report" \
+    124338841 1024 0x80008000e000 0x800080059b50 >"$report/stdout.json"
+done
+
+for artifact in calls.json console.txt counters.bin mmio.bin stdout.json; do
+  cmp "/work/profile-fixed-ipc/$artifact" "/work/profile-direct-ipc/$artifact"
+done
 ```

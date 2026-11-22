@@ -18,6 +18,7 @@ static bool active;
 static GHashTable *traps;
 static uint64_t host_syscalls[512];
 static uint64_t unexpected_syscalls;
+static char *output_directory;
 
 static bool inside(uint64_t pc, const struct interval *ranges, size_t length)
 {
@@ -79,7 +80,8 @@ static void translated(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
             uint32_t word = 0;
             if (qemu_plugin_insn_data(insn, &word, sizeof(word)) == sizeof(word) &&
                     (word & 0xffe0001f) != 0xd4200000) {
-                marker = 1;
+                /* Charge the lowered ERET to runtime in both variants. */
+                marker = pc == 0x80008001217c ? 0 : 1;
             } else {
                 marker = pc;
             }
@@ -110,11 +112,19 @@ static void observe_host_syscall(qemu_plugin_id_t id, unsigned int cpu, int64_t 
     else ++unexpected_syscalls;
 }
 
+static FILE *open_report(const char *name)
+{
+    char *path = g_build_filename(output_directory, name, NULL);
+    FILE *file = fopen(path, "w");
+    g_free(path);
+    return file;
+}
+
 static void finish(qemu_plugin_id_t id, void *opaque)
 {
     (void)id;
     (void)opaque;
-    FILE *tab = fopen("/work/profile-direct-transitions-ipc/traps.tsv", "w");
+    FILE *tab = open_report("traps.tsv");
     if (tab) {
         GHashTableIter iter;
         gpointer pc, hits;
@@ -124,34 +134,35 @@ static void finish(qemu_plugin_id_t id, void *opaque)
         fclose(tab);
     }
     g_hash_table_destroy(traps);
-    tab = fopen("/work/profile-direct-transitions-ipc/host-syscalls.tsv", "w");
+    tab = open_report("host-syscalls.tsv");
     if (tab) {
         for (unsigned i = 0; i < 512; ++i)
             if (host_syscalls[i]) fprintf(tab, "%u\t%" PRIu64 "\n", i, host_syscalls[i]);
         if (unexpected_syscalls) fprintf(tab, "-1\t%" PRIu64 "\n", unexpected_syscalls);
         fclose(tab);
     }
-    FILE *file = fopen("/work/profile-direct-transitions-ipc/counts.json", "w");
+    FILE *file = open_report("counts.json");
     if (file) {
         fprintf(file, "{\"starts\":%u,\"stops\":%u,\"other_vcpus\":%u,\"runtime\":%" PRIu64 ",\"kernel\":%" PRIu64
                 ",\"user\":%" PRIu64 ",\"prefix_10m\":[%" PRIu64 ",%" PRIu64 ",%" PRIu64 "]}\n",
                 starts, stops, other_vcpus, count[0], count[1], count[2], prefix[0], prefix[1], prefix[2]);
         fclose(file);
     }
+    g_free(output_directory);
 }
 
 QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id, const qemu_info_t *info, int argc, char **argv)
 {
-    if (info->system_emulation) {
+    if (info->system_emulation || argc > 1 ||
+            (argc == 1 && (!g_str_has_prefix(argv[0], "out=") || !argv[0][4]))) {
         return -1;
     }
-    (void)argc;
-    (void)argv;
     kernel_count = load("/work/kernel-ranges.bin", kernel, 64);
     user_count = load("/work/user-ranges.bin", user, 64);
     if (!kernel_count || !user_count) {
         return -1;
     }
+    output_directory = g_strdup(argc ? argv[0] + 4 : "/work/profile-direct-transitions-ipc");
     traps = g_hash_table_new(g_direct_hash, g_direct_equal);
     qemu_plugin_register_vcpu_tb_trans_cb(id, translated);
     qemu_plugin_register_vcpu_syscall_cb(id, observe_host_syscall);

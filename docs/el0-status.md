@@ -1,4 +1,4 @@
-# EL0 replay status · 2026-11-21
+# EL0 replay status · 2026-11-22
 
 Implementation and benchmark baseline `5e71d68` on `main`.
 
@@ -10,9 +10,9 @@ that the workload needs use EL0 sequences or shadow architectural state.
 ## Verified runs
 
 - The 640-iteration pipe and eventfd workload completed in QEMU Linux-user
-  on Cortex-A53 with **0.3311 runtime instructions per kernel instruction**
-  at 10 million kernel instructions, down from 83.8888. The full run counted
-  10,779,406 kernel, 3,579,622 runtime, and 97,373 application instructions.
+  on Cortex-A53 with **9.70% runtime instruction overhead** at 10 million
+  kernel instructions, down from 33.11%. The full run counted
+  10,779,406 kernel, 1,055,672 runtime, and 97,373 application instructions.
   All 8,322 syscall entries, 8,321 returns, and 35 UART operations matched
   the native reference. The ledger recorded zero user faults. The run
   rejected any runtime address translation or mapping refresh. The opt-in
@@ -34,9 +34,8 @@ that the workload needs use EL0 sequences or shadow architectural state.
   16 KiB host pages. The existing IPC capture requires a different layout.
   The [alias projection command](el0-macos.md#checking-a-capture-for-native-mappings)
   reports which ranges block installation.
-- The fixed-mapping QEMU experiment still uses signals for syscall entry and
-  return and UART MMIO. Its instruction ratio applies to the captured IPC
-  workload. The replay issued 16,678 `rt_sigreturn` calls in the measured
+- The direct syscall transitions are specific to the captured IPC workload.
+  UART MMIO accounted for the 35 remaining `rt_sigreturn` calls in the measured
   window. Timing and microarchitectural validation remain pending. See the
   [model runner](el0-model-runner.md).
 - The clustered ELF still needs execution on an Android device.

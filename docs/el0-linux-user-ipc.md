@@ -1,9 +1,9 @@
 # Fixed-mapping IPC replay in QEMU Linux-user
 
-The 640-iteration IPC workload completed with **9.70% runtime instruction
-overhead** at 10 million kernel instructions, down from 33.11% in the previous
-run. The full run dispatched 10,779,406 kernel instructions, 1,055,672 runtime
-instructions and 97,373 application instructions.
+The 640-iteration IPC workload completed with **5.09% runtime instruction
+overhead** at 10 million kernel instructions, down from 7.23% before the DAIF
+changes. The full run dispatched 10,779,406 kernel instructions, 558,981
+runtime instructions and 97,373 application instructions.
 
 | Replay variant | Runtime instructions per kernel instruction at 10M kernel instructions |
 | --- | ---: |
@@ -12,15 +12,21 @@ instructions and 97,373 application instructions.
 | Inline register operations and direct memory accesses | 1.7859 |
 | Inline result observer and native sign tests | 0.7696 |
 | In-place signal-frame syscall transitions | 0.3311 |
-| Direct syscall transitions and inline shadow-register accesses | **0.0970** |
+| Direct syscall transitions and inline shadow-register accesses (`26bdf40`) | 0.0970 |
+| Direct gateways and syscall event recording in the return stub | 0.0769 |
+| SSBS-aware syscall return check | 0.0723 |
+| Direct DAIF register writes with masked reads | 0.0669 |
+| Single-store DAIF updates for the full mask and I/F | **0.0509** |
 
 The prepared capture populates all ELF load segments before execution. The
 Linux-user process retains the user and kernel mappings throughout the replay.
 The final variant rejects any call to the address translator or mapping
 synchronizer during execution. Captured EL1 register operations use EL0
 instructions and shadow state. Memory instructions access the installed
-addresses directly. The result observer uses the captured syscall's return
-slot to complete the event ledger.
+addresses directly. Each syscall site branches to its own gateway. A bounded
+cursor feeds the event ledger, and the return stub writes the restored result
+from `x0` into the pending event. The runner accounts for the direct
+transitions after execution using the cursor and the pending event.
 
 The experiment assumes a trusted application, fixed mapping permissions, and
 the captured kernel's syscall frame layout. It specializes the observed return
@@ -31,6 +37,19 @@ its traced uses. Syscall gateways branch to the captured EL0 vector. The
 return stub restores user state and branches through the matching gateway.
 The measured interval included 35 `rt_sigreturn` calls for UART MMIO, down
 from 16,678. These were the only host syscall requests observed by the plugin.
+
+The return stub selects an instruction sequence for the captured user SSBS
+bit. It checks the common return state after masking NZCV and normalizing
+SSBS. When DAIF or PAN is set, the stub uses the full status check and
+restores both fields.
+
+DAIF register writes store their operand directly. Register reads mask
+the result, and the runtime normalizes DAIF before C emulation and at the
+execution boundary. The replay places its state so bits 9:6 of the existing
+`x18` pointer supply the full DAIF mask. A byte store sets or clears I and
+F while preserving D and A. These changes save 213,836 runtime instructions
+in the 10-million prefix and 230,406 across the full replay. The kernel and
+application counts match the previous reader in both intervals.
 
 ## Replay inputs and accounting
 
@@ -49,7 +68,20 @@ from 16,678. These were the only host syscall requests observed by the plugin.
 The direct run matched all five recorded replay artifacts byte for byte. This
 includes 8,322 syscall entries, 8,321 returns, 35 UART operations, and the
 `OSREC_IPC_PASS` console line. The final `exit(0)` reached the expected
-boundary. No user fault appeared in the ledger.
+boundary. No user fault appeared in the ledger. The shadow entry and emulation
+counters matched the prior reader. A trace buffer limited to one event stopped
+at the second syscall and preserved the first result and both guard records.
+Additional replay checks matched the prior reader with SSBS clear and with
+DAIF and PAN set in the saved return status. Injecting an SSBS mismatch or a
+reserved status bit stopped the replay before the first return.
+
+The DAIF audit matched all 63,399 observed mask changes and 8,340 guest reads.
+Additional checks matched the reference after injecting bits outside DAIF and
+after forcing D and A set across partial updates. The emitter also passed
+with a state pointer that selected the fallback for setting the mask.
+
+The syscall entry and return stubs, including their gateways and the lowered
+ERET, account for 507,616 runtime instructions, or 90.8% of the full run.
 
 | Artifact | SHA-256 |
 | --- | --- |

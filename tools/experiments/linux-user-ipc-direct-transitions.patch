@@ -1,22 +1,21 @@
 --- a/runtime/linuxkernel_el0/native.c
 +++ b/runtime/linuxkernel_el0/native.c
-@@ -43,6 +43,15 @@
+@@ -43,6 +43,14 @@
  struct lk_el0_native {
      struct package_header h;
      struct lk_el0_kernel *kernel;
 +    uint64_t fixed_tpidr_el1, fixed_dczid_el0;
 +    uint64_t fixed_guest_x18, fixed_saved_x16;
-+    uint64_t fixed_saved_x17, fixed_saved_x15;
-+    uint64_t fixed_svc_pc, fixed_return_thunk;
-+    uint64_t fixed_event_limit;
++    uint64_t fixed_saved_x17;
++    uint64_t fixed_resume_pc, fixed_return_thunk;
++    struct lk_el0_event *event_end, *event_cursor, *pending_event;
 +    struct lk_el0_event *events;
-+    uint64_t event_capacity,event_count;
-+    struct lk_el0_event *pending_event;
-+    uint64_t pending_regs;
++    uint64_t event_count; /* Used when tracing is disabled. */
++    uint64_t slow_events; /* Events recorded by the signal handler in this run. */
      struct osrec_shadow shadow;
      struct osrec_context initial, *context;
      struct lk_el0_fp fp;
-@@ -71,8 +80,6 @@
+@@ -71,8 +79,6 @@
      unsigned char *executable_bytes;
      size_t executables;
      unsigned application,prepared,kernel_visible;
@@ -25,59 +24,120 @@
      struct vma_config vma;
      struct interval *vmas;
      size_t vma_count;
-@@ -433,6 +440,11 @@
+@@ -88,8 +94,11 @@
+  * the owner restores dispositions and releases its mapping state. */
+ static struct sigaction forwarded[4];
+ static LK_THREAD_LOCAL struct lk_el0_native *running;
++#define FIXED_DAIF_MASK 0x3c0ull
+ #define METADATA_BASE 0x180000000000ull
+ #define METADATA_SIZE (256ull<<20)
++_Static_assert(!(METADATA_BASE & FIXED_DAIF_MASK) && !(FIXED_DAIF_MASK % 16),
++               "DAIF mask fits the aligned metadata offset");
+ static void *metadata;
+ static size_t metadata_used;
+ static void *metadata_alloc(size_t bytes)
+@@ -173,9 +182,17 @@
+ {
+     if(!n || (capacity && !events) || capacity>1000000)return LK_EL0_BAD_ARGUMENT;
+     if(n->executing)return LK_EL0_BUSY;
+-    n->events=events;n->event_capacity=capacity;n->event_count=0;return LK_EL0_OK;
+-}
+-uint64_t lk_el0_native_events(struct lk_el0_native *n){return n?n->event_count:0;}
++    n->pending_event=NULL;
++    n->events=n->event_cursor=events;
++    n->event_end=events?events+capacity:NULL;
++    n->event_count=0;
++    return LK_EL0_OK;
++}
++uint64_t lk_el0_native_events(struct lk_el0_native *n)
++{
++    if(!n)return 0;
++    return n->events?(uint64_t)(n->event_cursor-n->events):n->event_count;
++}
+ enum lk_el0_status lk_el0_native_trace_allocate(struct lk_el0_native *n,uint64_t capacity,struct lk_el0_event **out)
+ {
+     if(!n || !out || !capacity || capacity>1000000)return LK_EL0_BAD_ARGUMENT;
+@@ -406,22 +423,18 @@
+ }
+ static struct lk_el0_event *event(struct lk_el0_native *n)
+ {
+-    if(n->event_count==1000000 || (n->events && n->event_count==n->event_capacity))
++    if(n->events) {
++        if(n->event_cursor==n->event_end)
++            stop(OSREC_STOP_UNSUPPORTED,n->context->pc,0x45564e54,lk_el0_native_events(n));
++        struct lk_el0_event *e=n->event_cursor++;
++        n->slow_events++;
++        memset(e,0,sizeof *e);
++        return e;
++    }
++    if(n->event_count==1000000)
+         stop(OSREC_STOP_UNSUPPORTED,n->context->pc,0x45564e54,n->event_count);
+-    struct lk_el0_event *e=n->events?n->events+n->event_count:NULL;
+-    if(e)memset(e,0,sizeof *e);
+-    n->event_count++;return e;
+-}
+-static void syscall_entry(struct lk_el0_native *n,uint32_t word)
+-{
+-    struct osrec_context *c=n->context;
+-    n->pending_event=event(n);
+-    if(n->pending_event) {
+-        n->pending_event->pc=c->pc;n->pending_event->number=c->x[8];
+-        memcpy(n->pending_event->arguments,c->x,6*8);
+-    }
+-    if(!osrec_enter_syscall(&n->shadow,c,word,OSREC_ENTRY_VENEER))stop(OSREC_STOP_RUNTIME,c->pc,word,0);
+-    n->pending_regs=c->sp-0x150;
++    n->event_count++;
++    return NULL;
+ }
+ static void patch_instruction(struct lk_el0_native *n,uint64_t pc,uint32_t word)
+ {
+@@ -433,6 +446,8 @@
  #define FIXED_CODE_VA 0x800085000000ull
  #define FIXED_CODE_SIZE (4u << 20)
  #define FIXED_SLOT_WORDS 12u
 +#define SHADOW_BASE 18u
-+#define FIXED_EL0_PSTATE (0xf0000000ull | (1ull<<12))
-+#define FIXED_DAIF_MASK 0x3c0ull
-+#define FIXED_PAN_MASK (1ull<<22)
 +#define FIXED_GATE_WORDS 12u
 
  static uint32_t direct_branch(uint64_t pc,uint64_t target)
  {
-@@ -488,15 +500,12 @@
- static uint32_t *emit_observer(struct lk_el0_native *n,uint32_t *out)
- {
-     uint32_t *start=out;
+@@ -480,35 +495,246 @@
+     return 0xf9000000u|((offset/8)<<10)|(base<<5)|src;
+ }
+
+-static uint32_t cbz(unsigned reg,const uint32_t *pc,const uint32_t *target)
+-{
+-    return 0xb4000000u|((uint32_t)(target-pc)<<5)|reg;
+-}
+-
+-static uint32_t *emit_observer(struct lk_el0_native *n,uint32_t *out)
+-{
+-    uint32_t *start=out;
 -    *out++=0xa9bf47f0u; /* stp x16, x17, [sp, #-16]! */
 -    out=load_address(out,16,&n->pending_regs);
 -    *out++=load_q(17,16,0);
-+    *out++=0xf81f0ff1u; /* str x17, [sp, #-16]! */
-+    *out++=load_q(17,SHADOW_BASE,offsetof(struct lk_el0_native,pending_regs));
-     uint32_t *no_pending=out++;
+-    uint32_t *no_pending=out++;
 -    *out++=store_q(31,16,0);
 -    size_t delta=offsetof(struct lk_el0_native,pending_regs)-offsetof(struct lk_el0_native,pending_event);
 -    *out++=0xd1000210u|(delta<<10); /* sub x16, x16, #delta */
 -    *out++=load_q(30,16,0);
 -    *out++=store_q(31,16,0);
-+    *out++=store_q(31,SHADOW_BASE,offsetof(struct lk_el0_native,pending_regs));
-+    *out++=load_q(30,SHADOW_BASE,offsetof(struct lk_el0_native,pending_event));
-+    *out++=store_q(31,SHADOW_BASE,offsetof(struct lk_el0_native,pending_event));
-     uint32_t *no_event=out++;
-     *out++=load_q(17,17,0);
-     *out++=store_q(17,30,offsetof(struct lk_el0_event,result));
-@@ -504,11 +513,259 @@
-     *out++=store_q(17,30,offsetof(struct lk_el0_event,completed));
-     *no_pending=cbz(17,no_pending,out);
-     *no_event=cbz(30,no_event,out);
+-    uint32_t *no_event=out++;
+-    *out++=load_q(17,17,0);
+-    *out++=store_q(17,30,offsetof(struct lk_el0_event,result));
+-    *out++=0xd2800031u; /* mov x17, #1 */
+-    *out++=store_q(17,30,offsetof(struct lk_el0_event,completed));
+-    *no_pending=cbz(17,no_pending,out);
+-    *no_event=cbz(30,no_event,out);
 -    *out++=0xa8c147f0u; /* ldp x16, x17, [sp], #16 */
 -    out=load_address(out,30,(const uint64_t *)(uintptr_t)(n->app.hook+4));
-+    *out++=0xf84107f1u; /* ldr x17, [sp], #16 */
-+    uint32_t *load_lr=out++;
-     *out=direct_branch((uintptr_t)out,n->app.target);
-+    ++out;
-+    if((uintptr_t)out%8)*out++=0;
-+    *load_lr=0x5800001eu|((uint32_t)(out-load_lr)<<5); /* ldr x30, return_pc */
-+    uint64_t return_pc=n->app.hook+4;
-+    memcpy(out,&return_pc,sizeof return_pc);
-+    out+=2;
-     patch_instruction(n,n->app.hook,direct_branch(n->app.hook,(uintptr_t)start));
+-    *out=direct_branch((uintptr_t)out,n->app.target);
+-    patch_instruction(n,n->app.hook,direct_branch(n->app.hook,(uintptr_t)start));
 -    return out+1;
-+    return out;
++static uint32_t pair_q(unsigned first,unsigned second,size_t offset,int load)
++{
++    return (load?0xa9400000u:0xa9000000u)|((offset/8)<<15)|
++           (second<<10)|(SHADOW_BASE<<5)|first;
 +}
-+
 +
 +static void expect_word(struct lk_el0_native *n,uint64_t pc,uint32_t expected)
 +{
@@ -128,6 +188,9 @@
 +
 +
 +/* The copied sequences use only local branches and offsets from x18.
++ * At ERET x0 holds the restored syscall result, so the return sequence
++ * can complete the event directly. A syscall that does not return
++ * leaves its event incomplete.
 + * The low-address syscall gateways supply a site and a return landing pad. */
 +static uint32_t *emit_fixed_entry(struct lk_el0_native *n,uint32_t *out)
 +{
@@ -135,49 +198,36 @@
 +    __asm__ volatile(
 +        "b 9f\n"
 +        "1:\n"
-+        "str x15,[x18,%c[saved15]]\n"
-+        "ldr x16,[x18,%c[count]]\n"
-+        "ldr x17,[x18,%c[limit]]\n"
++        "ldp x17,x16,[x18,%c[event_end]]\n"
 +        "sub x17,x17,x16\n"
 +        "cbz x17,8f\n"
-+        "mov x17,%c[event_size]\n"
-+        "ldr x15,[x18,%c[events]]\n"
-+        "madd x17,x16,x17,x15\n"
-+        "add x16,x16,#1\n"
-+        "str x16,[x18,%c[count]]\n"
-+        "stp xzr,x8,[x17]\n"
-+        "stp x0,x1,[x17,#16]\n"
-+        "stp x2,x3,[x17,#32]\n"
-+        "stp x4,x5,[x17,#48]\n"
-+        "stp xzr,xzr,[x17,#64]\n"
-+        "ldr x16,[x18,%c[site]]\n"
-+        "str x16,[x17,#80]\n"
-+        "str x17,[x18,%c[pending_event]]\n"
-+        "add x16,x16,#4\n"
-+        "str x16,[x18,%c[elr]]\n"
++        "stp xzr,x8,[x16]\n"
++        "stp x0,x1,[x16,#16]\n"
++        "stp x2,x3,[x16,#32]\n"
++        "stp x4,x5,[x16,#48]\n"
++        "stp xzr,xzr,[x16,#64]\n"
++        "ldr x17,[x18,%c[resume]]\n"
++        "sub x17,x17,#4\n"
++        "str x17,[x16,#80]\n"
++        "add x17,x16,%c[event_size]\n"
++        "stp x17,x16,[x18,%c[cursor]]\n"
++        "ldr x17,[x18,%c[resume]]\n"
 +        "mrs x16,nzcv\n"
 +        "3: nop\n" /* Optional SSBS from the captured user PSTATE. */
-+        "str x16,[x18,%c[spsr]]\n"
++        "stp x17,x16,[x18,%c[elr]]\n"
 +        "mov x16,#0x56000000\n"
 +        "str x16,[x18,%c[esr]]\n"
 +        "mov x16,sp\n"
 +        "str x16,[x18,%c[sp_el0]]\n"
 +        "ldr x16,[x18,%c[sp_el1]]\n"
 +        "mov sp,x16\n"
-+        "sub x16,x16,#0x150\n"
-+        "str x16,[x18,%c[pending_regs]]\n"
 +        "mov x16,#0x3c0\n"
 +        "str x16,[x18,%c[daif]]\n"
 +        "mov x16,#1\n"
 +        "str x16,[x18,%c[mode]]\n"
-+        "ldr x16,[x18,%c[entries]]\n"
-+        "add x16,x16,#1\n"
-+        "str x16,[x18,%c[entries]]\n"
-+        "ldr x15,[x18,%c[saved15]]\n"
 +        "ldp x16,x17,[x18,%c[saved16]]\n"
 +        "4: nop\n" /* Direct branch to the captured EL0 vector. */
 +        "8:\n"
-+        "ldr x15,[x18,%c[saved15]]\n"
 +        "ldp x16,x17,[x18,%c[saved16]]\n"
 +        "brk #0xf07\n"
 +        "2:\n"
@@ -187,25 +237,26 @@
 +        "adr %2,3b\n"
 +        "adr %3,4b\n"
 +        : "=&r"(begin),"=&r"(end),"=&r"(ssbs),"=&r"(branch)
-+        : [saved15] "i"(offsetof(struct lk_el0_native,fixed_saved_x15)),
-+          [saved16] "i"(offsetof(struct lk_el0_native,fixed_saved_x16)),
-+          [count] "i"(offsetof(struct lk_el0_native,event_count)),
-+          [limit] "i"(offsetof(struct lk_el0_native,fixed_event_limit)),
++        : [saved16] "i"(offsetof(struct lk_el0_native,fixed_saved_x16)),
++          [event_end] "i"(offsetof(struct lk_el0_native,event_end)),
++          [cursor] "i"(offsetof(struct lk_el0_native,event_cursor)),
 +          [event_size] "i"(sizeof(struct lk_el0_event)),
-+          [events] "i"(offsetof(struct lk_el0_native,events)),
-+          [site] "i"(offsetof(struct lk_el0_native,fixed_svc_pc)),
-+          [pending_event] "i"(offsetof(struct lk_el0_native,pending_event)),
-+          [pending_regs] "i"(offsetof(struct lk_el0_native,pending_regs)),
++          [resume] "i"(offsetof(struct lk_el0_native,fixed_resume_pc)),
 +          [elr] "i"(offsetof(struct lk_el0_native,shadow.elr)),
-+          [spsr] "i"(offsetof(struct lk_el0_native,shadow.spsr)),
 +          [esr] "i"(offsetof(struct lk_el0_native,shadow.esr)),
 +          [sp_el0] "i"(offsetof(struct lk_el0_native,shadow.sp_el0)),
 +          [sp_el1] "i"(offsetof(struct lk_el0_native,shadow.sp_el1)),
 +          [daif] "i"(offsetof(struct lk_el0_native,shadow.daif)),
-+          [mode] "i"(offsetof(struct lk_el0_native,shadow.mode)),
-+          [entries] "i"(offsetof(struct lk_el0_native,shadow.entries)));
++          [mode] "i"(offsetof(struct lk_el0_native,shadow.mode)));
++    _Static_assert(offsetof(struct lk_el0_native,event_cursor)==
++                       offsetof(struct lk_el0_native,event_end)+8 &&
++                   offsetof(struct lk_el0_native,pending_event)==
++                       offsetof(struct lk_el0_native,event_cursor)+8 &&
++                   offsetof(struct osrec_shadow,spsr)==offsetof(struct osrec_shadow,elr)+8,
++                   "paired entry fields");
 +    _Static_assert(sizeof(struct lk_el0_event)==88 &&
 +                   offsetof(struct lk_el0_event,result)==64 &&
++                   offsetof(struct lk_el0_event,completed)==72 &&
 +                   offsetof(struct lk_el0_event,pc)==80,"IPC event layout");
 +    size_t slots=(uintptr_t)end/4-(uintptr_t)begin/4;
 +    memcpy(out,begin,slots*sizeof *out);
@@ -218,94 +269,97 @@
 +
 +static uint32_t *emit_fixed_return(struct lk_el0_native *n,uint32_t *out)
 +{
-+    const uint32_t *begin,*end,*ssbs;
-+    uint64_t psr=FIXED_EL0_PSTATE|FIXED_DAIF_MASK|FIXED_PAN_MASK;
++    /* Emit both SSBS forms so the selected stub only normalizes bits
++     * which differ from zero in the captured state. */
++    const uint32_t *without_ssbs,*with_ssbs,*templates_end;
 +    __asm__ volatile(
 +        "b 9f\n"
-+        "1:\n"
++        ".macro ipc_return ssbs\n"
 +        "stp x16,x17,[x18,%c[saved16]]\n"
-+        "ldr x16,[x18,%c[site]]\n"
++        "ldr x16,[x18,%c[resume]]\n"
 +        "ldr x17,[x18,%c[elr]]\n"
 +        "sub x17,x17,x16\n"
-+        "sub x17,x17,#4\n"
 +        "cbnz x17,8f\n"
 +        "ldr x17,[x18,%c[spsr]]\n"
-+        "movz x16,%c[psr_low]\n"
-+        "movk x16,%c[psr_high],lsl #16\n"
-+        "bic x16,x17,x16\n"
-+        "cbnz x16,8f\n"
-+        "3: tbnz x17,#12,8f\n" /* Reject any change to the user SSBS bit. */
-+        "and x16,x17,#0x3c0\n"
-+        "str x16,[x18,%c[daif]]\n"
-+        "ubfx x16,x17,#22,#1\n"
-+        "str x16,[x18,%c[pan]]\n"
++        "and x16,x17,#0xffffffff0fffffff\n" /* Ignore NZCV. */
++        ".if \\ssbs\n"
++        "eor x16,x16,#0x1000\n" /* Normalize the captured SSBS bit. */
++        ".endif\n"
++        "cbnz x16,5f\n"
++        "stp xzr,xzr,[x18,%c[daif]]\n"
++        "msr nzcv,x17\n"
++        "6: ldr x16,[x18,%c[pending_event]]\n"
++        "cbz x16,8f\n"
++        "mov x17,#1\n"
++        "stp x0,x17,[x16,%c[result]]\n"
++        "str xzr,[x18,%c[pending_event]]\n"
 +        "mov x16,sp\n"
 +        "str x16,[x18,%c[sp_el1]]\n"
 +        "ldr x16,[x18,%c[sp_el0]]\n"
 +        "mov sp,x16\n"
 +        "str xzr,[x18,%c[mode]]\n"
-+        "str xzr,[x18,%c[guest_x18]]\n"
-+        "ldr x16,[x18,%c[emulated]]\n"
-+        "add x16,x16,#1\n"
-+        "str x16,[x18,%c[emulated]]\n"
-+        "msr nzcv,x17\n"
 +        "ldr x16,[x18,%c[thunk]]\n"
 +        "br x16\n"
++        "5: and x16,x16,#0xfffffffffffffc3f\n" /* Ignore DAIF. */
++        "and x16,x16,#0xffffffffffbfffff\n" /* Ignore PAN. */
++        "cbnz x16,8f\n" /* Reject changes to SSBS and all other bits. */
++        "msr nzcv,x17\n"
++        "and x16,x17,#0x3c0\n"
++        "ubfx x17,x17,#22,#1\n"
++        "stp x16,x17,[x18,%c[daif]]\n"
++        "b 6b\n"
 +        "8:\n"
 +        "ldp x16,x17,[x18,%c[saved16]]\n"
 +        "brk #0xf08\n"
-+        "2:\n"
++        ".endm\n"
++        "1: ipc_return 0\n"
++        "2: ipc_return 1\n"
++        "3:\n"
++        ".purgem ipc_return\n"
 +        "9:\n"
 +        "adr %0,1b\n"
 +        "adr %1,2b\n"
 +        "adr %2,3b\n"
-+        : "=&r"(begin),"=&r"(end),"=&r"(ssbs)
++        : "=&r"(without_ssbs),"=&r"(with_ssbs),"=&r"(templates_end)
 +        : [saved16] "i"(offsetof(struct lk_el0_native,fixed_saved_x16)),
-+          [site] "i"(offsetof(struct lk_el0_native,fixed_svc_pc)),
++          [resume] "i"(offsetof(struct lk_el0_native,fixed_resume_pc)),
 +          [elr] "i"(offsetof(struct lk_el0_native,shadow.elr)),
++          [pending_event] "i"(offsetof(struct lk_el0_native,pending_event)),
++          [result] "i"(offsetof(struct lk_el0_event,result)),
 +          [spsr] "i"(offsetof(struct lk_el0_native,shadow.spsr)),
-+          [psr_low] "i"(psr&65535),[psr_high] "i"(psr>>16),
 +          [daif] "i"(offsetof(struct lk_el0_native,shadow.daif)),
-+          [pan] "i"(offsetof(struct lk_el0_native,shadow.pan)),
 +          [sp_el0] "i"(offsetof(struct lk_el0_native,shadow.sp_el0)),
 +          [sp_el1] "i"(offsetof(struct lk_el0_native,shadow.sp_el1)),
 +          [mode] "i"(offsetof(struct lk_el0_native,shadow.mode)),
-+          [guest_x18] "i"(offsetof(struct lk_el0_native,fixed_guest_x18)),
-+          [emulated] "i"(offsetof(struct lk_el0_native,shadow.emulated)),
 +          [thunk] "i"(offsetof(struct lk_el0_native,fixed_return_thunk)));
++    _Static_assert(offsetof(struct osrec_shadow,pan)==offsetof(struct osrec_shadow,daif)+8,
++                   "paired return fields");
++    int ssbs=(n->context->pstate&(1ull<<12))!=0;
++    const uint32_t *begin=ssbs?with_ssbs:without_ssbs;
++    const uint32_t *end=ssbs?templates_end:with_ssbs;
 +    size_t slots=(uintptr_t)end/4-(uintptr_t)begin/4;
 +    memcpy(out,begin,slots*sizeof *out);
-+    if(n->context->pstate&(1ull<<12))
-+        out[((uintptr_t)ssbs-(uintptr_t)begin)/4]^=1u<<24; /* TBNZ to TBZ */
 +    return out+slots;
 +}
 +
-+static uint32_t pair_q(unsigned first,unsigned second,size_t offset,int load)
++static uint32_t *fixed_gateway_slot(struct lk_el0_native *n,size_t index)
 +{
-+    return (load?0xa9400000u:0xa9000000u)|((offset/8)<<15)|
-+           (second<<10)|(SHADOW_BASE<<5)|first;
++    return (uint32_t *)n->gateways+index*FIXED_GATE_WORDS;
 +}
 +
 +static void emit_fixed_gateways(struct lk_el0_native *n,const uint32_t *entry)
 +{
 +    const size_t saved=offsetof(struct lk_el0_native,fixed_saved_x16);
-+    const size_t site=offsetof(struct lk_el0_native,fixed_svc_pc);
++    const size_t site=offsetof(struct lk_el0_native,fixed_resume_pc);
 +    _Static_assert(offsetof(struct lk_el0_native,fixed_saved_x16)<512 &&
-+                   offsetof(struct lk_el0_native,fixed_svc_pc)<512 &&
++                   offsetof(struct lk_el0_native,fixed_resume_pc)<512 &&
 +                   offsetof(struct lk_el0_native,fixed_saved_x17)==
 +                       offsetof(struct lk_el0_native,fixed_saved_x16)+8 &&
 +                   offsetof(struct lk_el0_native,fixed_return_thunk)==
-+                       offsetof(struct lk_el0_native,fixed_svc_pc)+8,"paired gateway offsets");
-+    const size_t first=(n->app.count+1)&~1ull;
-+    if(first+n->app.count*FIXED_GATE_WORDS>n->app.size/4)
-+        stop(OSREC_STOP_UNSUPPORTED,n->context->pc,n->app.count,n->app.size);
-+    uint32_t *gateways=n->gateways;
++                       offsetof(struct lk_el0_native,fixed_resume_pc)+8,"paired gateway offsets");
 +    for(size_t i=0;i<n->app.count;i++) {
 +        const struct application_site *a=n->app_sites+i;
-+        if(a->kind || a->word!=0xd4000001u)
-+            stop(OSREC_STOP_UNSUPPORTED,a->pc,a->word,a->kind);
-+        uint32_t *slot=gateways+first+i*FIXED_GATE_WORDS;
-+        gateways[i]=direct_branch(a->gateway,(uintptr_t)slot);
++        uint32_t *slot=fixed_gateway_slot(n,i);
 +        slot[0]=pair_q(16,17,saved,0);
 +        slot[1]=0x58000010u|(7u<<5); /* ldr x16, slot[8] */
 +        slot[2]=0x10000011u|(4u<<5); /* adr x17, slot[6] */
@@ -315,13 +369,14 @@
 +        slot[6]=pair_q(16,17,saved,1);
 +        slot[7]=direct_branch((uintptr_t)(slot+7),a->pc+4);
 +        uint64_t address=(uintptr_t)entry;
-+        memcpy(slot+8,&a->pc,sizeof a->pc);
++        uint64_t resume=a->pc+4;
++        memcpy(slot+8,&resume,sizeof resume);
 +        memcpy(slot+10,&address,sizeof address);
 +    }
  }
 
  static void prepare_fixed_code(struct lk_el0_native *n)
-@@ -523,7 +780,13 @@
+@@ -523,7 +749,14 @@
      __asm__ volatile("mrs %0, dczid_el0":"=r"(dczid));
      int native_zva=(n->shadow.known[0xd807/8]&(1u<<(0xd807%8))) &&
                     dczid==n->shadow.value[0xd807] && !(dczid&16);
@@ -333,10 +388,11 @@
 +       n->app.target!=0x8000800190d8ull || n->fixed_return_pc!=0x80008001217cull)
 +        stop(OSREC_STOP_UNSUPPORTED,n->context->pc,SHADOW_BASE,n->context->x[SHADOW_BASE]);
 +    size_t used=(size_t)(prepare_fixed_x18(n,n->fixed_code)-n->fixed_code);
++    int anchor_sets_daif=((uintptr_t)n&FIXED_DAIF_MASK)==FIXED_DAIF_MASK;
      for(uint64_t i=0;i<n->h.sites;i++) {
          const struct osrec_site *site=&n->sites[i];
          uint64_t pc=site->va;
-@@ -560,37 +823,62 @@
+@@ -560,46 +793,85 @@
              continue;
          }
          uint64_t *addr=set_mask || clear_mask?&n->shadow.daif:shadow_register(&n->shadow,key,read);
@@ -350,11 +406,23 @@
 +        if(rt==SHADOW_BASE)continue;
 +        size_t offset=(uintptr_t)addr-(uintptr_t)n;
 +        int direct=offset<32768 && !(offset%8);
-+        if(direct && clear_mask && ((word>>8)&15u)==15) {
-+            patch_instruction(n,pc,store_q(31,SHADOW_BASE,offset));
-+            continue;
++        unsigned mask=(word>>8)&15u;
++        if(direct && (clear_mask || (set_mask && anchor_sets_daif))) {
++            unsigned value=clear_mask?31:SHADOW_BASE;
++            if(mask==15) {
++                patch_instruction(n,pc,store_q(value,SHADOW_BASE,offset));
++                continue;
++            }
++            /* I and F occupy the low byte. A byte store preserves D and A. */
++            size_t low_byte=offset+(__BYTE_ORDER__==__ORDER_BIG_ENDIAN__?7:0);
++            if(mask==3 && low_byte<4096) {
++                patch_instruction(n,pc,0x39000000u|(low_byte<<10)|(SHADOW_BASE<<5)|value);
++                continue;
++            }
 +        }
-+        if(direct && !set_mask && !clear_mask && key!=0xc213 && (read || key!=0xda11)) {
++        /* MSR DAIF can store the whole operand. MRS masks the result,
++         * and the signal handler normalizes the field before C emulation. */
++        if(direct && !set_mask && !clear_mask && key!=0xc213 && (!read || key!=0xda11)) {
 +            patch_instruction(n,pc,read?load_q(rt,SHADOW_BASE,offset):store_q(rt,SHADOW_BASE,offset));
 +            continue;
 +        }
@@ -370,6 +438,7 @@
 +                *out++=load_q(rt,rt,0);
 +            }
              if(key==0xc213)*out++=0xd3400000u|(42u<<16)|(41u<<10)|(rt<<5)|rt;
++            if(key==0xda11)*out++=0x927a0c00u|(rt<<5)|rt; /* AND xRt,xRt,#0x3c0 */
          } else {
 -            unsigned a=rt==16?17:16,b=rt==16 || rt==17?18:17;
 +            unsigned a=rt==16?17:16,b=rt==16 || rt==17?19:17;
@@ -386,7 +455,6 @@
 -                    unsigned bit=6+j;
 -                    *out++=(set_mask?(0xb2400000u|((64-bit)<<16)):
 -                                     (0x92400000u|((63-bit)<<16)|(62u<<10)))|(b<<5)|b;
-+                unsigned mask=(word>>8)&15u;
 +                if(set_mask && mask==15) {
 +                    *out++=0xd2807800u|b; /* mov xB, #0x3c0 */
 +                } else {
@@ -399,8 +467,8 @@
 +                                         (0x92400000u|((63-bit)<<16)|(62u<<10)))|(b<<5)|b;
 +                    }
                  }
-             } else if(key==0xda11) {
-                 value=b;*out++=0x92400000u|(58u<<16)|(3u<<10)|(rt<<5)|b;
+-            } else if(key==0xda11) {
+-                value=b;*out++=0x92400000u|(58u<<16)|(3u<<10)|(rt<<5)|b;
              } else if(key==0xc213) {
                  value=b;*out++=0xd3400000u|(22u<<16)|(22u<<10)|(rt<<5)|b;
              }
@@ -409,15 +477,15 @@
              *out++=0xa8c10000u|(b<<10)|(31u<<5)|a; /* LDP a,b,[sp],#16 */
          }
          *out=direct_branch((uintptr_t)out,pc+4);
-@@ -599,7 +887,14 @@
+         used=(size_t)(out+1-n->fixed_code);
+         patch_instruction(n,pc,direct_branch(pc,(uintptr_t)start));
      }
-     if(used>FIXED_CODE_SIZE/4-24)
-         stop(OSREC_STOP_UNSUPPORTED,n->app.hook,used,0);
+-    if(used>FIXED_CODE_SIZE/4-24)
+-        stop(OSREC_STOP_UNSUPPORTED,n->app.hook,used,0);
 -    uint32_t *end=emit_observer(n,n->fixed_code+used);
-+    uint32_t *entry=emit_observer(n,n->fixed_code+used);
-+    if(entry>n->fixed_code+FIXED_CODE_SIZE/4-128 || !n->fixed_return_pc || !n->events)
-+        stop(OSREC_STOP_UNSUPPORTED,n->context->pc,n->fixed_return_pc,0);
-+    n->fixed_event_limit=n->event_capacity<1000000?n->event_capacity:1000000;
++    if(used>FIXED_CODE_SIZE/4-128 || !n->fixed_return_pc)
++        stop(OSREC_STOP_UNSUPPORTED,n->context->pc,n->fixed_return_pc,used);
++    uint32_t *entry=n->fixed_code+used;
 +    uint32_t *return_code=emit_fixed_entry(n,entry);
 +    uint32_t *end=emit_fixed_return(n,return_code);
 +    emit_fixed_gateways(n,entry);
@@ -425,8 +493,41 @@
      if(mprotect(n->fixed_code,FIXED_CODE_SIZE,PROT_READ|PROT_EXEC))
          stop(OSREC_STOP_UNSUPPORTED,n->context->pc,errno,FIXED_CODE_VA);
      __builtin___clear_cache((char *)n->fixed_code,(char *)end);
-@@ -634,16 +929,16 @@
-         ((uint32_t *)g)[i]=0xd4200000u|(0xf03u<<5);
+@@ -608,11 +880,14 @@
+ {
+     if(n->prepared)return;
+     if(!n->app_sites || !n->vma.magic)stop(OSREC_STOP_UNSUPPORTED,n->context->pc,0x415050,0);
++    if(!n->events)stop(OSREC_STOP_UNSUPPORTED,n->context->pc,0x45564e54,0);
+     void *g=mmap((void *)(uintptr_t)n->app.base,n->app.size,PROT_READ|PROT_WRITE,
+                  MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0);
+     if(g==MAP_FAILED)stop(OSREC_STOP_UNSUPPORTED,n->context->pc,errno,n->app.base);
+     if(g!=(void *)(uintptr_t)n->app.base){munmap(g,n->app.size);stop(OSREC_STOP_UNSUPPORTED,n->context->pc,0,n->app.base);}
+     n->gateways=g;
++    if(n->app.count>n->app.size/4/FIXED_GATE_WORDS)
++        stop(OSREC_STOP_UNSUPPORTED,n->context->pc,n->app.count,n->app.size);
+     for(size_t i=0;i<n->users;i++)if(protection(n->user[i].attrs,1)&PROT_EXEC) {
+         if(n->user[i].va<n->app.text_lo || n->user[i].va>=n->app.text_hi)
+             stop(OSREC_STOP_UNSUPPORTED,n->context->pc,0x45584543,n->user[i].va);
+@@ -620,30 +895,25 @@
+         n->executable[n->executables++]=n->user[i];
+     }
+     for(uint64_t i=0;i<n->app.count;i++) {
+-        struct application_site *a=n->app_sites+i;
++        const struct application_site *a=n->app_sites+i;
++        if(a->kind || a->word!=0xd4000001u)
++            stop(OSREC_STOP_UNSUPPORTED,a->pc,a->word,a->kind);
+         uint64_t attrs=0,pa=translate(n,a->pc,2,&attrs);
+         uint32_t *p=pa&1?NULL:physical(n,pa+(a->pc&4095),4);
+         if(!p || *p!=a->word || !(protection(attrs,1)&PROT_EXEC))stop(OSREC_STOP_UNSUPPORTED,a->pc,a->word,pa);
+-        uint32_t replacement;
+-        if(a->kind==0) {
+-            int64_t delta=(int64_t)(a->gateway-a->pc);
+-            if(delta%4 || delta<-(1ll<<27) || delta>=(1ll<<27))stop(OSREC_STOP_RUNTIME,a->pc,a->gateway,0);
+-            replacement=0x14000000u|((uint32_t)(delta/4)&0x3ffffffu);
+-        } else replacement=a->kind==1?0xd4200000u|(0xf04u<<5):0xd503201fu;
+-        *p=replacement;
+-        ((uint32_t *)g)[i]=0xd4200000u|(0xf03u<<5);
++        *p=direct_branch(a->pc,(uintptr_t)fixed_gateway_slot(n,i));
          __builtin___clear_cache((char *)(uintptr_t)a->pc,(char *)(uintptr_t)(a->pc+4));
      }
 -    if(mprotect(g,n->app.size,PROT_READ|PROT_EXEC))stop(OSREC_STOP_RUNTIME,n->context->pc,errno,n->app.base);
@@ -445,7 +546,7 @@
      n->executable_bytes=metadata_alloc(n->executables*PAGE);
      if(!n->executable_bytes)stop(OSREC_STOP_RUNTIME,n->context->pc,ENOMEM,0);
      for(size_t i=0;i<n->executables;i++)
-@@ -771,48 +1066,6 @@
+@@ -771,48 +1041,6 @@
      if(p->sa_handler==SIG_DFL){sigaction(sig,p,NULL);syscall(SYS_tgkill,getpid(),syscall(SYS_gettid),sig);return;}
      if(p->sa_flags&SA_SIGINFO)p->sa_sigaction(sig,info,context);else p->sa_handler(sig);
  }
@@ -494,7 +595,7 @@
  static void handler(int sig,siginfo_t *info,void *context)
  {
      struct lk_el0_native *n=running;
-@@ -820,15 +1073,13 @@
+@@ -820,32 +1048,26 @@
      ucontext_t *u=context;
      if(n->handling)stop(OSREC_STOP_RUNTIME,u->uc_mcontext.pc,sig,(uintptr_t)info->si_addr);
      n->handling=1;
@@ -511,11 +612,64 @@
          memcpy(fp->vregs,n->fp.v,sizeof n->fp.v);
          fp->fpsr=n->fp.fpsr;fp->fpcr=n->fp.fpcr;
          n->handling=0;return;
-@@ -899,6 +1150,7 @@
-         stop(OSREC_STOP_RUNTIME,c->pc,0xf02,0);
      }
-     n->signal_fp=NULL;
-+    if(n->prepared)c->x[SHADOW_BASE]=n->fixed_guest_x18;
+     n->signal_fp=fp;
++    if(n->prepared)n->shadow.daif&=FIXED_DAIF_MASK;
+     from_signal(n,u);
+     struct osrec_context *c=n->context;
+     uint64_t far=(uintptr_t)info->si_addr;
+     int user=n->shadow.mode==OSREC_USER;
+     if(sig==SIGTRAP) {
+-        if(user && in_gateways(n,c->pc)) {
+-            uint64_t index=(c->pc-n->app.base)/4;
+-            if(c->pc%4 || index>=n->app.count || n->app_sites[index].kind!=0)
+-                stop(OSREC_STOP_UNSUPPORTED,c->pc,sig,far);
+-            struct application_site *a=n->app_sites+index;
+-            c->pc=a->pc;syscall_entry(n,a->word);goto resume;
+-        }
++        if(user && in_gateways(n,c->pc))
++            stop(OSREC_STOP_UNSUPPORTED,c->pc,sig,far);
+         uint32_t word=*(uint32_t *)(uintptr_t)c->pc;
+         if((word&0xffe0001fu)!=0xd4200000u)stop(OSREC_STOP_EXCEPTION,c->pc,word,far);
+         if(user && (word>>5&65535)==0xf04) {
+@@ -890,6 +1112,9 @@
+     __asm__ volatile(".arch_extension fp\n\tmrs %0,fpcr\n\tmrs %1,fpsr\n\t.arch_extension nofp":"=r"(host_fpcr),"=r"(host_fpsr));
+     n->context=c;n->diagnostic=d;n->status=LK_EL0_FAULT;n->handling=0;n->starting=1;
+     n->application=s->mode==OSREC_USER;
++    const struct lk_el0_event *first_event=n->event_cursor;
++    unsigned had_pending=n->pending_event!=NULL;
++    n->slow_events=0;
+     running=n;
+     lk_stop_handler old_stop=lk_backend_stop;lk_backend_stop=stop;
+     if(!sigsetjmp(n->jump,1)) {
+@@ -902,6 +1127,19 @@
      if(n->prepared && n->application) {
          n->application=0;
          validate_application(n);
++    }
++    if(n->prepared) {
++        s->daif&=FIXED_DAIF_MASK;
++        c->x[SHADOW_BASE]=s->mode==OSREC_USER?0:n->fixed_guest_x18;
++        if(first_event) {
++            /* The cursor includes events recorded by the signal path,
++             * whose counters the emulator already updated. An outstanding
++             * direct event accounts for an entry with no matching return. */
++            uint64_t direct_entries=(uint64_t)(n->event_cursor-first_event)-n->slow_events;
++            uint64_t direct_returns=direct_entries+had_pending-(n->pending_event!=NULL);
++            s->entries+=direct_entries;
++            s->emulated+=direct_returns;
++        }
+     }
+     visibility(n,1);
+     n->executing=0;n->application=0;lk_backend_stop=old_stop;running=NULL;
+@@ -951,7 +1189,9 @@
+         if(metadata!=MAP_FAILED)munmap(metadata,METADATA_SIZE);
+         metadata=NULL;atomic_flag_clear(&owned);return LK_EL0_UNSUPPORTED;
+     }
+-    metadata_used=0;
++    /* When x18 points at n, bits 9:6 supply the full DAIF mask.
++     * The replay can use x18 as the source for mask-setting stores. */
++    metadata_used=FIXED_DAIF_MASK;
+     struct lk_el0_native *n=metadata_calloc(1,sizeof *n);
+     if(!n){munmap(metadata,METADATA_SIZE);metadata=NULL;atomic_flag_clear(&owned);return LK_EL0_FAULT;}
+     n->fd=-1;

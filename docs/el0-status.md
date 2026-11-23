@@ -1,6 +1,7 @@
-# EL0 replay status · 2026-11-22
+# EL0 replay status · 2026-11-23
 
-Implementation and benchmark baseline `5e71d68` on `main`.
+The current IPC result uses the direct transition experiment. The IPC report
+includes the original direct-transition benchmark from `26bdf40` on `main`.
 
 The modeling path starts at the user ELF's saved entry, then executes the
 captured kernel's syscall code in the same EL0 address space. The harness
@@ -10,9 +11,9 @@ that the workload needs use EL0 sequences or shadow architectural state.
 ## Verified runs
 
 - The 640-iteration pipe and eventfd workload completed in QEMU Linux-user
-  on Cortex-A53 with **9.70% runtime instruction overhead** at 10 million
-  kernel instructions, down from 33.11%. The full run counted
-  10,779,406 kernel, 1,055,672 runtime, and 97,373 application instructions.
+  on Cortex-A53 with **5.09% runtime instruction overhead** at 10 million
+  kernel instructions, down from 7.23%. The full run counted
+  10,779,406 kernel, 558,981 runtime, and 97,373 application instructions.
   All 8,322 syscall entries, 8,321 returns, and 35 UART operations matched
   the native reference. The ledger recorded zero user faults. The run
   rejected any runtime address translation or mapping refresh. The opt-in

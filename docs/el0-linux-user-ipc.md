@@ -1,9 +1,9 @@
 # Fixed-mapping IPC replay in QEMU Linux-user
 
-The 640-iteration IPC workload completed with **5.09% runtime instruction
-overhead** at 10 million kernel instructions, down from 7.23% before the DAIF
-changes. The full run dispatched 10,779,406 kernel instructions, 558,981
-runtime instructions and 97,373 application instructions.
+The 640-iteration IPC workload completed with **4.55% runtime instruction
+overhead** at 10 million kernel instructions, down from 4.63%. The full run
+dispatched 10,779,406 kernel instructions, 497,097 runtime instructions
+and 97,373 application instructions.
 
 | Replay variant | Runtime instructions per kernel instruction at 10M kernel instructions |
 | --- | ---: |
@@ -16,7 +16,12 @@ runtime instructions and 97,373 application instructions.
 | Direct gateways and syscall event recording in the return stub | 0.0769 |
 | SSBS-aware syscall return check | 0.0723 |
 | Direct DAIF register writes with masked reads | 0.0669 |
-| Single-store DAIF updates for the full mask and I/F | **0.0509** |
+| Single-store DAIF updates for the full mask and I/F (`7d096e0`) | 0.0509 |
+| Deferred result initialization and direct DAIF store at entry | 0.0494 |
+| Pending event and guest mode encoded together | 0.0478 |
+| Paired stack and gateway load and direct UART frame updates | 0.0470 |
+| Paired load of live and expected return addresses | 0.0463 |
+| Direct return using an untagged pending-event pointer | **0.0455** |
 
 The prepared capture populates all ELF load segments before execution. The
 Linux-user process retains the user and kernel mappings throughout the replay.
@@ -27,6 +32,12 @@ addresses directly. Each syscall site branches to its own gateway. A bounded
 cursor feeds the event ledger, and the return stub writes the restored result
 from `x0` into the pending event. The runner accounts for the direct
 transitions after execution using the cursor and the pending event.
+The direct return initializes the result fields. The runtime also initializes
+an incomplete record at a replay stop or before resuming user execution
+after an emulated return. The C emulator records guest mode with the event
+cursor and pending pointer. Its mode remains valid while both pointers match.
+After a direct transition changes either pointer, a pending event indicates
+kernel mode and a cleared pointer indicates user mode.
 
 The experiment assumes a trusted application, fixed mapping permissions, and
 the captured kernel's syscall frame layout. It specializes the observed return
@@ -51,6 +62,27 @@ F while preserving D and A. These changes save 213,836 runtime instructions
 in the 10-million prefix and 230,406 across the full replay. The kernel and
 application counts match the previous reader in both intervals.
 
+Deferred result initialization, the DAIF store at entry, and the packed
+pending event and guest mode save 30,880 runtime instructions in the
+10-million prefix and 32,623 across the full replay. Entry uses the mask in
+`x18` when its address bits match. The fallback uses an immediate for the
+mask.
+
+The return stub loads the user stack pointer and gateway address as a pair.
+That saves 7,719 runtime instructions in the prefix and 8,321 across the
+full replay. The UART handler updates the interrupted signal frame in place
+after validating the access. That saves another 4,403 instructions in the
+full replay. All 35 UART accesses occur after the prefix.
+
+The return check also loads the live ELR and expected user PC as a pair.
+The runtime transfers ELR and SPSR between the assembly stubs and the C
+emulator at signal boundaries. This saves 7,719 runtime instructions in the
+prefix and 8,251 across the full replay.
+
+Keeping the pending pointer untagged removes one instruction from the
+direct return. That saves a further 7,719 runtime instructions in the prefix
+and 8,286 across the full replay.
+
 ## Replay inputs and accounting
 
 - QEMU 10.0.13 with plugins, Linux user mode, AArch64 Cortex-A53.
@@ -74,6 +106,20 @@ at the second syscall and preserved the first result and both guard records.
 Additional replay checks matched the prior reader with SSBS clear and with
 DAIF and PAN set in the saved return status. Injecting an SSBS mismatch or a
 reserved status bit stopped the replay before the first return.
+The packed-mode variant matched the reference diagnostics for injected user
+faults before and after a direct syscall return. With every return routed
+through the signal handler, the replay kept the same ledger and preserved
+the incomplete result fields in a prefilled caller buffer. That stress
+run executed 3.4% more runtime instructions than the previous reader.
+The direct UART frame path preserved terminal registers and FPSIMD state.
+An unsupported UART instruction and exhaustion of the MMIO ledger preserved
+the previous reader's diagnostics and terminal state.
+The ELR and SPSR value traces matched. Injected return address and status
+mismatches reached the same guard instruction and produced matching fault
+reports. The untagged-pointer variant matched an injected user fault after
+an emulated kernel instruction and direct syscall return. Its forced
+C-emulation run matched the ledger and used 0.6% fewer runtime instructions
+than the paired-address variant.
 
 The DAIF audit matched all 63,399 observed mask changes and 8,340 guest reads.
 Additional checks matched the reference after injecting bits outside DAIF and
@@ -81,7 +127,7 @@ after forcing D and A set across partial updates. The emitter also passed
 with a state pointer that selected the fallback for setting the mask.
 
 The syscall entry and return stubs, including their gateways and the lowered
-ERET, account for 507,616 runtime instructions, or 90.8% of the full run.
+ERET, account for 449,365 runtime instructions, or 90.4% of the full run.
 
 | Artifact | SHA-256 |
 | --- | --- |

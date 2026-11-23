@@ -7,11 +7,11 @@
 +    uint64_t fixed_tpidr_el1, fixed_dczid_el0;
 +    uint64_t fixed_guest_x18, fixed_saved_x16;
 +    uint64_t fixed_saved_x17;
-+    uint64_t fixed_resume_pc, fixed_return_thunk;
 +    struct lk_el0_event *event_end, *event_cursor, *pending_event;
 +    struct lk_el0_event *events;
 +    uint64_t event_count; /* Used when tracing is disabled. */
 +    uint64_t slow_events; /* Events recorded by the signal handler in this run. */
++    uint64_t fixed_spsr, fixed_elr, fixed_resume_pc, fixed_return_thunk;
      struct osrec_shadow shadow;
      struct osrec_context initial, *context;
      struct lk_el0_fp fp;
@@ -24,7 +24,17 @@
      struct vma_config vma;
      struct interval *vmas;
      size_t vma_count;
-@@ -88,8 +94,11 @@
+@@ -80,7 +86,8 @@
+     struct fpsimd_context *signal_fp;
+     uint32_t *fixed_code;
+     uint64_t fixed_return_pc;
+-
++    const struct lk_el0_event *mode_cursor, *mode_pending_event;
++    enum osrec_mode saved_mode;
+ };
+ static const int signals[4]={SIGTRAP,SIGILL,SIGSEGV,SIGBUS};
+ static atomic_flag owned=ATOMIC_FLAG_INIT;
+@@ -88,8 +95,11 @@
   * the owner restores dispositions and releases its mapping state. */
  static struct sigaction forwarded[4];
  static LK_THREAD_LOCAL struct lk_el0_native *running;
@@ -36,7 +46,45 @@
  static void *metadata;
  static size_t metadata_used;
  static void *metadata_alloc(size_t bytes)
-@@ -173,9 +182,17 @@
+@@ -113,9 +123,37 @@
+         n->fp.fpsr=fp->fpsr;n->fp.fpcr=fp->fpcr;
+     }
+ }
++static void initialize_incomplete_event(struct lk_el0_event *event)
++{
++    if(event) {
++        event->result=0;
++        event->completed=0;
++    }
++}
++/* A direct entry advances the cursor and sets the pending pointer. A direct
++ * return clears the pointer. If neither changed since C published its state,
++ * the emulator's mode is still current. */
++static void load_fixed_state(struct lk_el0_native *n)
++{
++    if(n->event_cursor==n->mode_cursor && n->pending_event==n->mode_pending_event)
++        n->shadow.mode=n->saved_mode;
++    else
++        n->shadow.mode=n->pending_event?OSREC_KERNEL:OSREC_USER;
++    n->shadow.elr=n->fixed_elr;
++    n->shadow.spsr=n->fixed_spsr;
++}
++static void publish_fixed_state(struct lk_el0_native *n)
++{
++    n->fixed_elr=n->shadow.elr;
++    n->fixed_spsr=n->shadow.spsr;
++    n->mode_cursor=n->event_cursor;
++    n->mode_pending_event=n->pending_event;
++    n->saved_mode=n->shadow.mode;
++}
+ static void stop(uint64_t reason,uint64_t pc,uint64_t detail,uint64_t far)
+ {
+     struct lk_el0_native *n=running;
++    if(n->prepared && n->handling)publish_fixed_state(n);
+     capture_fp(n);
+     *n->diagnostic=(struct lk_el0_diagnostic){reason,pc,detail,far};
+     n->status=reason==OSREC_STOP_RUNTIME?LK_EL0_FAULT:LK_EL0_BOUNDARY;
+@@ -173,9 +211,17 @@
  {
      if(!n || (capacity && !events) || capacity>1000000)return LK_EL0_BAD_ARGUMENT;
      if(n->executing)return LK_EL0_BUSY;
@@ -57,7 +105,7 @@
  enum lk_el0_status lk_el0_native_trace_allocate(struct lk_el0_native *n,uint64_t capacity,struct lk_el0_event **out)
  {
      if(!n || !out || !capacity || capacity>1000000)return LK_EL0_BAD_ARGUMENT;
-@@ -406,22 +423,18 @@
+@@ -406,22 +452,18 @@
  }
  static struct lk_el0_event *event(struct lk_el0_native *n)
  {
@@ -91,7 +139,7 @@
  }
  static void patch_instruction(struct lk_el0_native *n,uint64_t pc,uint32_t word)
  {
-@@ -433,6 +446,8 @@
+@@ -433,6 +475,8 @@
  #define FIXED_CODE_VA 0x800085000000ull
  #define FIXED_CODE_SIZE (4u << 20)
  #define FIXED_SLOT_WORDS 12u
@@ -100,7 +148,26 @@
 
  static uint32_t direct_branch(uint64_t pc,uint64_t target)
  {
-@@ -480,35 +495,246 @@
+@@ -452,13 +496,14 @@
+     return out;
+ }
+
+-static uint64_t *shadow_register(struct osrec_shadow *s,unsigned key,int read)
+-{
++static uint64_t *shadow_register(struct lk_el0_native *n,unsigned key,int read)
++{
++    struct osrec_shadow *s=&n->shadow;
+     switch(key) {
+     case 0xc208: return &s->sp_el0;
+     case 0xe208: return &s->sp_el1;
+-    case 0xc201: return &s->elr;
+-    case 0xc200: return &s->spsr;
++    case 0xc201: return &n->fixed_elr;
++    case 0xc200: return &n->fixed_spsr;
+     case 0xc290: return &s->esr;
+     case 0xc300: return &s->far;
+     case 0xda11: return &s->daif;
+@@ -480,35 +525,247 @@
      return 0xf9000000u|((offset/8)<<10)|(base<<5)|src;
  }
 
@@ -192,7 +259,8 @@
 + * can complete the event directly. A syscall that does not return
 + * leaves its event incomplete.
 + * The low-address syscall gateways supply a site and a return landing pad. */
-+static uint32_t *emit_fixed_entry(struct lk_el0_native *n,uint32_t *out)
++static __attribute__((always_inline)) inline uint32_t *emit_fixed_entry(
++    struct lk_el0_native *n,uint32_t *out,int anchor_sets_daif)
 +{
 +    const uint32_t *begin,*end,*ssbs,*branch;
 +    __asm__ volatile(
@@ -205,7 +273,6 @@
 +        "stp x0,x1,[x16,#16]\n"
 +        "stp x2,x3,[x16,#32]\n"
 +        "stp x4,x5,[x16,#48]\n"
-+        "stp xzr,xzr,[x16,#64]\n"
 +        "ldr x17,[x18,%c[resume]]\n"
 +        "sub x17,x17,#4\n"
 +        "str x17,[x16,#80]\n"
@@ -214,17 +281,19 @@
 +        "ldr x17,[x18,%c[resume]]\n"
 +        "mrs x16,nzcv\n"
 +        "3: nop\n" /* Optional SSBS from the captured user PSTATE. */
-+        "stp x17,x16,[x18,%c[elr]]\n"
++        "stp x16,x17,[x18,%c[spsr]]\n"
 +        "mov x16,#0x56000000\n"
 +        "str x16,[x18,%c[esr]]\n"
 +        "mov x16,sp\n"
 +        "str x16,[x18,%c[sp_el0]]\n"
 +        "ldr x16,[x18,%c[sp_el1]]\n"
 +        "mov sp,x16\n"
++        ".if %c[anchor_sets_daif]\n"
++        "str x18,[x18,%c[daif]]\n"
++        ".else\n"
 +        "mov x16,#0x3c0\n"
 +        "str x16,[x18,%c[daif]]\n"
-+        "mov x16,#1\n"
-+        "str x16,[x18,%c[mode]]\n"
++        ".endif\n"
 +        "ldp x16,x17,[x18,%c[saved16]]\n"
 +        "4: nop\n" /* Direct branch to the captured EL0 vector. */
 +        "8:\n"
@@ -237,22 +306,23 @@
 +        "adr %2,3b\n"
 +        "adr %3,4b\n"
 +        : "=&r"(begin),"=&r"(end),"=&r"(ssbs),"=&r"(branch)
-+        : [saved16] "i"(offsetof(struct lk_el0_native,fixed_saved_x16)),
++        : [anchor_sets_daif] "i"(anchor_sets_daif),
++          [saved16] "i"(offsetof(struct lk_el0_native,fixed_saved_x16)),
 +          [event_end] "i"(offsetof(struct lk_el0_native,event_end)),
 +          [cursor] "i"(offsetof(struct lk_el0_native,event_cursor)),
 +          [event_size] "i"(sizeof(struct lk_el0_event)),
 +          [resume] "i"(offsetof(struct lk_el0_native,fixed_resume_pc)),
-+          [elr] "i"(offsetof(struct lk_el0_native,shadow.elr)),
++          [spsr] "i"(offsetof(struct lk_el0_native,fixed_spsr)),
 +          [esr] "i"(offsetof(struct lk_el0_native,shadow.esr)),
 +          [sp_el0] "i"(offsetof(struct lk_el0_native,shadow.sp_el0)),
 +          [sp_el1] "i"(offsetof(struct lk_el0_native,shadow.sp_el1)),
-+          [daif] "i"(offsetof(struct lk_el0_native,shadow.daif)),
-+          [mode] "i"(offsetof(struct lk_el0_native,shadow.mode)));
++          [daif] "i"(offsetof(struct lk_el0_native,shadow.daif)));
 +    _Static_assert(offsetof(struct lk_el0_native,event_cursor)==
 +                       offsetof(struct lk_el0_native,event_end)+8 &&
 +                   offsetof(struct lk_el0_native,pending_event)==
 +                       offsetof(struct lk_el0_native,event_cursor)+8 &&
-+                   offsetof(struct osrec_shadow,spsr)==offsetof(struct osrec_shadow,elr)+8,
++                   offsetof(struct lk_el0_native,fixed_elr)==
++                       offsetof(struct lk_el0_native,fixed_spsr)+8,
 +                   "paired entry fields");
 +    _Static_assert(sizeof(struct lk_el0_event)==88 &&
 +                   offsetof(struct lk_el0_event,result)==64 &&
@@ -276,8 +346,7 @@
 +        "b 9f\n"
 +        ".macro ipc_return ssbs\n"
 +        "stp x16,x17,[x18,%c[saved16]]\n"
-+        "ldr x16,[x18,%c[resume]]\n"
-+        "ldr x17,[x18,%c[elr]]\n"
++        "ldp x17,x16,[x18,%c[elr]]\n"
 +        "sub x17,x17,x16\n"
 +        "cbnz x17,8f\n"
 +        "ldr x17,[x18,%c[spsr]]\n"
@@ -292,14 +361,12 @@
 +        "cbz x16,8f\n"
 +        "mov x17,#1\n"
 +        "stp x0,x17,[x16,%c[result]]\n"
-+        "str xzr,[x18,%c[pending_event]]\n"
 +        "mov x16,sp\n"
 +        "str x16,[x18,%c[sp_el1]]\n"
-+        "ldr x16,[x18,%c[sp_el0]]\n"
++        "ldp x17,x16,[x18,%c[thunk]]\n"
 +        "mov sp,x16\n"
-+        "str xzr,[x18,%c[mode]]\n"
-+        "ldr x16,[x18,%c[thunk]]\n"
-+        "br x16\n"
++        "str xzr,[x18,%c[pending_event]]\n"
++        "br x17\n"
 +        "5: and x16,x16,#0xfffffffffffffc3f\n" /* Ignore DAIF. */
 +        "and x16,x16,#0xffffffffffbfffff\n" /* Ignore PAN. */
 +        "cbnz x16,8f\n" /* Reject changes to SSBS and all other bits. */
@@ -322,17 +389,18 @@
 +        "adr %2,3b\n"
 +        : "=&r"(without_ssbs),"=&r"(with_ssbs),"=&r"(templates_end)
 +        : [saved16] "i"(offsetof(struct lk_el0_native,fixed_saved_x16)),
-+          [resume] "i"(offsetof(struct lk_el0_native,fixed_resume_pc)),
-+          [elr] "i"(offsetof(struct lk_el0_native,shadow.elr)),
++          [elr] "i"(offsetof(struct lk_el0_native,fixed_elr)),
 +          [pending_event] "i"(offsetof(struct lk_el0_native,pending_event)),
 +          [result] "i"(offsetof(struct lk_el0_event,result)),
-+          [spsr] "i"(offsetof(struct lk_el0_native,shadow.spsr)),
++          [spsr] "i"(offsetof(struct lk_el0_native,fixed_spsr)),
 +          [daif] "i"(offsetof(struct lk_el0_native,shadow.daif)),
-+          [sp_el0] "i"(offsetof(struct lk_el0_native,shadow.sp_el0)),
 +          [sp_el1] "i"(offsetof(struct lk_el0_native,shadow.sp_el1)),
-+          [mode] "i"(offsetof(struct lk_el0_native,shadow.mode)),
 +          [thunk] "i"(offsetof(struct lk_el0_native,fixed_return_thunk)));
-+    _Static_assert(offsetof(struct osrec_shadow,pan)==offsetof(struct osrec_shadow,daif)+8,
++    _Static_assert(offsetof(struct lk_el0_native,fixed_resume_pc)==
++                       offsetof(struct lk_el0_native,fixed_elr)+8 &&
++                   offsetof(struct lk_el0_native,shadow.sp_el0)==
++                       offsetof(struct lk_el0_native,fixed_return_thunk)+8 &&
++                   offsetof(struct osrec_shadow,pan)==offsetof(struct osrec_shadow,daif)+8,
 +                   "paired return fields");
 +    int ssbs=(n->context->pstate&(1ull<<12))!=0;
 +    const uint32_t *begin=ssbs?with_ssbs:without_ssbs;
@@ -376,7 +444,7 @@
  }
 
  static void prepare_fixed_code(struct lk_el0_native *n)
-@@ -523,7 +749,14 @@
+@@ -523,7 +780,14 @@
      __asm__ volatile("mrs %0, dczid_el0":"=r"(dczid));
      int native_zva=(n->shadow.known[0xd807/8]&(1u<<(0xd807%8))) &&
                     dczid==n->shadow.value[0xd807] && !(dczid&16);
@@ -392,10 +460,12 @@
      for(uint64_t i=0;i<n->h.sites;i++) {
          const struct osrec_site *site=&n->sites[i];
          uint64_t pc=site->va;
-@@ -560,46 +793,85 @@
+@@ -559,47 +823,86 @@
+             patch_instruction(n,pc,rt==31?0xd503201fu:0xd2800080u|rt);
              continue;
          }
-         uint64_t *addr=set_mask || clear_mask?&n->shadow.daif:shadow_register(&n->shadow,key,read);
+-        uint64_t *addr=set_mask || clear_mask?&n->shadow.daif:shadow_register(&n->shadow,key,read);
++        uint64_t *addr=set_mask || clear_mask?&n->shadow.daif:shadow_register(n,key,read);
 +        if(read && addr && key==0xc684)addr=&n->fixed_tpidr_el1;
 +        if(read && addr && key==0xd807)addr=&n->fixed_dczid_el0;
          if(!addr)continue;
@@ -486,14 +556,14 @@
 +    if(used>FIXED_CODE_SIZE/4-128 || !n->fixed_return_pc)
 +        stop(OSREC_STOP_UNSUPPORTED,n->context->pc,n->fixed_return_pc,used);
 +    uint32_t *entry=n->fixed_code+used;
-+    uint32_t *return_code=emit_fixed_entry(n,entry);
++    uint32_t *return_code=anchor_sets_daif?emit_fixed_entry(n,entry,1):emit_fixed_entry(n,entry,0);
 +    uint32_t *end=emit_fixed_return(n,return_code);
 +    emit_fixed_gateways(n,entry);
 +    patch_instruction(n,n->fixed_return_pc,direct_branch(n->fixed_return_pc,(uintptr_t)return_code));
      if(mprotect(n->fixed_code,FIXED_CODE_SIZE,PROT_READ|PROT_EXEC))
          stop(OSREC_STOP_UNSUPPORTED,n->context->pc,errno,FIXED_CODE_VA);
      __builtin___clear_cache((char *)n->fixed_code,(char *)end);
-@@ -608,11 +880,14 @@
+@@ -608,11 +911,14 @@
  {
      if(n->prepared)return;
      if(!n->app_sites || !n->vma.magic)stop(OSREC_STOP_UNSUPPORTED,n->context->pc,0x415050,0);
@@ -508,7 +578,7 @@
      for(size_t i=0;i<n->users;i++)if(protection(n->user[i].attrs,1)&PROT_EXEC) {
          if(n->user[i].va<n->app.text_lo || n->user[i].va>=n->app.text_hi)
              stop(OSREC_STOP_UNSUPPORTED,n->context->pc,0x45584543,n->user[i].va);
-@@ -620,30 +895,25 @@
+@@ -620,30 +926,25 @@
          n->executable[n->executables++]=n->user[i];
      }
      for(uint64_t i=0;i<n->app.count;i++) {
@@ -546,7 +616,74 @@
      n->executable_bytes=metadata_alloc(n->executables*PAGE);
      if(!n->executable_bytes)stop(OSREC_STOP_RUNTIME,n->context->pc,ENOMEM,0);
      for(size_t i=0;i<n->executables;i++)
-@@ -771,48 +1041,6 @@
+@@ -656,28 +957,37 @@
+         if(memcmp(n->executable_bytes+i*PAGE,physical(n,n->executable[i].pa,PAGE),PAGE))
+             stop(OSREC_STOP_UNSUPPORTED,n->context->pc,0x54455854,n->executable[i].va);
+ }
+-static int emulate_mmio(struct lk_el0_native *n,uint64_t far)
+-{
+-    struct osrec_context *c=n->context;
++/* Operate directly on the interrupted frame for a validated UART access.
++ * A rejected access leaves the frame unchanged and supplies the diagnostic
++ * detail for the general signal path. */
++static int emulate_mmio(struct lk_el0_native *n,uint64_t far,ucontext_t *u,uint64_t *detail)
++{
+     if(n->mmio_used==n->mmio_count)return 0;
+     struct lk_el0_mmio *e=n->mmio+n->mmio_used;
+-    if(!n->record_mmio && (e->pc!=c->pc || e->address!=far))return 0;
+-    uint32_t word=*(uint32_t *)(uintptr_t)c->pc;
+-    if((word&0x3b000000)!=0x39000000 || word&(1u<<26) || (word>>22&3)>1)
+-        stop(OSREC_STOP_UNSUPPORTED,c->pc,word,far);
++    uint64_t pc=u->uc_mcontext.pc;
++    if(!n->record_mmio && (e->pc!=pc || e->address!=far))return 0;
++    uint32_t word=*(uint32_t *)(uintptr_t)pc;
++    if((word&0x3b000000)!=0x39000000 || word&(1u<<26) || (word>>22&3)>1) {
++        *detail=word;
++        return -1;
++    }
+     unsigned size=1u<<(word>>30),rn=word>>5&31,rt=word&31,write=!(word&(1u<<22));
+-    uint64_t address=(rn==31?c->sp:c->x[rn])+((word>>10&4095)*size);
++    uint64_t address=(rn==31?u->uc_mcontext.sp:u->uc_mcontext.regs[rn])+((word>>10&4095)*size);
+     uint64_t mask=size==8?UINT64_MAX:(1ull<<(size*8))-1;
++    uint64_t value=write && rt!=31?u->uc_mcontext.regs[rt]&mask:0;
+     if(n->record_mmio) {
+         uint64_t offset=far-n->uart_va;
+         if(address!=far || size>4 || (!write && offset!=0x18) || (write && offset!=0 && offset!=0x38))return 0;
+-        *e=(struct lk_el0_mmio){c->pc,far,size,write,write?(rt==31?0:c->x[rt]&mask):0x90};
+-    }
+-    if(address!=far || e->size!=size || e->write!=write ||
+-       (write && (rt==31?0:c->x[rt]&mask)!=e->value))
+-        stop(OSREC_STOP_UNSUPPORTED,c->pc,n->mmio_used,far);
+-    if(!write && rt!=31)c->x[rt]=e->value&mask;
+-    n->mmio_used++;c->pc+=4;return 1;
++        *e=(struct lk_el0_mmio){pc,far,size,write,write?value:0x90};
++    } else if(address!=far || e->size!=size || e->write!=write ||
++              (write && value!=e->value)) {
++        *detail=n->mmio_used;
++        return -1;
++    }
++    if(!write && rt!=31)u->uc_mcontext.regs[rt]=e->value&mask;
++    n->mmio_used++;
++    u->uc_mcontext.pc=pc+4;
++    return 1;
+ }
+ int lk_native_user_access(struct osrec_shadow *s,struct osrec_context *c,uint32_t word,uint64_t address,unsigned bytes)
+ {
+@@ -750,11 +1060,12 @@
+     }
+     return fp;
+ }
++static const uint64_t signal_pstate_mask=0xf0000000ull|(1ull<<12);
+ static void from_signal(struct lk_el0_native *n,ucontext_t *u)
+ {
+     memcpy(n->context->x,u->uc_mcontext.regs,sizeof n->context->x);
+     n->context->sp=u->uc_mcontext.sp;n->context->pc=u->uc_mcontext.pc;
+-    n->context->pstate=u->uc_mcontext.pstate&(0xf0000000ull|(1ull<<12));
++    n->context->pstate=u->uc_mcontext.pstate&signal_pstate_mask;
+ }
+ static void to_signal(struct lk_el0_native *n,ucontext_t *u)
+ {
+@@ -771,48 +1082,6 @@
      if(p->sa_handler==SIG_DFL){sigaction(sig,p,NULL);syscall(SYS_tgkill,getpid(),syscall(SYS_gettid),sig);return;}
      if(p->sa_flags&SA_SIGINFO)p->sa_sigaction(sig,info,context);else p->sa_handler(sig);
  }
@@ -595,13 +732,14 @@
  static void handler(int sig,siginfo_t *info,void *context)
  {
      struct lk_el0_native *n=running;
-@@ -820,32 +1048,26 @@
+@@ -820,32 +1089,44 @@
      ucontext_t *u=context;
      if(n->handling)stop(OSREC_STOP_RUNTIME,u->uc_mcontext.pc,sig,(uintptr_t)info->si_addr);
      n->handling=1;
 -    if(sig==SIGTRAP && n->prepared && !n->starting && fixed_syscall_transition(n,&u->uc_mcontext)) {
 -        n->handling=0;return;
 -    }
++    if(n->prepared)load_fixed_state(n);
      uint64_t esr=0;
      struct fpsimd_context *fp=fpsimd(u,&esr);
      if(!fp)stop(OSREC_STOP_RUNTIME,u->uc_mcontext.pc,0x4650,0);
@@ -615,10 +753,29 @@
      }
      n->signal_fp=fp;
 +    if(n->prepared)n->shadow.daif&=FIXED_DAIF_MASK;
++    uint64_t far=(uintptr_t)info->si_addr;
++    int user=n->shadow.mode==OSREC_USER;
++    if(sig==SIGSEGV || sig==SIGBUS) {
++        int mmio=0;
++        uint64_t detail=esr;
++        /* QEMU Linux-user supplies the fault address without an ESR record. */
++        if(!esr && !user && n->record_mmio && n->uart_va &&
++           (far-n->uart_va==0 || far-n->uart_va==0x18 || far-n->uart_va==0x38) &&
++           far!=u->uc_mcontext.pc)
++            mmio=emulate_mmio(n,far,u,&detail);
++        if(mmio>0) {
++            u->uc_mcontext.pstate&=signal_pstate_mask;
++            n->signal_fp=NULL;
++            n->handling=0;
++            return;
++        }
++        from_signal(n,u);
++        stop(mmio<0?OSREC_STOP_UNSUPPORTED:OSREC_STOP_EXCEPTION,u->uc_mcontext.pc,detail,far);
++    }
      from_signal(n,u);
      struct osrec_context *c=n->context;
-     uint64_t far=(uintptr_t)info->si_addr;
-     int user=n->shadow.mode==OSREC_USER;
+-    uint64_t far=(uintptr_t)info->si_addr;
+-    int user=n->shadow.mode==OSREC_USER;
      if(sig==SIGTRAP) {
 -        if(user && in_gateways(n,c->pc)) {
 -            uint64_t index=(c->pc-n->app.base)/4;
@@ -632,7 +789,35 @@
          uint32_t word=*(uint32_t *)(uintptr_t)c->pc;
          if((word&0xffe0001fu)!=0xd4200000u)stop(OSREC_STOP_EXCEPTION,c->pc,word,far);
          if(user && (word>>5&65535)==0xf04) {
-@@ -890,6 +1112,9 @@
+@@ -856,13 +1137,6 @@
+         }
+         far=n->shadow.far; /* BRK leaves the architectural FAR unchanged. */
+         esr=(0x3cull<<26)|(1ull<<25)|((word>>5)&65535);
+-    } else if(sig==SIGSEGV || sig==SIGBUS) {
+-        /* QEMU linux-user delivers a fault address without an ESR record.
+-         * The captured UART handler independently verifies the instruction and address. */
+-        if(!esr && !user && n->record_mmio && n->uart_va &&
+-           (far-n->uart_va==0 || far-n->uart_va==0x18 || far-n->uart_va==0x38) &&
+-           far!=c->pc && emulate_mmio(n,far))goto resume;
+-        stop(OSREC_STOP_EXCEPTION,c->pc,esr,far);
+     } else {esr=0;far=n->shadow.far;} /* undefined instructions do not set FAR */
+     if(user && n->application) {
+         struct lk_el0_event *e=event(n);
+@@ -871,6 +1145,13 @@
+     osrec_lowered_exception(&n->shadow,c,esr,far);
+     osrec_handle_exception(&n->shadow,c,n->sites,n->h.sites,esr,far);
+ resume:
++    if(n->prepared) {
++        /* An emulated return may bypass the direct result store. Its
++         * incomplete record must survive a subsequent direct entry. */
++        if(n->shadow.mode==OSREC_USER)
++            initialize_incomplete_event(n->pending_event);
++        publish_fixed_state(n);
++    }
+     if(n->shadow.mode==OSREC_USER && !n->application) {
+         capture_fp(n);n->status=LK_EL0_OK;siglongjmp(n->jump,1);
+     }
+@@ -890,10 +1171,14 @@
      __asm__ volatile(".arch_extension fp\n\tmrs %0,fpcr\n\tmrs %1,fpsr\n\t.arch_extension nofp":"=r"(host_fpcr),"=r"(host_fpsr));
      n->context=c;n->diagnostic=d;n->status=LK_EL0_FAULT;n->handling=0;n->starting=1;
      n->application=s->mode==OSREC_USER;
@@ -642,27 +827,35 @@
      running=n;
      lk_stop_handler old_stop=lk_backend_stop;lk_backend_stop=stop;
      if(!sigsetjmp(n->jump,1)) {
-@@ -902,6 +1127,19 @@
+         if(n->application)prepare_application(n);
++        if(n->prepared)publish_fixed_state(n);
+         n->executing=1;
+         __asm__ volatile("brk #0xf02" ::: "memory");
+         stop(OSREC_STOP_RUNTIME,c->pc,0xf02,0);
+@@ -902,6 +1187,22 @@
      if(n->prepared && n->application) {
          n->application=0;
          validate_application(n);
 +    }
 +    if(n->prepared) {
++        load_fixed_state(n);
 +        s->daif&=FIXED_DAIF_MASK;
++        struct lk_el0_event *pending=n->pending_event;
 +        c->x[SHADOW_BASE]=s->mode==OSREC_USER?0:n->fixed_guest_x18;
 +        if(first_event) {
 +            /* The cursor includes events recorded by the signal path,
 +             * whose counters the emulator already updated. An outstanding
 +             * direct event accounts for an entry with no matching return. */
 +            uint64_t direct_entries=(uint64_t)(n->event_cursor-first_event)-n->slow_events;
-+            uint64_t direct_returns=direct_entries+had_pending-(n->pending_event!=NULL);
++            uint64_t direct_returns=direct_entries+had_pending-(pending!=NULL);
 +            s->entries+=direct_entries;
 +            s->emulated+=direct_returns;
 +        }
++        initialize_incomplete_event(pending);
      }
      visibility(n,1);
      n->executing=0;n->application=0;lk_backend_stop=old_stop;running=NULL;
-@@ -951,7 +1189,9 @@
+@@ -951,7 +1252,9 @@
          if(metadata!=MAP_FAILED)munmap(metadata,METADATA_SIZE);
          metadata=NULL;atomic_flag_clear(&owned);return LK_EL0_UNSUPPORTED;
      }

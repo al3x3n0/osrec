@@ -11,9 +11,9 @@ that the workload needs use EL0 sequences or shadow architectural state.
 ## Verified runs
 
 - The 640-iteration pipe and eventfd workload completed in QEMU Linux-user
-  on Cortex-A53 with **5.09% runtime instruction overhead** at 10 million
-  kernel instructions, down from 7.23%. The full run counted
-  10,779,406 kernel, 558,981 runtime, and 97,373 application instructions.
+  on Cortex-A53 with **4.55% runtime instruction overhead** at 10 million
+  kernel instructions, down from 4.63%. The full run counted
+  10,779,406 kernel, 497,097 runtime, and 97,373 application instructions.
   All 8,322 syscall entries, 8,321 returns, and 35 UART operations matched
   the native reference. The ledger recorded zero user faults. The run
   rejected any runtime address translation or mapping refresh. The opt-in

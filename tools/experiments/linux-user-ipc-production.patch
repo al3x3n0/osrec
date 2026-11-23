@@ -1,0 +1,487 @@
+--- a/runtime/linuxkernel_el0/native.c
++++ b/runtime/linuxkernel_el0/native.c
+@@ -46,11 +46,8 @@
+     uint64_t fixed_tpidr_el1, fixed_dczid_el0;
+     uint64_t fixed_guest_x18, fixed_saved_x16;
+     uint64_t fixed_saved_x17;
+-    struct lk_el0_event *event_end, *event_cursor, *pending_event;
++    uint64_t transition; /* Direct entry count in bits 63:1, outstanding in bit 0. */
+     uint64_t fixed_sp_el1, fixed_svc_esr;
+-    struct lk_el0_event *events;
+-    uint64_t event_count; /* Used when tracing is disabled. */
+-    uint64_t slow_events; /* Events recorded by the signal handler in this run. */
+     uint64_t fixed_spsr, fixed_elr, fixed_resume_pc, fixed_return_thunk;
+     uint64_t fixed_sp_el0, fixed_daif, fixed_pan;
+     struct osrec_shadow shadow;
+@@ -70,8 +67,6 @@
+     volatile sig_atomic_t starting, handling, executing;
+     struct lk_el0_counter *counters;
+     uint64_t counter_count,counter_used;
+-    unsigned record_counters,record_mmio;
+-    uint64_t counter_base,counter_step,uart_va;
+     struct lk_el0_mmio *mmio;
+     uint64_t mmio_count,mmio_used;
+     struct application_header app;
+@@ -88,7 +83,7 @@
+     struct fpsimd_context *signal_fp;
+     uint32_t *fixed_code;
+     uint64_t fixed_return_pc;
+-    const struct lk_el0_event *mode_cursor, *mode_pending_event;
++    uint64_t mode_transition;
+     enum osrec_mode saved_mode;
+ };
+ static const int signals[4]={SIGTRAP,SIGILL,SIGSEGV,SIGBUS};
+@@ -126,22 +121,13 @@
+         n->fp.fpsr=fp->fpsr;n->fp.fpcr=fp->fpcr;
+     }
+ }
+-static void initialize_incomplete_event(struct lk_el0_event *event)
+-{
+-    if(event) {
+-        event->result=0;
+-        event->completed=0;
+-    }
+-}
+-/* A direct entry advances the cursor and sets the pending pointer. A direct
+- * return clears the pointer. If neither changed since C published its state,
+- * the emulator's mode is still current. */
++/* The C mode remains current until a direct transition changes the token. */
+ static void load_fixed_state(struct lk_el0_native *n)
+ {
+-    if(n->event_cursor==n->mode_cursor && n->pending_event==n->mode_pending_event)
++    if(n->transition==n->mode_transition)
+         n->shadow.mode=n->saved_mode;
+     else
+-        n->shadow.mode=n->pending_event?OSREC_KERNEL:OSREC_USER;
++        n->shadow.mode=(n->transition&1)?OSREC_KERNEL:OSREC_USER;
+     n->shadow.elr=n->fixed_elr;
+     n->shadow.spsr=n->fixed_spsr;
+     n->shadow.sp_el0=n->fixed_sp_el0;
+@@ -157,8 +143,7 @@
+     n->fixed_sp_el1=n->shadow.sp_el1;
+     n->fixed_daif=n->shadow.daif;
+     n->fixed_pan=n->shadow.pan;
+-    n->mode_cursor=n->event_cursor;
+-    n->mode_pending_event=n->pending_event;
++    n->mode_transition=n->transition;
+     n->saved_mode=n->shadow.mode;
+ }
+ static void stop(uint64_t reason,uint64_t pc,uint64_t detail,uint64_t far)
+@@ -173,12 +158,6 @@
+ __attribute__((visibility("hidden"))) uint64_t lk_native_counter(uint64_t pc,unsigned key)
+ {
+     struct lk_el0_native *n=running;
+-    if(n->record_counters) {
+-        if(n->counter_used==n->counter_count || (key!=0xdf01 && key!=0xdf02))
+-            stop(OSREC_STOP_UNSUPPORTED,pc,key,n->counter_used);
+-        uint64_t value=n->counter_base+n->counter_step*n->counter_used;
+-        n->counters[n->counter_used++]=(struct lk_el0_counter){pc,key,value};return value;
+-    }
+     if(n->counter_used==n->counter_count || n->counters[n->counter_used].pc!=pc ||
+        n->counters[n->counter_used].encoding!=key)
+         stop(OSREC_STOP_UNSUPPORTED,pc,key,n->counter_used);
+@@ -193,7 +172,7 @@
+     struct lk_el0_counter *copy=count?metadata_alloc(count*sizeof *copy):NULL;
+     if(count && !copy)return LK_EL0_FAULT;
+     if(count)memcpy(copy,events,count*sizeof *copy);
+-    metadata_free(n->counters);n->counters=copy;n->counter_count=count;n->counter_used=0;n->record_counters=0;
++    metadata_free(n->counters);n->counters=copy;n->counter_count=count;n->counter_used=0;
+     return LK_EL0_OK;
+ }
+ uint64_t lk_el0_native_counters_consumed(struct lk_el0_native *n){return n?n->counter_used:0;}
+@@ -206,41 +185,9 @@
+     struct lk_el0_mmio *copy=count?metadata_alloc(count*sizeof *copy):NULL;
+     if(count && !copy)return LK_EL0_FAULT;
+     if(count)memcpy(copy,events,count*sizeof *copy);
+-    metadata_free(n->mmio);n->mmio=copy;n->mmio_count=count;n->mmio_used=0;n->record_mmio=0;return LK_EL0_OK;
+-}
+-enum lk_el0_status lk_el0_native_record_inputs(struct lk_el0_native *n,uint64_t base,uint64_t step,uint64_t uart,
+-                                              struct lk_el0_counter *c,uint64_t nc,struct lk_el0_mmio *m,uint64_t nm)
+-{
+-    if(!n || !c || !nc || nc>1000000 || !m || !nm || nm>1000000 || uart%PAGE)return LK_EL0_BAD_ARGUMENT;
+-    if(n->executing)return LK_EL0_BUSY;
+-    n->record_counters=n->record_mmio=1;n->counter_base=base;n->counter_step=step;n->uart_va=uart;
+-    n->counters=c;n->counter_count=nc;n->counter_used=0;n->mmio=m;n->mmio_count=nm;n->mmio_used=0;
+-    return LK_EL0_OK;
++    metadata_free(n->mmio);n->mmio=copy;n->mmio_count=count;n->mmio_used=0;return LK_EL0_OK;
+ }
+ uint64_t lk_el0_native_mmio_consumed(struct lk_el0_native *n){return n?n->mmio_used:0;}
+-enum lk_el0_status lk_el0_native_trace(struct lk_el0_native *n,struct lk_el0_event *events,uint64_t capacity)
+-{
+-    if(!n || (capacity && !events) || capacity>1000000)return LK_EL0_BAD_ARGUMENT;
+-    if(n->executing)return LK_EL0_BUSY;
+-    n->pending_event=NULL;
+-    n->events=n->event_cursor=events;
+-    n->event_end=events?events+capacity:NULL;
+-    n->event_count=0;
+-    return LK_EL0_OK;
+-}
+-uint64_t lk_el0_native_events(struct lk_el0_native *n)
+-{
+-    if(!n)return 0;
+-    return n->events?(uint64_t)(n->event_cursor-n->events):n->event_count;
+-}
+-enum lk_el0_status lk_el0_native_trace_allocate(struct lk_el0_native *n,uint64_t capacity,struct lk_el0_event **out)
+-{
+-    if(!n || !out || !capacity || capacity>1000000)return LK_EL0_BAD_ARGUMENT;
+-    *out=NULL;if(n->executing)return LK_EL0_BUSY;
+-    struct lk_el0_event *events=metadata_calloc(capacity,sizeof *events);
+-    if(!events)return LK_EL0_FAULT;
+-    *out=events;return lk_el0_native_trace(n,events,capacity);
+-}
+ enum lk_el0_status lk_el0_native_execute(struct lk_el0_native *n,const struct osrec_context *user,struct lk_el0_result *out)
+ {
+     if(!out)return LK_EL0_BAD_ARGUMENT;
+@@ -460,21 +407,6 @@
+     }
+     struct mapping *swap=n->user;n->user=n->next;n->next=swap;n->users=fresh;n->pendings=0;
+     return 0;
+-}
+-static struct lk_el0_event *event(struct lk_el0_native *n)
+-{
+-    if(n->events) {
+-        if(n->event_cursor==n->event_end)
+-            stop(OSREC_STOP_UNSUPPORTED,n->context->pc,0x45564e54,lk_el0_native_events(n));
+-        struct lk_el0_event *e=n->event_cursor++;
+-        n->slow_events++;
+-        memset(e,0,sizeof *e);
+-        return e;
+-    }
+-    if(n->event_count==1000000)
+-        stop(OSREC_STOP_UNSUPPORTED,n->context->pc,0x45564e54,n->event_count);
+-    n->event_count++;
+-    return NULL;
+ }
+ static void patch_instruction(struct lk_el0_native *n,uint64_t pc,uint32_t word)
+ {
+@@ -591,9 +523,8 @@
+
+
+ /* The copied sequences use only local branches and offsets from x18.
+- * At ERET x0 holds the restored syscall result, so the return sequence
+- * can complete the event directly. A syscall that does not return
+- * leaves its event incomplete.
++ * Direct entry advances the generation and marks it outstanding. Direct
++ * return keeps the generation and clears the outstanding bit.
+  * The low-address syscall gateways supply a site and a return landing pad. */
+ static __attribute__((always_inline)) inline uint32_t *emit_fixed_entry(
+     struct lk_el0_native *n,uint32_t *out,int anchor_sets_daif)
+@@ -602,18 +533,10 @@
+     __asm__ volatile(
+         "b 9f\n"
+         "1:\n"
+-        "ldp x17,x16,[x18,%c[event_end]]\n"
+-        "sub x17,x17,x16\n"
+-        "cbz x17,8f\n"
+-        "stp xzr,x8,[x16]\n"
+-        "stp x0,x1,[x16,#16]\n"
+-        "stp x2,x3,[x16,#32]\n"
+-        "stp x4,x5,[x16,#48]\n"
+-        "ldr x17,[x18,%c[resume]]\n"
+-        "sub x17,x17,#4\n"
+-        "str x17,[x16,#80]\n"
+-        "add x17,x16,%c[event_size]\n"
+-        "stp x17,x16,[x18,%c[cursor]]\n"
++        "ldr x16,[x18,%c[transition]]\n"
++        "add x16,x16,#2\n"
++        "orr x16,x16,#1\n"
++        "str x16,[x18,%c[transition]]\n"
+         "ldr x17,[x18,%c[resume]]\n"
+         "mrs x16,nzcv\n"
+         "3: nop\n" /* Optional SSBS from the captured user PSTATE. */
+@@ -631,9 +554,6 @@
+         "mov sp,x16\n"
+         "ldp x16,x17,[x18,%c[saved16]]\n"
+         "4: nop\n" /* Direct branch to the captured EL0 vector. */
+-        "8:\n"
+-        "ldp x16,x17,[x18,%c[saved16]]\n"
+-        "brk #0xf07\n"
+         "2:\n"
+         "9:\n"
+         "adr %0,1b\n"
+@@ -643,30 +563,20 @@
+         : "=&r"(begin),"=&r"(end),"=&r"(ssbs),"=&r"(branch)
+         : [anchor_sets_daif] "i"(anchor_sets_daif),
+           [saved16] "i"(offsetof(struct lk_el0_native,fixed_saved_x16)),
+-          [event_end] "i"(offsetof(struct lk_el0_native,event_end)),
+-          [cursor] "i"(offsetof(struct lk_el0_native,event_cursor)),
+-          [event_size] "i"(sizeof(struct lk_el0_event)),
++          [transition] "i"(offsetof(struct lk_el0_native,transition)),
+           [resume] "i"(offsetof(struct lk_el0_native,fixed_resume_pc)),
+           [spsr] "i"(offsetof(struct lk_el0_native,fixed_spsr)),
+           [esr] "i"(offsetof(struct lk_el0_native,shadow.esr)),
+           [sp_el0] "i"(offsetof(struct lk_el0_native,fixed_sp_el0)),
+           [sp_el1] "i"(offsetof(struct lk_el0_native,fixed_sp_el1)),
+           [daif] "i"(offsetof(struct lk_el0_native,fixed_daif)));
+-    _Static_assert(offsetof(struct lk_el0_native,event_cursor)==
+-                       offsetof(struct lk_el0_native,event_end)+8 &&
+-                   offsetof(struct lk_el0_native,pending_event)==
+-                       offsetof(struct lk_el0_native,event_cursor)+8 &&
+-                   offsetof(struct lk_el0_native,fixed_elr)==
++    _Static_assert(offsetof(struct lk_el0_native,fixed_elr)==
+                        offsetof(struct lk_el0_native,fixed_spsr)+8 &&
+                    offsetof(struct lk_el0_native,fixed_daif)==
+                        offsetof(struct lk_el0_native,fixed_sp_el0)+8 &&
+                    offsetof(struct lk_el0_native,fixed_svc_esr)==
+                        offsetof(struct lk_el0_native,fixed_sp_el1)+8,
+                    "paired entry fields");
+-    _Static_assert(sizeof(struct lk_el0_event)==88 &&
+-                   offsetof(struct lk_el0_event,result)==64 &&
+-                   offsetof(struct lk_el0_event,completed)==72 &&
+-                   offsetof(struct lk_el0_event,pc)==80,"IPC event layout");
+     size_t slots=(uintptr_t)end/4-(uintptr_t)begin/4;
+     memcpy(out,begin,slots*sizeof *out);
+     if(n->context->pstate&(1ull<<12))
+@@ -696,12 +606,11 @@
+         "cbnz x16,5f\n"
+         "stp xzr,xzr,[x18,%c[daif]]\n"
+         "msr nzcv,x17\n"
+-        "6: ldr x16,[x18,%c[pending_event]]\n"
+-        "cbz x16,8f\n"
+-        "mov x17,#1\n"
+-        "stp x0,x17,[x16,%c[result]]\n"
++        "6: ldr x16,[x18,%c[transition]]\n"
++        "tbz x16,#0,8f\n"
++        "and x17,x16,#0xfffffffffffffffe\n"
+         "mov x16,sp\n"
+-        "stp xzr,x16,[x18,%c[pending_event]]\n" /* Clear the event and save SP_EL1. */
++        "stp x17,x16,[x18,%c[transition]]\n" /* Complete the transition and save SP_EL1. */
+         "ldp x17,x16,[x18,%c[thunk]]\n"
+         "mov sp,x16\n"
+         "br x17\n"
+@@ -728,13 +637,12 @@
+         : "=&r"(without_ssbs),"=&r"(with_ssbs),"=&r"(templates_end)
+         : [saved16] "i"(offsetof(struct lk_el0_native,fixed_saved_x16)),
+           [elr] "i"(offsetof(struct lk_el0_native,fixed_elr)),
+-          [pending_event] "i"(offsetof(struct lk_el0_native,pending_event)),
+-          [result] "i"(offsetof(struct lk_el0_event,result)),
++          [transition] "i"(offsetof(struct lk_el0_native,transition)),
+           [spsr] "i"(offsetof(struct lk_el0_native,fixed_spsr)),
+           [daif] "i"(offsetof(struct lk_el0_native,fixed_daif)),
+           [thunk] "i"(offsetof(struct lk_el0_native,fixed_return_thunk)));
+     _Static_assert(offsetof(struct lk_el0_native,fixed_sp_el1)==
+-                       offsetof(struct lk_el0_native,pending_event)+8 &&
++                       offsetof(struct lk_el0_native,transition)+8 &&
+                    offsetof(struct lk_el0_native,fixed_resume_pc)==
+                        offsetof(struct lk_el0_native,fixed_elr)+8 &&
+                    offsetof(struct lk_el0_native,fixed_sp_el0)==
+@@ -927,7 +835,6 @@
+ {
+     if(n->prepared)return;
+     if(!n->app_sites || !n->vma.magic)stop(OSREC_STOP_UNSUPPORTED,n->context->pc,0x415050,0);
+-    if(!n->events)stop(OSREC_STOP_UNSUPPORTED,n->context->pc,0x45564e54,0);
+     void *g=mmap((void *)(uintptr_t)n->app.base,n->app.size,PROT_READ|PROT_WRITE,
+                  MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0);
+     if(g==MAP_FAILED)stop(OSREC_STOP_UNSUPPORTED,n->context->pc,errno,n->app.base);
+@@ -981,7 +888,7 @@
+     if(n->mmio_used==n->mmio_count)return 0;
+     struct lk_el0_mmio *e=n->mmio+n->mmio_used;
+     uint64_t pc=u->uc_mcontext.pc;
+-    if(!n->record_mmio && (e->pc!=pc || e->address!=far))return 0;
++    if(e->pc!=pc || e->address!=far)return 0;
+     uint32_t word=*(uint32_t *)(uintptr_t)pc;
+     if((word&0x3b000000)!=0x39000000 || word&(1u<<26) || (word>>22&3)>1) {
+         *detail=word;
+@@ -991,12 +898,7 @@
+     uint64_t address=(rn==31?u->uc_mcontext.sp:u->uc_mcontext.regs[rn])+((word>>10&4095)*size);
+     uint64_t mask=size==8?UINT64_MAX:(1ull<<(size*8))-1;
+     uint64_t value=write && rt!=31?u->uc_mcontext.regs[rt]&mask:0;
+-    if(n->record_mmio) {
+-        uint64_t offset=far-n->uart_va;
+-        if(address!=far || size>4 || (!write && offset!=0x18) || (write && offset!=0 && offset!=0x38))return 0;
+-        *e=(struct lk_el0_mmio){pc,far,size,write,write?value:0x90};
+-    } else if(address!=far || e->size!=size || e->write!=write ||
+-              (write && value!=e->value)) {
++    if(address!=far || e->size!=size || e->write!=write || (write && value!=e->value)) {
+         *detail=n->mmio_used;
+         return -1;
+     }
+@@ -1124,9 +1026,7 @@
+         int mmio=0;
+         uint64_t detail=esr;
+         /* QEMU Linux-user supplies the fault address without an ESR record. */
+-        if(!esr && !user && n->record_mmio && n->uart_va &&
+-           (far-n->uart_va==0 || far-n->uart_va==0x18 || far-n->uart_va==0x38) &&
+-           far!=u->uc_mcontext.pc)
++        if(!esr && !user && far!=u->uc_mcontext.pc)
+             mmio=emulate_mmio(n,far,u,&detail);
+         if(mmio>0) {
+             u->uc_mcontext.pstate&=signal_pstate_mask;
+@@ -1153,20 +1053,10 @@
+         far=n->shadow.far; /* BRK leaves the architectural FAR unchanged. */
+         esr=(0x3cull<<26)|(1ull<<25)|((word>>5)&65535);
+     } else {esr=0;far=n->shadow.far;} /* undefined instructions do not set FAR */
+-    if(user && n->application) {
+-        struct lk_el0_event *e=event(n);
+-        if(e){e->exception=1;e->number=UINT64_MAX;e->pc=c->pc;e->arguments[0]=esr;e->arguments[1]=far;e->arguments[2]=c->pc;}
+-    }
+     osrec_lowered_exception(&n->shadow,c,esr,far);
+     osrec_handle_exception(&n->shadow,c,n->sites,n->h.sites,esr,far);
+ resume:
+-    if(n->prepared) {
+-        /* An emulated return may bypass the direct result store. Its
+-         * incomplete record must survive a subsequent direct entry. */
+-        if(n->shadow.mode==OSREC_USER)
+-            initialize_incomplete_event(n->pending_event);
+-        publish_fixed_state(n);
+-    }
++    if(n->prepared)publish_fixed_state(n);
+     if(n->shadow.mode==OSREC_USER && !n->application) {
+         capture_fp(n);n->status=LK_EL0_OK;siglongjmp(n->jump,1);
+     }
+@@ -1186,9 +1076,7 @@
+     __asm__ volatile(".arch_extension fp\n\tmrs %0,fpcr\n\tmrs %1,fpsr\n\t.arch_extension nofp":"=r"(host_fpcr),"=r"(host_fpsr));
+     n->context=c;n->diagnostic=d;n->status=LK_EL0_FAULT;n->handling=0;n->starting=1;
+     n->application=s->mode==OSREC_USER;
+-    const struct lk_el0_event *first_event=n->event_cursor;
+-    unsigned had_pending=n->pending_event!=NULL;
+-    n->slow_events=0;
++    uint64_t first_transition=n->transition;
+     running=n;
+     lk_stop_handler old_stop=lk_backend_stop;lk_backend_stop=stop;
+     if(!sigsetjmp(n->jump,1)) {
+@@ -1205,18 +1093,10 @@
+     }
+     if(n->prepared) {
+         load_fixed_state(n);
+-        struct lk_el0_event *pending=n->pending_event;
+         c->x[SHADOW_BASE]=s->mode==OSREC_USER?0:n->fixed_guest_x18;
+-        if(first_event) {
+-            /* The cursor includes events recorded by the signal path,
+-             * whose counters the emulator already updated. An outstanding
+-             * direct event accounts for an entry with no matching return. */
+-            uint64_t direct_entries=(uint64_t)(n->event_cursor-first_event)-n->slow_events;
+-            uint64_t direct_returns=direct_entries+had_pending-(pending!=NULL);
+-            s->entries+=direct_entries;
+-            s->emulated+=direct_returns;
+-        }
+-        initialize_incomplete_event(pending);
++        uint64_t entries=(n->transition>>1)-(first_transition>>1);
++        s->entries+=entries;
++        s->emulated+=entries+(first_transition&1)-(n->transition&1);
+     }
+     visibility(n,1);
+     n->executing=0;n->application=0;lk_backend_stop=old_stop;running=NULL;
+@@ -1516,11 +1396,6 @@
+ enum lk_el0_status lk_el0_native_mmio(struct lk_el0_native *n,const struct lk_el0_mmio *e,uint64_t c)
+ {(void)n;(void)e;(void)c;return LK_EL0_UNSUPPORTED;}
+ uint64_t lk_el0_native_mmio_consumed(struct lk_el0_native *n){(void)n;return 0;}
+-enum lk_el0_status lk_el0_native_trace(struct lk_el0_native *n,struct lk_el0_event *e,uint64_t c)
+-{(void)n;(void)e;(void)c;return LK_EL0_UNSUPPORTED;}
+-enum lk_el0_status lk_el0_native_trace_allocate(struct lk_el0_native *n,uint64_t c,struct lk_el0_event **e)
+-{(void)n;(void)c;if(e)*e=NULL;return LK_EL0_UNSUPPORTED;}
+-uint64_t lk_el0_native_events(struct lk_el0_native *n){(void)n;return 0;}
+ enum lk_el0_status lk_el0_native_execute(struct lk_el0_native *n,const struct osrec_context *c,struct lk_el0_result *r)
+ {(void)n;(void)c;(void)r;return LK_EL0_UNSUPPORTED;}
+ enum lk_el0_status lk_el0_native_open(const char *p,struct lk_el0_native **n,struct lk_el0_diagnostic *d)
+@@ -1533,9 +1408,6 @@
+ struct lk_el0_fp *lk_el0_native_fp(struct lk_el0_native *n){(void)n;return NULL;}
+ enum lk_el0_status lk_el0_native_memory(struct lk_el0_native *n,uint64_t a,void *b,uint64_t s,int w,int k,struct lk_el0_diagnostic *d)
+ {(void)n;(void)a;(void)b;(void)s;(void)w;(void)k;(void)d;return LK_EL0_UNSUPPORTED;}
+-enum lk_el0_status lk_el0_native_record_inputs(struct lk_el0_native *n,uint64_t b,uint64_t s,uint64_t u,
+-                                              struct lk_el0_counter *c,uint64_t nc,struct lk_el0_mmio *m,uint64_t nm)
+-{(void)n;(void)b;(void)s;(void)u;(void)c;(void)nc;(void)m;(void)nm;return LK_EL0_UNSUPPORTED;}
+ enum lk_el0_status lk_el0_native_snapshot(struct lk_el0_native *n,const struct osrec_context *c,int a,int b)
+ {(void)n;(void)c;(void)a;(void)b;return LK_EL0_UNSUPPORTED;}
+ #endif
+--- a/tools/linuxkernel_embedded_main.c
++++ b/tools/linuxkernel_embedded_main.c
+@@ -1,55 +1,54 @@
+-/* A complete native checkpoint. All state, inputs and acceptance checks are
+- * linked read-only assets; no original package paths are opened at runtime. */
++/* Execution-only launcher for the pinned Linux-user IPC capture. */
+ #include "linuxkernel_embedded.h"
+-#include "linuxkernel_checkpoint_report.h"
+-#ifndef OSREC_FREESTANDING
++#ifdef OSREC_FREESTANDING
++#include "standalone.h"
++#else
++#include <inttypes.h>
++#include <stdio.h>
+ #include <string.h>
+ #endif
+-_Static_assert(sizeof(struct checkpoint_expected_event)==80,"embedded oracle ABI");
+-static int same(const struct lk_el0_event *a,const struct checkpoint_expected_event *b)
+-{
+-    return a->exception==b->exception && a->number==b->number &&
+-           !memcmp(a->arguments,b->arguments,sizeof b->arguments) &&
+-           a->completed==b->completed && (!b->completed || a->result==b->result);
+-}
+-static int duplicate(const struct lk_el0_event *a,const struct lk_el0_event *b)
+-{return a->exception && b->exception && !memcmp(a->arguments,b->arguments,3*8);}
++
++extern const uint64_t osrec_ipc_uart_va;
++
+ int main(int argc,char **argv)
+ {
+-    const char *trace=NULL;
+-    if(argc==2 && !strcmp(argv[1],"--describe")) {
+-        return fwrite(osrec_checkpoint.provenance.data,1,osrec_checkpoint.provenance.size,stdout)==osrec_checkpoint.provenance.size?0:1;
++    const struct checkpoint_bundle *checkpoint=&osrec_checkpoint;
++    if(argc==2 && !strcmp(argv[1],"--describe"))
++        return fwrite(checkpoint->provenance.data,1,checkpoint->provenance.size,stdout)
++               ==checkpoint->provenance.size?0:1;
++    if(argc!=1 || checkpoint->event_count || checkpoint->expected)return 2;
++
++    struct lk_el0_native *native=NULL;
++    struct lk_el0_diagnostic diagnostic;
++    enum lk_el0_status status=lk_el0_native_open_image(&checkpoint->image,&native,&diagnostic);
++    if(status!=LK_EL0_OK) {
++        fprintf(stderr,"open failed status=%u reason=%"PRIu64" detail=%"PRIu64"\n",
++                status,diagnostic.reason,diagnostic.detail);
++        return 1;
+     }
+-    if(argc==3 && !strcmp(argv[1],"--trace"))trace=argv[2];
+-    else if(argc!=1){fprintf(stderr,"usage: %s [--describe | --trace OUTPUT.json]\n",argv[0]);return 2;}
+-    struct lk_el0_native *native=NULL;struct lk_el0_diagnostic diagnostic;
+-    enum lk_el0_status status=lk_el0_native_open_image(&osrec_checkpoint.image,&native,&diagnostic);
+-    if(status!=LK_EL0_OK){fprintf(stderr,"checkpoint load failed: status=%u detail=%"PRIu64"\n",status,diagnostic.detail);return 1;}
+-    struct lk_el0_event *events=NULL;
+-    uint64_t capacity=osrec_checkpoint.event_count+1024;
+-    if(lk_el0_native_trace_allocate(native,capacity,&events)!=LK_EL0_OK){lk_el0_native_close(native);return 1;}
+     struct lk_el0_result result;
+     status=lk_el0_native_execute(native,NULL,&result);
+-    uint64_t count=lk_el0_native_events(native),used=lk_el0_native_counters_consumed(native),mmio=lk_el0_native_mmio_consumed(native);
+-    int okay=status==LK_EL0_BOUNDARY && result.diagnostic.reason==osrec_checkpoint.stop_reason &&
+-             result.diagnostic.pc==osrec_checkpoint.stop_pc &&
+-             used==osrec_checkpoint.image.counters.size/sizeof(struct lk_el0_counter) &&
+-             mmio==osrec_checkpoint.image.mmio.size/sizeof(struct lk_el0_mmio);
+-    uint64_t expected=0;
+-    for(uint64_t i=0;i<count;i++) {
+-        if(i && duplicate(events+i,events+i-1))continue;
+-        if(expected>=osrec_checkpoint.event_count || !same(events+i,osrec_checkpoint.expected+expected)) {
+-            fprintf(stderr,"checkpoint event mismatch at %"PRIu64" (native event %"PRIu64")\n",expected,i);okay=0;break;
++    uint64_t counters=lk_el0_native_counters_consumed(native);
++    uint64_t mmio=lk_el0_native_mmio_consumed(native);
++    int complete=status==LK_EL0_BOUNDARY && result.diagnostic.reason==checkpoint->stop_reason &&
++                 result.diagnostic.pc==checkpoint->stop_pc && result.context.x[0]==0 &&
++                 counters==checkpoint->image.counters.size/sizeof(struct lk_el0_counter) &&
++                 mmio==checkpoint->image.mmio.size/sizeof(struct lk_el0_mmio);
++    if(lk_el0_native_close(native)!=LK_EL0_OK)complete=0;
++    if(!complete) {
++        fprintf(stderr,"replay stopped status=%u reason=%"PRIu64" pc=0x%"PRIx64
++                       " detail=0x%"PRIx64" counters=%"PRIu64" mmio=%"PRIu64"\n",
++                status,result.diagnostic.reason,result.diagnostic.pc,result.diagnostic.detail,
++                counters,mmio);
++        return 1;
++    }
++    /* The runtime checked each issued write against its transcript entry. */
++    const struct lk_el0_mmio *inputs=checkpoint->image.mmio.data;
++    for(uint64_t i=0;i<mmio;i++) {
++        if(inputs[i].write && inputs[i].address==osrec_ipc_uart_va) {
++            unsigned char byte=(unsigned char)inputs[i].value;
++            if(fwrite(&byte,1,1,stdout)!=1)return 1;
+         }
+-        expected++;
+     }
+-    if(expected!=osrec_checkpoint.event_count)okay=0;
+-    if(trace) {
+-        FILE *out=fopen(trace,"w");
+-        if(!out)okay=0;
+-        else {if(checkpoint_report(out,"embedded-native-checkpoint",events,count,&result,used,mmio))okay=0;if(fclose(out))okay=0;}
+-    }
+-    printf("{\"verified\":%s,\"events\":%"PRIu64",\"expected_events\":%"PRIu64",\"counter_reads\":%"PRIu64",\"mmio_accesses\":%"PRIu64",\"stop_pc\":\"0x%"PRIx64"\",\"identity\":\"%s\"}\n",okay?"true":"false",count,osrec_checkpoint.event_count,used,mmio,result.diagnostic.pc,osrec_checkpoint.identity);
+-    if(lk_el0_native_close(native)!=LK_EL0_OK)okay=0;
+-    return okay?0:1;
++    return ferror(stdout)?1:0;
+ }

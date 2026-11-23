@@ -1,6 +1,6 @@
 --- a/runtime/linuxkernel_el0/native.c
 +++ b/runtime/linuxkernel_el0/native.c
-@@ -43,6 +43,14 @@
+@@ -43,6 +43,16 @@
  struct lk_el0_native {
      struct package_header h;
      struct lk_el0_kernel *kernel;
@@ -8,14 +8,16 @@
 +    uint64_t fixed_guest_x18, fixed_saved_x16;
 +    uint64_t fixed_saved_x17;
 +    struct lk_el0_event *event_end, *event_cursor, *pending_event;
++    uint64_t fixed_sp_el1, fixed_svc_esr;
 +    struct lk_el0_event *events;
 +    uint64_t event_count; /* Used when tracing is disabled. */
 +    uint64_t slow_events; /* Events recorded by the signal handler in this run. */
 +    uint64_t fixed_spsr, fixed_elr, fixed_resume_pc, fixed_return_thunk;
++    uint64_t fixed_sp_el0, fixed_daif, fixed_pan;
      struct osrec_shadow shadow;
      struct osrec_context initial, *context;
      struct lk_el0_fp fp;
-@@ -71,8 +79,6 @@
+@@ -71,8 +81,6 @@
      unsigned char *executable_bytes;
      size_t executables;
      unsigned application,prepared,kernel_visible;
@@ -24,7 +26,7 @@
      struct vma_config vma;
      struct interval *vmas;
      size_t vma_count;
-@@ -80,7 +86,8 @@
+@@ -80,7 +88,8 @@
      struct fpsimd_context *signal_fp;
      uint32_t *fixed_code;
      uint64_t fixed_return_pc;
@@ -34,11 +36,12 @@
  };
  static const int signals[4]={SIGTRAP,SIGILL,SIGSEGV,SIGBUS};
  static atomic_flag owned=ATOMIC_FLAG_INIT;
-@@ -88,8 +95,11 @@
+@@ -88,8 +97,12 @@
   * the owner restores dispositions and releases its mapping state. */
  static struct sigaction forwarded[4];
  static LK_THREAD_LOCAL struct lk_el0_native *running;
 +#define FIXED_DAIF_MASK 0x3c0ull
++#define FIXED_SVC_ESR 0x56000000ull /* AArch64 SVC #0. */
  #define METADATA_BASE 0x180000000000ull
  #define METADATA_SIZE (256ull<<20)
 +_Static_assert(!(METADATA_BASE & FIXED_DAIF_MASK) && !(FIXED_DAIF_MASK % 16),
@@ -46,7 +49,7 @@
  static void *metadata;
  static size_t metadata_used;
  static void *metadata_alloc(size_t bytes)
-@@ -113,9 +123,37 @@
+@@ -113,9 +126,45 @@
          n->fp.fpsr=fp->fpsr;n->fp.fpcr=fp->fpcr;
      }
  }
@@ -68,11 +71,19 @@
 +        n->shadow.mode=n->pending_event?OSREC_KERNEL:OSREC_USER;
 +    n->shadow.elr=n->fixed_elr;
 +    n->shadow.spsr=n->fixed_spsr;
++    n->shadow.sp_el0=n->fixed_sp_el0;
++    n->shadow.sp_el1=n->fixed_sp_el1;
++    n->shadow.daif=n->fixed_daif&FIXED_DAIF_MASK;
++    n->shadow.pan=n->fixed_pan;
 +}
 +static void publish_fixed_state(struct lk_el0_native *n)
 +{
 +    n->fixed_elr=n->shadow.elr;
 +    n->fixed_spsr=n->shadow.spsr;
++    n->fixed_sp_el0=n->shadow.sp_el0;
++    n->fixed_sp_el1=n->shadow.sp_el1;
++    n->fixed_daif=n->shadow.daif;
++    n->fixed_pan=n->shadow.pan;
 +    n->mode_cursor=n->event_cursor;
 +    n->mode_pending_event=n->pending_event;
 +    n->saved_mode=n->shadow.mode;
@@ -84,7 +95,7 @@
      capture_fp(n);
      *n->diagnostic=(struct lk_el0_diagnostic){reason,pc,detail,far};
      n->status=reason==OSREC_STOP_RUNTIME?LK_EL0_FAULT:LK_EL0_BOUNDARY;
-@@ -173,9 +211,17 @@
+@@ -173,9 +222,17 @@
  {
      if(!n || (capacity && !events) || capacity>1000000)return LK_EL0_BAD_ARGUMENT;
      if(n->executing)return LK_EL0_BUSY;
@@ -105,7 +116,7 @@
  enum lk_el0_status lk_el0_native_trace_allocate(struct lk_el0_native *n,uint64_t capacity,struct lk_el0_event **out)
  {
      if(!n || !out || !capacity || capacity>1000000)return LK_EL0_BAD_ARGUMENT;
-@@ -406,22 +452,18 @@
+@@ -406,22 +463,18 @@
  }
  static struct lk_el0_event *event(struct lk_el0_native *n)
  {
@@ -139,7 +150,7 @@
  }
  static void patch_instruction(struct lk_el0_native *n,uint64_t pc,uint32_t word)
  {
-@@ -433,6 +475,8 @@
+@@ -433,6 +486,8 @@
  #define FIXED_CODE_VA 0x800085000000ull
  #define FIXED_CODE_SIZE (4u << 20)
  #define FIXED_SLOT_WORDS 12u
@@ -148,7 +159,7 @@
 
  static uint32_t direct_branch(uint64_t pc,uint64_t target)
  {
-@@ -452,13 +496,14 @@
+@@ -452,17 +507,18 @@
      return out;
  }
 
@@ -158,16 +169,24 @@
 +{
 +    struct osrec_shadow *s=&n->shadow;
      switch(key) {
-     case 0xc208: return &s->sp_el0;
-     case 0xe208: return &s->sp_el1;
+-    case 0xc208: return &s->sp_el0;
+-    case 0xe208: return &s->sp_el1;
 -    case 0xc201: return &s->elr;
 -    case 0xc200: return &s->spsr;
++    case 0xc208: return &n->fixed_sp_el0;
++    case 0xe208: return &n->fixed_sp_el1;
 +    case 0xc201: return &n->fixed_elr;
 +    case 0xc200: return &n->fixed_spsr;
      case 0xc290: return &s->esr;
      case 0xc300: return &s->far;
-     case 0xda11: return &s->daif;
-@@ -480,35 +525,247 @@
+-    case 0xda11: return &s->daif;
+-    case 0xc213: return &s->pan;
++    case 0xda11: return &n->fixed_daif;
++    case 0xc213: return &n->fixed_pan;
+     case 0xc600: return &s->vbar;
+     case 0xc100: return read?&s->ttbr0:NULL;
+     case 0xdf01: case 0xdf02: return NULL;
+@@ -480,35 +536,251 @@
      return 0xf9000000u|((offset/8)<<10)|(base<<5)|src;
  }
 
@@ -282,18 +301,17 @@
 +        "mrs x16,nzcv\n"
 +        "3: nop\n" /* Optional SSBS from the captured user PSTATE. */
 +        "stp x16,x17,[x18,%c[spsr]]\n"
-+        "mov x16,#0x56000000\n"
-+        "str x16,[x18,%c[esr]]\n"
 +        "mov x16,sp\n"
-+        "str x16,[x18,%c[sp_el0]]\n"
-+        "ldr x16,[x18,%c[sp_el1]]\n"
-+        "mov sp,x16\n"
 +        ".if %c[anchor_sets_daif]\n"
-+        "str x18,[x18,%c[daif]]\n"
++        "stp x16,x18,[x18,%c[sp_el0]]\n"
 +        ".else\n"
++        "str x16,[x18,%c[sp_el0]]\n"
 +        "mov x16,#0x3c0\n"
 +        "str x16,[x18,%c[daif]]\n"
 +        ".endif\n"
++        "ldp x16,x17,[x18,%c[sp_el1]]\n"
++        "str x17,[x18,%c[esr]]\n"
++        "mov sp,x16\n"
 +        "ldp x16,x17,[x18,%c[saved16]]\n"
 +        "4: nop\n" /* Direct branch to the captured EL0 vector. */
 +        "8:\n"
@@ -314,15 +332,19 @@
 +          [resume] "i"(offsetof(struct lk_el0_native,fixed_resume_pc)),
 +          [spsr] "i"(offsetof(struct lk_el0_native,fixed_spsr)),
 +          [esr] "i"(offsetof(struct lk_el0_native,shadow.esr)),
-+          [sp_el0] "i"(offsetof(struct lk_el0_native,shadow.sp_el0)),
-+          [sp_el1] "i"(offsetof(struct lk_el0_native,shadow.sp_el1)),
-+          [daif] "i"(offsetof(struct lk_el0_native,shadow.daif)));
++          [sp_el0] "i"(offsetof(struct lk_el0_native,fixed_sp_el0)),
++          [sp_el1] "i"(offsetof(struct lk_el0_native,fixed_sp_el1)),
++          [daif] "i"(offsetof(struct lk_el0_native,fixed_daif)));
 +    _Static_assert(offsetof(struct lk_el0_native,event_cursor)==
 +                       offsetof(struct lk_el0_native,event_end)+8 &&
 +                   offsetof(struct lk_el0_native,pending_event)==
 +                       offsetof(struct lk_el0_native,event_cursor)+8 &&
 +                   offsetof(struct lk_el0_native,fixed_elr)==
-+                       offsetof(struct lk_el0_native,fixed_spsr)+8,
++                       offsetof(struct lk_el0_native,fixed_spsr)+8 &&
++                   offsetof(struct lk_el0_native,fixed_daif)==
++                       offsetof(struct lk_el0_native,fixed_sp_el0)+8 &&
++                   offsetof(struct lk_el0_native,fixed_svc_esr)==
++                       offsetof(struct lk_el0_native,fixed_sp_el1)+8,
 +                   "paired entry fields");
 +    _Static_assert(sizeof(struct lk_el0_event)==88 &&
 +                   offsetof(struct lk_el0_event,result)==64 &&
@@ -362,10 +384,9 @@
 +        "mov x17,#1\n"
 +        "stp x0,x17,[x16,%c[result]]\n"
 +        "mov x16,sp\n"
-+        "str x16,[x18,%c[sp_el1]]\n"
++        "stp xzr,x16,[x18,%c[pending_event]]\n" /* Clear the event and save SP_EL1. */
 +        "ldp x17,x16,[x18,%c[thunk]]\n"
 +        "mov sp,x16\n"
-+        "str xzr,[x18,%c[pending_event]]\n"
 +        "br x17\n"
 +        "5: and x16,x16,#0xfffffffffffffc3f\n" /* Ignore DAIF. */
 +        "and x16,x16,#0xffffffffffbfffff\n" /* Ignore PAN. */
@@ -393,14 +414,16 @@
 +          [pending_event] "i"(offsetof(struct lk_el0_native,pending_event)),
 +          [result] "i"(offsetof(struct lk_el0_event,result)),
 +          [spsr] "i"(offsetof(struct lk_el0_native,fixed_spsr)),
-+          [daif] "i"(offsetof(struct lk_el0_native,shadow.daif)),
-+          [sp_el1] "i"(offsetof(struct lk_el0_native,shadow.sp_el1)),
++          [daif] "i"(offsetof(struct lk_el0_native,fixed_daif)),
 +          [thunk] "i"(offsetof(struct lk_el0_native,fixed_return_thunk)));
-+    _Static_assert(offsetof(struct lk_el0_native,fixed_resume_pc)==
++    _Static_assert(offsetof(struct lk_el0_native,fixed_sp_el1)==
++                       offsetof(struct lk_el0_native,pending_event)+8 &&
++                   offsetof(struct lk_el0_native,fixed_resume_pc)==
 +                       offsetof(struct lk_el0_native,fixed_elr)+8 &&
-+                   offsetof(struct lk_el0_native,shadow.sp_el0)==
++                   offsetof(struct lk_el0_native,fixed_sp_el0)==
 +                       offsetof(struct lk_el0_native,fixed_return_thunk)+8 &&
-+                   offsetof(struct osrec_shadow,pan)==offsetof(struct osrec_shadow,daif)+8,
++                   offsetof(struct lk_el0_native,fixed_pan)==
++                       offsetof(struct lk_el0_native,fixed_daif)+8,
 +                   "paired return fields");
 +    int ssbs=(n->context->pstate&(1ull<<12))!=0;
 +    const uint32_t *begin=ssbs?with_ssbs:without_ssbs;
@@ -444,11 +467,12 @@
  }
 
  static void prepare_fixed_code(struct lk_el0_native *n)
-@@ -523,7 +780,14 @@
+@@ -523,7 +795,15 @@
      __asm__ volatile("mrs %0, dczid_el0":"=r"(dczid));
      int native_zva=(n->shadow.known[0xd807/8]&(1u<<(0xd807%8))) &&
                     dczid==n->shadow.value[0xd807] && !(dczid&16);
 -    size_t used=0;
++    n->fixed_svc_esr=FIXED_SVC_ESR;
 +    n->fixed_tpidr_el1=n->shadow.value[0xc684];
 +    n->fixed_dczid_el0=n->shadow.value[0xd807];
 +    if(n->context->x[SHADOW_BASE] || n->context->pc!=0x201160ull ||
@@ -460,12 +484,12 @@
      for(uint64_t i=0;i<n->h.sites;i++) {
          const struct osrec_site *site=&n->sites[i];
          uint64_t pc=site->va;
-@@ -559,47 +823,86 @@
+@@ -559,47 +839,86 @@
              patch_instruction(n,pc,rt==31?0xd503201fu:0xd2800080u|rt);
              continue;
          }
 -        uint64_t *addr=set_mask || clear_mask?&n->shadow.daif:shadow_register(&n->shadow,key,read);
-+        uint64_t *addr=set_mask || clear_mask?&n->shadow.daif:shadow_register(n,key,read);
++        uint64_t *addr=set_mask || clear_mask?&n->fixed_daif:shadow_register(n,key,read);
 +        if(read && addr && key==0xc684)addr=&n->fixed_tpidr_el1;
 +        if(read && addr && key==0xd807)addr=&n->fixed_dczid_el0;
          if(!addr)continue;
@@ -563,7 +587,7 @@
      if(mprotect(n->fixed_code,FIXED_CODE_SIZE,PROT_READ|PROT_EXEC))
          stop(OSREC_STOP_UNSUPPORTED,n->context->pc,errno,FIXED_CODE_VA);
      __builtin___clear_cache((char *)n->fixed_code,(char *)end);
-@@ -608,11 +911,14 @@
+@@ -608,11 +927,14 @@
  {
      if(n->prepared)return;
      if(!n->app_sites || !n->vma.magic)stop(OSREC_STOP_UNSUPPORTED,n->context->pc,0x415050,0);
@@ -578,7 +602,7 @@
      for(size_t i=0;i<n->users;i++)if(protection(n->user[i].attrs,1)&PROT_EXEC) {
          if(n->user[i].va<n->app.text_lo || n->user[i].va>=n->app.text_hi)
              stop(OSREC_STOP_UNSUPPORTED,n->context->pc,0x45584543,n->user[i].va);
-@@ -620,30 +926,25 @@
+@@ -620,30 +942,25 @@
          n->executable[n->executables++]=n->user[i];
      }
      for(uint64_t i=0;i<n->app.count;i++) {
@@ -616,7 +640,7 @@
      n->executable_bytes=metadata_alloc(n->executables*PAGE);
      if(!n->executable_bytes)stop(OSREC_STOP_RUNTIME,n->context->pc,ENOMEM,0);
      for(size_t i=0;i<n->executables;i++)
-@@ -656,28 +957,37 @@
+@@ -656,28 +973,37 @@
          if(memcmp(n->executable_bytes+i*PAGE,physical(n,n->executable[i].pa,PAGE),PAGE))
              stop(OSREC_STOP_UNSUPPORTED,n->context->pc,0x54455854,n->executable[i].va);
  }
@@ -669,7 +693,7 @@
  }
  int lk_native_user_access(struct osrec_shadow *s,struct osrec_context *c,uint32_t word,uint64_t address,unsigned bytes)
  {
-@@ -750,11 +1060,12 @@
+@@ -750,11 +1076,12 @@
      }
      return fp;
  }
@@ -683,7 +707,7 @@
  }
  static void to_signal(struct lk_el0_native *n,ucontext_t *u)
  {
-@@ -771,48 +1082,6 @@
+@@ -771,48 +1098,6 @@
      if(p->sa_handler==SIG_DFL){sigaction(sig,p,NULL);syscall(SYS_tgkill,getpid(),syscall(SYS_gettid),sig);return;}
      if(p->sa_flags&SA_SIGINFO)p->sa_sigaction(sig,info,context);else p->sa_handler(sig);
  }
@@ -732,7 +756,7 @@
  static void handler(int sig,siginfo_t *info,void *context)
  {
      struct lk_el0_native *n=running;
-@@ -820,32 +1089,44 @@
+@@ -820,32 +1105,43 @@
      ucontext_t *u=context;
      if(n->handling)stop(OSREC_STOP_RUNTIME,u->uc_mcontext.pc,sig,(uintptr_t)info->si_addr);
      n->handling=1;
@@ -752,7 +776,6 @@
          n->handling=0;return;
      }
      n->signal_fp=fp;
-+    if(n->prepared)n->shadow.daif&=FIXED_DAIF_MASK;
 +    uint64_t far=(uintptr_t)info->si_addr;
 +    int user=n->shadow.mode==OSREC_USER;
 +    if(sig==SIGSEGV || sig==SIGBUS) {
@@ -789,7 +812,7 @@
          uint32_t word=*(uint32_t *)(uintptr_t)c->pc;
          if((word&0xffe0001fu)!=0xd4200000u)stop(OSREC_STOP_EXCEPTION,c->pc,word,far);
          if(user && (word>>5&65535)==0xf04) {
-@@ -856,13 +1137,6 @@
+@@ -856,13 +1152,6 @@
          }
          far=n->shadow.far; /* BRK leaves the architectural FAR unchanged. */
          esr=(0x3cull<<26)|(1ull<<25)|((word>>5)&65535);
@@ -803,7 +826,7 @@
      } else {esr=0;far=n->shadow.far;} /* undefined instructions do not set FAR */
      if(user && n->application) {
          struct lk_el0_event *e=event(n);
-@@ -871,6 +1145,13 @@
+@@ -871,6 +1160,13 @@
      osrec_lowered_exception(&n->shadow,c,esr,far);
      osrec_handle_exception(&n->shadow,c,n->sites,n->h.sites,esr,far);
  resume:
@@ -817,7 +840,7 @@
      if(n->shadow.mode==OSREC_USER && !n->application) {
          capture_fp(n);n->status=LK_EL0_OK;siglongjmp(n->jump,1);
      }
-@@ -890,10 +1171,14 @@
+@@ -890,10 +1186,14 @@
      __asm__ volatile(".arch_extension fp\n\tmrs %0,fpcr\n\tmrs %1,fpsr\n\t.arch_extension nofp":"=r"(host_fpcr),"=r"(host_fpsr));
      n->context=c;n->diagnostic=d;n->status=LK_EL0_FAULT;n->handling=0;n->starting=1;
      n->application=s->mode==OSREC_USER;
@@ -832,14 +855,13 @@
          n->executing=1;
          __asm__ volatile("brk #0xf02" ::: "memory");
          stop(OSREC_STOP_RUNTIME,c->pc,0xf02,0);
-@@ -902,6 +1187,22 @@
+@@ -902,6 +1202,21 @@
      if(n->prepared && n->application) {
          n->application=0;
          validate_application(n);
 +    }
 +    if(n->prepared) {
 +        load_fixed_state(n);
-+        s->daif&=FIXED_DAIF_MASK;
 +        struct lk_el0_event *pending=n->pending_event;
 +        c->x[SHADOW_BASE]=s->mode==OSREC_USER?0:n->fixed_guest_x18;
 +        if(first_event) {
@@ -855,7 +877,7 @@
      }
      visibility(n,1);
      n->executing=0;n->application=0;lk_backend_stop=old_stop;running=NULL;
-@@ -951,7 +1252,9 @@
+@@ -951,7 +1266,9 @@
          if(metadata!=MAP_FAILED)munmap(metadata,METADATA_SIZE);
          metadata=NULL;atomic_flag_clear(&owned);return LK_EL0_UNSUPPORTED;
      }

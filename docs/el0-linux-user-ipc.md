@@ -1,9 +1,9 @@
 # Fixed-mapping IPC replay in QEMU Linux-user
 
-The 640-iteration IPC workload completed with **4.55% runtime instruction
-overhead** at 10 million kernel instructions, down from 4.63%. The full run
-dispatched 10,779,406 kernel instructions, 497,097 runtime instructions
-and 97,373 application instructions.
+The 640-iteration IPC workload completed with **3.62% runtime instruction
+overhead** at 10 million kernel instructions in a two-pass build. The checked
+reader measured 4.32%. Both ran in QEMU Linux-user on Cortex-A53 and executed
+10,779,406 kernel and 97,373 application instructions across the full replay.
 
 | Replay variant | Runtime instructions per kernel instruction at 10M kernel instructions |
 | --- | ---: |
@@ -21,11 +21,13 @@ and 97,373 application instructions.
 | Pending event and guest mode encoded together | 0.0478 |
 | Paired stack and gateway load and direct UART frame updates | 0.0470 |
 | Paired load of live and expected return addresses | 0.0463 |
-| Direct return using an untagged pending-event pointer | **0.0455** |
+| Direct return using an untagged pending-event pointer | 0.0455 |
+| Paired stack and syscall state transfers | 0.0432 |
+| Two-pass execution-only ELF | **0.0362** |
 
 The prepared capture populates all ELF load segments before execution. The
 Linux-user process retains the user and kernel mappings throughout the replay.
-The final variant rejects any call to the address translator or mapping
+The checked reader rejects any call to the address translator or mapping
 synchronizer during execution. Captured EL1 register operations use EL0
 instructions and shadow state. Memory instructions access the installed
 addresses directly. Each syscall site branches to its own gateway. A bounded
@@ -83,6 +85,13 @@ Keeping the pending pointer untagged removes one instruction from the
 direct return. That saves a further 7,719 runtime instructions in the prefix
 and 8,286 across the full replay.
 
+Syscall entry saves the user stack pointer and DAIF as a pair and loads the
+kernel stack pointer with the precomputed SVC syndrome. Return saves the
+kernel stack pointer and clears the pending event in one store pair. These
+changes save another 23,159 runtime instructions in the prefix and 24,895
+across the full replay. Signal handling transfers the live fields into
+the existing checkpoint shadow layout for C emulation.
+
 ## Replay inputs and accounting
 
 - QEMU 10.0.13 with plugins, Linux user mode, AArch64 Cortex-A53.
@@ -120,14 +129,20 @@ reports. The untagged-pointer variant matched an injected user fault after
 an emulated kernel instruction and direct syscall return. Its forced
 C-emulation run matched the ledger and used 0.6% fewer runtime instructions
 than the paired-address variant.
+The paired stack transfers matched the stack-pointer, DAIF, PAN, ESR, ELR,
+and SPSR traces. Tests also covered the DAIF immediate fallback, prefilled
+trace buffers, and faults after a signal interrupted kernel execution.
+Forcing every return through C emulation used 1.0% more runtime instructions
+than the untagged-pointer variant and produced the same replay artifacts.
 
 The DAIF audit matched all 63,399 observed mask changes and 8,340 guest reads.
 Additional checks matched the reference after injecting bits outside DAIF and
 after forcing D and A set across partial updates. The emitter also passed
 with a state pointer that selected the fallback for setting the mask.
 
-The syscall entry and return stubs, including their gateways and the lowered
-ERET, account for 449,365 runtime instructions, or 90.4% of the full run.
+The syscall entry and return stubs in the checked reader, including their
+gateways and the lowered ERET, account for 424,400 runtime instructions,
+or 89.9% of the full run.
 
 | Artifact | SHA-256 |
 | --- | --- |
@@ -199,3 +214,55 @@ for artifact in calls.json console.txt counters.bin mmio.bin stdout.json; do
   cmp "/work/profile-fixed-ipc/$artifact" "/work/profile-direct-ipc/$artifact"
 done
 ```
+
+## Build the execution-only ELF
+
+Use the direct reader run above as the collection pass. The exporter checks
+the starting checkpoint and the five recorded artifacts against the pinned
+SHA-256 values and an independent reference. It links the sparse starting RAM,
+application and kernel metadata, and ordered device inputs into one statically
+linked AArch64 Linux ELF. The replay uses a single transition word to track
+guest mode and omits syscall ledger writes. Its runtime still checks return
+PC and status, fixed mappings, each UART access against the transcript, and
+successful completion at `do_exit(0)`.
+
+In the isolated checkout with both reader patches applied, apply the
+[production patch](../tools/experiments/linux-user-ipc-production.patch).
+Set `IPC_ORACLE` to the independent reference directory and use fresh build
+output paths.
+
+```sh
+git apply tools/experiments/linux-user-ipc-production.patch
+OUT=/work/ipc-production-runtime python3 tools/export_native_checkpoint.py \
+  --package /work/prepared --oracle "$IPC_ORACLE" \
+  --ipc-profile /work/profile-direct-ipc --out /work/ipc-production --build
+
+mkdir -p /work/profile-production-ipc /work/ipc-empty
+cd /work/ipc-empty
+qemu-aarch64 -s 524288 -cpu cortex-a53 \
+  -plugin /work/linux-user-ipc.so,out=/work/profile-production-ipc \
+  /work/ipc-production/user-checkpoint >/work/profile-production-ipc/console.txt
+cmp /work/profile-direct-ipc/console.txt /work/profile-production-ipc/console.txt
+```
+
+The resulting ELF is 58,288,624 bytes and the linker audit confirmed it has
+its own startup, zero undefined symbols, and no libc, compiler runtime, or TLS.
+It completed from an empty working directory with the same console output.
+External instrumentation found identical hit counts at all 9,456 measured
+kernel and user instruction addresses and identical general registers, stack
+pointer, and NZCV at `do_exit`. The exporter rejected a modified transcript.
+Changing an embedded UART write also made the ELF stop with a nonzero status
+before printing any console output.
+
+| Measurement | Checked reader | Execution-only ELF |
+| --- | ---: | ---: |
+| Runtime instructions through 10M kernel instructions | 431,827 | 362,348 |
+| Runtime instruction overhead through 10M kernel instructions | 4.32% | 3.62% |
+| Runtime instructions over the full replay | 472,202 | 395,982 |
+| UART accesses over the full replay | 35 | 35 |
+
+The execution-only ELF used 16.1% fewer runtime instructions in the prefix
+and across the full replay. UART emulation still accounted for all 35
+`rt_sigreturn` calls during the measured interval. The instruction window
+excludes checkpoint setup and final output. The ELF targets the pinned
+capture and Linux host ABI.

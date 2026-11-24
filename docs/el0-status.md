@@ -1,4 +1,4 @@
-# EL0 replay status · 2026-11-23
+# EL0 replay status · 2026-11-24
 
 The current IPC result uses a checked direct-transition replay followed by an
 execution-only ELF build. The IPC report also includes the original
@@ -12,10 +12,11 @@ that the workload needs use EL0 sequences or shadow architectural state.
 ## Verified runs
 
 - The 640-iteration pipe and eventfd workload completed in QEMU Linux-user
-  on Cortex-A53 with **3.62% runtime instruction overhead** at 10 million
-  kernel instructions in the execution-only ELF. It used 395,982 runtime
+  on Cortex-A53 with **3.11% runtime instruction overhead** at 10 million
+  kernel instructions in the execution-only ELF. It used 336,087 runtime
   instructions across the full replay and matched the checked reader's guest
-  instruction frequencies, terminal registers, and UART output.
+  instruction frequencies, terminal registers, and UART output. Direct UART
+  replay removed the 35 host signal returns from the measured interval.
 - The checked reader for the same workload measured **4.32% runtime
   instruction overhead** at 10 million kernel instructions. The full run counted
   10,779,406 kernel, 472,202 runtime, and 97,373 application instructions.
@@ -40,8 +41,7 @@ that the workload needs use EL0 sequences or shadow architectural state.
   16 KiB host pages. The existing IPC capture requires a different layout.
   The [alias projection command](el0-macos.md#checking-a-capture-for-native-mappings)
   reports which ranges block installation.
-- The direct syscall transitions are specific to the captured IPC workload.
-  UART MMIO accounted for the 35 remaining `rt_sigreturn` calls in the measured
-  window. Timing and microarchitectural validation remain pending. See the
+- The direct syscall transitions and UART replay are specific to the captured
+  IPC workload. Timing and microarchitectural validation remain pending. See the
   [model runner](el0-model-runner.md).
 - The clustered ELF still needs execution on an Android device.

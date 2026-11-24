@@ -1,9 +1,11 @@
 # Fixed-mapping IPC replay in QEMU Linux-user
 
-The 640-iteration IPC workload completed with **3.62% runtime instruction
-overhead** at 10 million kernel instructions in a two-pass build. The checked
-reader measured 4.32%. Both ran in QEMU Linux-user on Cortex-A53 and executed
-10,779,406 kernel and 97,373 application instructions across the full replay.
+The 640-iteration IPC workload completed with **3.11% runtime instruction
+overhead** at 10 million kernel instructions in a two-pass build. The previous
+execution-only ELF measured 3.12% and the checked reader measured 4.32%.
+All ran in QEMU Linux-user on Cortex-A53 and executed 10,779,406 kernel and
+97,373 application instructions across the full replay. The updated ELF
+issued zero host syscall requests between application entry and `do_exit`.
 
 | Replay variant | Runtime instructions per kernel instruction at 10M kernel instructions |
 | --- | ---: |
@@ -23,7 +25,13 @@ reader measured 4.32%. Both ran in QEMU Linux-user on Cortex-A53 and executed
 | Paired load of live and expected return addresses | 0.0463 |
 | Direct return using an untagged pending-event pointer | 0.0455 |
 | Paired stack and syscall state transfers | 0.0432 |
-| Two-pass execution-only ELF | **0.0362** |
+| Two-pass execution-only ELF | 0.0362 |
+| Paired gateway load and direct resume-PC handoff | 0.0347 |
+| Single-increment transition sequence | 0.0339 |
+| Inline loads of read-only veneer constants | 0.0327 |
+| Pending return thunk and direct UART replay | 0.0320 |
+| Paired syscall entry counter and ESR update | 0.0312 |
+| Direct W18 shadow store and guarded scratch reuse | **0.0311** |
 
 The prepared capture populates all ELF load segments before execution. The
 Linux-user process retains the user and kernel mappings throughout the replay.
@@ -221,10 +229,35 @@ Use the direct reader run above as the collection pass. The exporter checks
 the starting checkpoint and the five recorded artifacts against the pinned
 SHA-256 values and an independent reference. It links the sparse starting RAM,
 application and kernel metadata, and ordered device inputs into one statically
-linked AArch64 Linux ELF. The replay uses a single transition word to track
-guest mode and omits syscall ledger writes. Its runtime still checks return
-PC and status, fixed mappings, each UART access against the transcript, and
-successful completion at `do_exit(0)`.
+linked AArch64 Linux ELF. The replay omits syscall ledger writes. Its runtime
+checks return PC and status, fixed mappings, each UART access against the
+transcript, and successful completion at `do_exit(0)`.
+
+Each gateway loads its user resume PC and return thunk together from adjacent
+runtime fields. It passes the resume PC in `x16` to the entry stub, which
+uses it directly when saving ELR. This saves two runtime instructions per
+syscall entry, or 15,440 in the prefix and 16,644 across the full replay.
+
+A single increment counts each direct entry. The return thunk doubles as the
+pending syscall marker. Both direct and emulated returns clear it before
+resuming user code. The direct return saves one instruction by clearing the
+thunk and saving SP_EL1 in a paired store. This saves 7,719 instructions in
+the 10-million-kernel-instruction prefix.
+
+During setup, the runtime recognizes veneers that load a literal and branch
+back to the source instruction's fallthrough. It verifies both branches and
+the literal page's read-only mappings, then replaces the source branch with a
+load from the replay state. Three such sites executed 6,400 times in this
+workload. This further saves 11,874 runtime instructions in the prefix and
+12,695 across the full replay.
+
+The four recorded PL011 instruction sites use direct replay during a pending
+syscall. The generated code checks the next record's PC, address, access size
+and direction, and verifies each write value. A failed match executes the
+original instruction. If that instruction faults, the signal handler reports
+the access at its original guest PC. The direct path handles all 35 UART
+accesses after the prefix and saves 4,248 runtime instructions across the full
+replay compared with the same return path and signal-assisted UART.
 
 In the isolated checkout with both reader patches applied, apply the
 [production patch](../tools/experiments/linux-user-ipc-production.patch).
@@ -245,24 +278,101 @@ qemu-aarch64 -s 524288 -cpu cortex-a53 \
 cmp /work/profile-direct-ipc/console.txt /work/profile-production-ipc/console.txt
 ```
 
-The resulting ELF is 58,288,624 bytes and the linker audit confirmed it has
+The resulting ELF is 58,302,480 bytes and the linker audit confirmed it has
 its own startup, zero undefined symbols, and no libc, compiler runtime, or TLS.
 It completed from an empty working directory with the same console output.
 External instrumentation found identical hit counts at all 9,456 measured
 kernel and user instruction addresses and identical general registers, stack
 pointer, and NZCV at `do_exit`. The exporter rejected a modified transcript.
-Changing an embedded UART write also made the ELF stop with a nonzero status
-before printing any console output.
+Changes to the embedded UART value, address, width, direction, order and
+record count produced the same stop diagnostics as the signal-assisted ELF
+and stopped before printing any console output. Forcing all 16 valid UART
+reads through the signal fallback preserved the guest state and output.
 
-| Measurement | Checked reader | Execution-only ELF |
-| --- | ---: | ---: |
-| Runtime instructions through 10M kernel instructions | 431,827 | 362,348 |
-| Runtime instruction overhead through 10M kernel instructions | 4.32% | 3.62% |
-| Runtime instructions over the full replay | 472,202 | 395,982 |
-| UART accesses over the full replay | 35 | 35 |
+The updated ELF matched the previous ELF's general registers, stack pointer,
+and NZCV at all 8,322 syscall entries, 8,321 resumes, 6,400 continuations
+after the inlined constant loads, and 35 UART continuations. Direct, mixed,
+and fully emulated returns each accounted for 8,322 entries and 8,321 returns,
+including the final pending `exit(0)` entry. Injected return-PC and status
+mismatches reached the return guard with matching registers and the same
+stop diagnostics.
 
-The execution-only ELF used 16.1% fewer runtime instructions in the prefix
-and across the full replay. UART emulation still accounted for all 35
-`rt_sigreturn` calls during the measured interval. The instruction window
-excludes checkpoint setup and final output. The ELF targets the pinned
-capture and Linux host ABI.
+The entry stub loads the fixed SVC syndrome and entry counter as a pair,
+increments the counter, then stores the counter and ESR together. This
+saves one runtime instruction per syscall entry. The signal handler copies
+ESR between the assembly and C state when it hands off execution.
+
+The pinned kernel writes the virtualized X18 through W18 or masks it to a
+byte, so the replay stores its value in a 32-bit shadow slot. The lowering
+replaces `mov w18,w12` with a single store. The hot `and w18,w2,#0xfffffffd`
+uses X16 as scratch and skips its spill and reload when the runtime verifies
+the next two instructions in read-only executable memory with no writable
+alias. Those instructions fall through to a write of W16 without reading
+X16. A test substituted an equivalent encoding of the intervening instruction
+and exercised the spill fallback. Both variants matched the baseline's
+X18 shadow stores and all 644 register frames after W16 was overwritten.
+
+| Measurement | Checked reader | Previous ELF | Updated ELF |
+| --- | ---: | ---: | ---: |
+| Runtime instructions through 10M kernel instructions | 431,827 | 311,875 | 310,659 |
+| Runtime instruction overhead through 10M kernel instructions | 4.32% | 3.12% | 3.11% |
+| Runtime instructions over the full replay | 472,202 | 337,395 | 336,087 |
+| UART accesses over the full replay | 35 | 35 | 35 |
+| Host syscall requests between application entry and `do_exit` | 35 | 0 | 0 |
+
+The X18 lowering saves 1,216 runtime instructions through the 10-million
+prefix and 1,308 across the full replay. The instruction window excludes
+checkpoint setup and final output. The ELF targets the pinned capture and
+Linux host ABI.
+
+## Sampled kernel call stacks
+
+Two QEMU Linux-user runs each sampled 10,527 stacks from the same 10,779,406
+guest kernel instructions. The sampler chose one instruction at a
+pseudorandom offset in each block of 1,024 kernel instructions and followed
+AArch64 calls and returns. All 303,514 observed returns matched their call
+sites, and all 8,322 syscall numbers and sites matched the checked replay
+ledger.
+
+| Syscall | Calls | Kernel instructions | Share |
+| --- | ---: | ---: | ---: |
+| `close` | 1,920 | 3,444,787 | 31.96% |
+| `pipe2` | 640 | 2,055,376 | 19.07% |
+| `read` | 3,200 | 1,842,560 | 17.09% |
+| `eventfd2` | 640 | 1,139,205 | 10.57% |
+| `writev` | 640 | 1,116,160 | 10.35% |
+| `readv` | 640 | 807,680 | 7.49% |
+| `write` | 641 | 373,459 | 3.46% |
+| `exit` | 1 | 179 | <0.01% |
+
+`el0t_64_sync` (6.27–6.61%) and `ret_to_user` (3.65–3.66%) had the
+most samples at their own instruction addresses in both runs. The sampled
+`close` paths included `__fput` and `kmem_cache_free`. The `pipe2`
+paths included `create_pipe_files` and `alloc_file_pseudo`.
+
+Build the [stack sampler](../tools/qemu_plugins/linux_user_ipc_stacks.c)
+with the same QEMU plugin headers and executable range files as the
+instruction counter. Run it from the empty directory used above.
+
+```sh
+clang-19 -O2 -shared -fPIC -Wall -Wextra -Werror -I"$QEMU_INCLUDE" \
+  $(pkg-config --cflags --libs glib-2.0) tools/qemu_plugins/linux_user_ipc_stacks.c \
+  -o /work/linux-user-ipc-stacks.so
+
+cd /work/ipc-empty
+for seed in 25214903917 88172645463325252; do
+  report="/work/ipc-stacks-$seed"
+  mkdir -p "$report"
+  qemu-aarch64 -s 524288 -cpu cortex-a53 \
+    -plugin "/work/linux-user-ipc-stacks.so,out=$report,seed=$seed" \
+    /work/ipc-production/user-checkpoint >"$report/console.txt"
+done
+```
+
+`raw-stacks.tsv` records the kernel instruction ordinal, sample PC, syscall
+ordinal, then the caller PCs from nearest to farthest. `syscall-visits.tsv`
+records the syscall ordinal, application PC, syscall number, and the
+cumulative kernel instruction counts before and after each call. Resolve
+PCs against the captured kernel's `vmlinux`, using the low 48 bits of
+its symbol addresses for the lowered replay. Tail calls can omit a frame,
+and inline functions are grouped under their enclosing symbols.

@@ -1,37 +1,74 @@
 --- a/runtime/linuxkernel_el0/native.c
 +++ b/runtime/linuxkernel_el0/native.c
-@@ -46,11 +46,8 @@
+@@ -29,6 +29,8 @@
+ #define PAGE 4096ull
+ #define PA_MASK 0x0000fffffffff000ull
+ #define MAGIC 0x3145564954414e4cull /* LNATIVE1 */
++#define FIXED_GATE_SITES 15u
++#define FIXED_UART_SITES 4u
+ struct package_header {
+     uint64_t magic, version, base, size, tcr, ranges, sites, veneer, veneers, maps;
+ };
+@@ -37,6 +39,7 @@
+ struct application_site { uint64_t pc; uint32_t word,kind; uint64_t gateway; };
+ struct vma_config { uint64_t magic,version,root,start,end,flags,r_pivot,r_slot,a_pivot,a_slot; };
+ struct interval {uint64_t start,end;};
++struct fixed_uart_site { uint64_t pc, fault_pc; uint32_t word; };
+ _Static_assert(sizeof(struct osrec_context)==272,"native package context ABI");
+ _Static_assert(sizeof(struct lk_el0_fp)==520,"native package FP ABI");
+ _Static_assert(sizeof(struct osrec_shadow)==532584,"native package shadow ABI");
+@@ -44,15 +47,18 @@
+     struct package_header h;
+     struct lk_el0_kernel *kernel;
      uint64_t fixed_tpidr_el1, fixed_dczid_el0;
-     uint64_t fixed_guest_x18, fixed_saved_x16;
-     uint64_t fixed_saved_x17;
+-    uint64_t fixed_guest_x18, fixed_saved_x16;
+-    uint64_t fixed_saved_x17;
 -    struct lk_el0_event *event_end, *event_cursor, *pending_event;
-+    uint64_t transition; /* Direct entry count in bits 63:1, outstanding in bit 0. */
-     uint64_t fixed_sp_el1, fixed_svc_esr;
+-    uint64_t fixed_sp_el1, fixed_svc_esr;
 -    struct lk_el0_event *events;
 -    uint64_t event_count; /* Used when tracing is disabled. */
 -    uint64_t slow_events; /* Events recorded by the signal handler in this run. */
-     uint64_t fixed_spsr, fixed_elr, fixed_resume_pc, fixed_return_thunk;
+-    uint64_t fixed_spsr, fixed_elr, fixed_resume_pc, fixed_return_thunk;
++    uint32_t fixed_guest_x18; /* The fixed capture only writes W18 or masks X18 to a byte. */
++    uint64_t fixed_saved_x16, fixed_saved_x17;
++    uint64_t fixed_svc_esr, direct_entries, fixed_esr;
++    uint64_t fixed_spsr, fixed_elr, fixed_resume_pc;
++    uint64_t fixed_return_thunk, fixed_sp_el1;
      uint64_t fixed_sp_el0, fixed_daif, fixed_pan;
++    uint64_t fixed_entry;
++    struct fixed_gateway { uint64_t resume_pc, return_thunk; } fixed_gates[FIXED_GATE_SITES];
++    uint64_t mmio_used,mmio_count;
++    struct lk_el0_mmio *mmio;
++    uint64_t mmio_saved_x15;
++    uint64_t fixed_constants[32];
      struct osrec_shadow shadow;
-@@ -70,8 +67,6 @@
+     struct osrec_context initial, *context;
+     struct lk_el0_fp fp;
+@@ -70,10 +76,8 @@
      volatile sig_atomic_t starting, handling, executing;
      struct lk_el0_counter *counters;
      uint64_t counter_count,counter_used;
 -    unsigned record_counters,record_mmio;
 -    uint64_t counter_base,counter_step,uart_va;
-     struct lk_el0_mmio *mmio;
-     uint64_t mmio_count,mmio_used;
+-    struct lk_el0_mmio *mmio;
+-    uint64_t mmio_count,mmio_used;
++    struct fixed_uart_site uart_sites[FIXED_UART_SITES];
++    size_t uart_count;
      struct application_header app;
-@@ -88,7 +83,7 @@
+     struct application_site *app_sites;
+     void *gateways;
+@@ -88,8 +92,8 @@
      struct fpsimd_context *signal_fp;
      uint32_t *fixed_code;
      uint64_t fixed_return_pc;
 -    const struct lk_el0_event *mode_cursor, *mode_pending_event;
-+    uint64_t mode_transition;
-     enum osrec_mode saved_mode;
+-    enum osrec_mode saved_mode;
++    uint64_t slow_returns;
++    enum osrec_mode mode_without_thunk;
  };
  static const int signals[4]={SIGTRAP,SIGILL,SIGSEGV,SIGBUS};
-@@ -126,22 +121,13 @@
+ static atomic_flag owned=ATOMIC_FLAG_INIT;
+@@ -126,24 +130,12 @@
          n->fp.fpsr=fp->fpsr;n->fp.fpcr=fp->fpcr;
      }
  }
@@ -45,29 +82,38 @@
 -/* A direct entry advances the cursor and sets the pending pointer. A direct
 - * return clears the pointer. If neither changed since C published its state,
 - * the emulator's mode is still current. */
-+/* The C mode remains current until a direct transition changes the token. */
  static void load_fixed_state(struct lk_el0_native *n)
  {
 -    if(n->event_cursor==n->mode_cursor && n->pending_event==n->mode_pending_event)
-+    if(n->transition==n->mode_transition)
-         n->shadow.mode=n->saved_mode;
-     else
+-        n->shadow.mode=n->saved_mode;
+-    else
 -        n->shadow.mode=n->pending_event?OSREC_KERNEL:OSREC_USER;
-+        n->shadow.mode=(n->transition&1)?OSREC_KERNEL:OSREC_USER;
++    n->shadow.mode=n->fixed_return_thunk?OSREC_KERNEL:n->mode_without_thunk;
      n->shadow.elr=n->fixed_elr;
      n->shadow.spsr=n->fixed_spsr;
++    n->shadow.esr=n->fixed_esr;
      n->shadow.sp_el0=n->fixed_sp_el0;
-@@ -157,8 +143,7 @@
+     n->shadow.sp_el1=n->fixed_sp_el1;
+     n->shadow.daif=n->fixed_daif&FIXED_DAIF_MASK;
+@@ -153,13 +145,14 @@
+ {
+     n->fixed_elr=n->shadow.elr;
+     n->fixed_spsr=n->shadow.spsr;
++    n->fixed_esr=n->shadow.esr;
+     n->fixed_sp_el0=n->shadow.sp_el0;
      n->fixed_sp_el1=n->shadow.sp_el1;
      n->fixed_daif=n->shadow.daif;
      n->fixed_pan=n->shadow.pan;
 -    n->mode_cursor=n->event_cursor;
 -    n->mode_pending_event=n->pending_event;
-+    n->mode_transition=n->transition;
-     n->saved_mode=n->shadow.mode;
+-    n->saved_mode=n->shadow.mode;
++    /* An outstanding direct syscall returns to user when its thunk clears.
++     * C-only transitions have no thunk and publish their actual mode. */
++    n->mode_without_thunk=n->fixed_return_thunk?OSREC_USER:n->shadow.mode;
  }
  static void stop(uint64_t reason,uint64_t pc,uint64_t detail,uint64_t far)
-@@ -173,12 +158,6 @@
+ {
+@@ -173,12 +166,6 @@
  __attribute__((visibility("hidden"))) uint64_t lk_native_counter(uint64_t pc,unsigned key)
  {
      struct lk_el0_native *n=running;
@@ -80,7 +126,7 @@
      if(n->counter_used==n->counter_count || n->counters[n->counter_used].pc!=pc ||
         n->counters[n->counter_used].encoding!=key)
          stop(OSREC_STOP_UNSUPPORTED,pc,key,n->counter_used);
-@@ -193,7 +172,7 @@
+@@ -193,7 +180,7 @@
      struct lk_el0_counter *copy=count?metadata_alloc(count*sizeof *copy):NULL;
      if(count && !copy)return LK_EL0_FAULT;
      if(count)memcpy(copy,events,count*sizeof *copy);
@@ -89,12 +135,13 @@
      return LK_EL0_OK;
  }
  uint64_t lk_el0_native_counters_consumed(struct lk_el0_native *n){return n?n->counter_used:0;}
-@@ -206,41 +185,9 @@
+@@ -206,41 +193,9 @@
      struct lk_el0_mmio *copy=count?metadata_alloc(count*sizeof *copy):NULL;
      if(count && !copy)return LK_EL0_FAULT;
      if(count)memcpy(copy,events,count*sizeof *copy);
 -    metadata_free(n->mmio);n->mmio=copy;n->mmio_count=count;n->mmio_used=0;n->record_mmio=0;return LK_EL0_OK;
--}
++    metadata_free(n->mmio);n->mmio=copy;n->mmio_count=count;n->mmio_used=0;return LK_EL0_OK;
+ }
 -enum lk_el0_status lk_el0_native_record_inputs(struct lk_el0_native *n,uint64_t base,uint64_t step,uint64_t uart,
 -                                              struct lk_el0_counter *c,uint64_t nc,struct lk_el0_mmio *m,uint64_t nm)
 -{
@@ -103,8 +150,7 @@
 -    n->record_counters=n->record_mmio=1;n->counter_base=base;n->counter_step=step;n->uart_va=uart;
 -    n->counters=c;n->counter_count=nc;n->counter_used=0;n->mmio=m;n->mmio_count=nm;n->mmio_used=0;
 -    return LK_EL0_OK;
-+    metadata_free(n->mmio);n->mmio=copy;n->mmio_count=count;n->mmio_used=0;return LK_EL0_OK;
- }
+-}
  uint64_t lk_el0_native_mmio_consumed(struct lk_el0_native *n){return n?n->mmio_used:0;}
 -enum lk_el0_status lk_el0_native_trace(struct lk_el0_native *n,struct lk_el0_event *events,uint64_t capacity)
 -{
@@ -132,11 +178,10 @@
  enum lk_el0_status lk_el0_native_execute(struct lk_el0_native *n,const struct osrec_context *user,struct lk_el0_result *out)
  {
      if(!out)return LK_EL0_BAD_ARGUMENT;
-@@ -460,21 +407,6 @@
-     }
+@@ -461,21 +416,6 @@
      struct mapping *swap=n->user;n->user=n->next;n->next=swap;n->users=fresh;n->pendings=0;
      return 0;
--}
+ }
 -static struct lk_el0_event *event(struct lk_el0_native *n)
 -{
 -    if(n->events) {
@@ -151,22 +196,167 @@
 -        stop(OSREC_STOP_UNSUPPORTED,n->context->pc,0x45564e54,n->event_count);
 -    n->event_count++;
 -    return NULL;
- }
+-}
  static void patch_instruction(struct lk_el0_native *n,uint64_t pc,uint32_t word)
  {
-@@ -591,9 +523,8 @@
+     uint64_t attrs=0,pa=translate(n,pc,0,&attrs);
+@@ -487,7 +427,8 @@
+ #define FIXED_CODE_SIZE (4u << 20)
+ #define FIXED_SLOT_WORDS 12u
+ #define SHADOW_BASE 18u
+-#define FIXED_GATE_WORDS 12u
++#define FIXED_GATE_WORDS 8u
++#define FIXED_UART_WORDS 48u
+
+ static uint32_t direct_branch(uint64_t pc,uint64_t target)
+ {
+@@ -515,7 +456,7 @@
+     case 0xe208: return &n->fixed_sp_el1;
+     case 0xc201: return &n->fixed_elr;
+     case 0xc200: return &n->fixed_spsr;
+-    case 0xc290: return &s->esr;
++    case 0xc290: return &n->fixed_esr;
+     case 0xc300: return &s->far;
+     case 0xda11: return &n->fixed_daif;
+     case 0xc213: return &n->fixed_pan;
+@@ -536,12 +477,77 @@
+     return 0xf9000000u|((offset/8)<<10)|(base<<5)|src;
+ }
+
++static uint32_t guest_x18_access(unsigned rt,int load)
++{
++    const size_t offset=offsetof(struct lk_el0_native,fixed_guest_x18);
++    _Static_assert(offsetof(struct lk_el0_native,fixed_guest_x18)<16384 &&
++                   offsetof(struct lk_el0_native,fixed_guest_x18)%4==0,
++                   "guest W18 fits the load/store immediate");
++    return (load?0xb9400000u:0xb9000000u)|
++           ((offset/4)<<10)|(SHADOW_BASE<<5)|rt;
++}
++
+ static uint32_t pair_q(unsigned first,unsigned second,size_t offset,int load)
+ {
+     return (load?0xa9400000u:0xa9000000u)|((offset/8)<<15)|
+            (second<<10)|(SHADOW_BASE<<5)|first;
+ }
+
++static int branch_to(uint32_t word,uint64_t pc,uint64_t target)
++{
++    int64_t displacement=(int64_t)((word&0x03ffffffu)^0x02000000u)-0x02000000;
++    return (word&0xfc000000u)==0x14000000u && pc+4*displacement==target;
++}
++
++static int writable_alias(const struct mapping *maps,size_t count,uint64_t pa)
++{
++    for(size_t i=0;i<count;i++)
++        if(pa>=maps[i].pa && pa-maps[i].pa<maps[i].size && (protection(maps[i].attrs,0)&PROT_WRITE))
++            return 1;
++    return 0;
++}
++
++/* Replace an unconditional branch to a read-only constant veneer with a
++ * load from the replay state. The destination and fallthrough stay the same. */
++static void inline_fixed_constants(struct lk_el0_native *n)
++{
++    struct constant_veneer { uint32_t load,branch; uint64_t literal; };
++    const size_t base=offsetof(struct lk_el0_native,fixed_constants);
++    const size_t capacity=sizeof n->fixed_constants/sizeof n->fixed_constants[0];
++    _Static_assert(offsetof(struct lk_el0_native,fixed_constants)+
++                   sizeof ((struct lk_el0_native *)0)->fixed_constants<=32768,
++                   "constant offsets fit the load immediate");
++    size_t count=0;
++    for(uint64_t i=0;i<n->lower.veneers;i++) {
++        uint64_t pc=n->lower.origins[i],veneer=n->lower.base+i*16,attrs=0;
++        if((veneer&15) || !is_kernel(n,veneer) || (pc&3) || !is_kernel(n,pc))continue;
++        uint64_t pa=translate(n,veneer,0,&attrs);
++        if((pa&1) || protection(attrs,0)!=(PROT_READ|PROT_EXEC))continue;
++        const struct constant_veneer *slot=physical(n,pa+(veneer&4095),sizeof *slot);
++        if(!slot || (slot->load&~31u)!=0x58000040u || !branch_to(slot->branch,veneer+4,pc+4))
++            continue;
++        unsigned rt=slot->load&31u;
++        if(rt==SHADOW_BASE || rt==31 || writable_alias(n->maps,n->h.maps,pa) ||
++           writable_alias(n->user,n->users,pa))continue;
++        uint64_t source_pa=translate(n,pc,0,&attrs);
++        const uint32_t *source=source_pa&1?NULL:physical(n,source_pa+(pc&4095),4);
++        if(!source || !(protection(attrs,0)&PROT_EXEC) || !branch_to(*source,pc,veneer))continue;
++        size_t index=0;
++        while(index<count && n->fixed_constants[index]!=slot->literal)++index;
++        if(index==capacity)continue;
++        if(index==count)n->fixed_constants[count++]=slot->literal;
++        patch_instruction(n,pc,load_q(rt,SHADOW_BASE,base+index*8));
++    }
++}
++
++static int immutable_word_matches(struct lk_el0_native *n,uint64_t pc,uint32_t expected)
++{
++    uint64_t attrs=0,pa=translate(n,pc,0,&attrs);
++    const uint32_t *word=pa&1?NULL:physical(n,pa+(pc&4095),4);
++    return word && *word==expected && protection(attrs,0)==(PROT_READ|PROT_EXEC) &&
++           !writable_alias(n->maps,n->h.maps,pa) && !writable_alias(n->user,n->users,pa);
++}
++
+ static void expect_word(struct lk_el0_native *n,uint64_t pc,uint32_t expected)
+ {
+     uint64_t attrs=0,pa=translate(n,pc,0,&attrs);
+@@ -554,14 +560,12 @@
+  * at every executed use from the audited IPC instruction trace. */
+ static uint32_t *prepare_fixed_x18(struct lk_el0_native *n,uint32_t *out)
+ {
+-    const size_t guest=offsetof(struct lk_el0_native,fixed_guest_x18);
+     const size_t saved=offsetof(struct lk_el0_native,fixed_saved_x16);
+     static const struct {
+         uint64_t pc;
+         uint32_t original, replacement;
+         int reads_x18, writes_x18;
+     } sites[]={
+-        {0x80008029f198ull,0x2a0c03f2u,0x2a0c03f0u,0,1}, /* mov w18, w12 */
+         {0x80008029f1a0ull,0x92401e52u,0x92401e10u,1,1}, /* and x18, x18, #0xff */
+         {0x80008029f1acull,0x4a120222u,0x4a100222u,1,0}, /* eor w2, w17, w18 */
+         {0x8000802ef620ull,0x121e7852u,0x121e7850u,0,1}, /* and w18, w2, #... */
+@@ -570,19 +574,25 @@
+     expect_word(n,0x800080011368ull,0xa9094ff2u);
+     expect_word(n,0x8000800113c8ull,0xaa1f03f2u);
+     expect_word(n,0x800080012120ull,0xa9494ff2u);
++    expect_word(n,0x80008029f198ull,0x2a0c03f2u); /* mov w18,w12 */
+     /* Guest userspace x18 is zero in the fixed IPC trace. */
+     patch_instruction(n,0x800080011368ull,0xa9094fffu);
+-    patch_instruction(n,0x8000800113c8ull,store_q(31,SHADOW_BASE,guest));
++    patch_instruction(n,0x8000800113c8ull,guest_x18_access(31,0));
+     patch_instruction(n,0x800080012120ull,0xa9494fffu);
++    patch_instruction(n,0x80008029f198ull,guest_x18_access(12,0));
+     for(size_t i=0;i<sizeof sites/sizeof *sites;i++) {
+         uint64_t pc=sites[i].pc;
+         expect_word(n,pc,sites[i].original);
++        /* MOV W2,#-1 and CSET W16,LT cannot fault or read the old X16. */
++        int save_x16=!(pc==0x8000802ef620ull &&
++                       immutable_word_matches(n,pc+4,0x12800002u) &&
++                       immutable_word_matches(n,pc+8,0x1a9fa7f0u));
+         patch_instruction(n,pc,direct_branch(pc,(uintptr_t)out));
+-        *out++=store_q(16,SHADOW_BASE,saved);
+-        if(sites[i].reads_x18)*out++=load_q(16,SHADOW_BASE,guest);
++        if(save_x16)*out++=store_q(16,SHADOW_BASE,saved);
++        if(sites[i].reads_x18)*out++=guest_x18_access(16,1);
+         *out++=sites[i].replacement;
+-        if(sites[i].writes_x18)*out++=store_q(16,SHADOW_BASE,guest);
+-        *out++=load_q(16,SHADOW_BASE,saved);
++        if(sites[i].writes_x18)*out++=guest_x18_access(16,0);
++        if(save_x16)*out++=load_q(16,SHADOW_BASE,saved);
+         *out=direct_branch((uintptr_t)out,pc+4);
+         ++out;
+     }
+@@ -591,10 +601,8 @@
 
 
  /* The copied sequences use only local branches and offsets from x18.
 - * At ERET x0 holds the restored syscall result, so the return sequence
 - * can complete the event directly. A syscall that does not return
 - * leaves its event incomplete.
-+ * Direct entry advances the generation and marks it outstanding. Direct
-+ * return keeps the generation and clears the outstanding bit.
-  * The low-address syscall gateways supply a site and a return landing pad. */
+- * The low-address syscall gateways supply a site and a return landing pad. */
++ * The low-address syscall gateway passes the user resume PC in x16 and
++ * publishes the pending return thunk. */
  static __attribute__((always_inline)) inline uint32_t *emit_fixed_entry(
      struct lk_el0_native *n,uint32_t *out,int anchor_sets_daif)
-@@ -602,18 +533,10 @@
+ {
+@@ -602,22 +610,12 @@
      __asm__ volatile(
          "b 9f\n"
          "1:\n"
@@ -182,14 +372,25 @@
 -        "str x17,[x16,#80]\n"
 -        "add x17,x16,%c[event_size]\n"
 -        "stp x17,x16,[x18,%c[cursor]]\n"
-+        "ldr x16,[x18,%c[transition]]\n"
-+        "add x16,x16,#2\n"
-+        "orr x16,x16,#1\n"
-+        "str x16,[x18,%c[transition]]\n"
-         "ldr x17,[x18,%c[resume]]\n"
-         "mrs x16,nzcv\n"
+-        "ldr x17,[x18,%c[resume]]\n"
+-        "mrs x16,nzcv\n"
++        "mrs x17,nzcv\n"
          "3: nop\n" /* Optional SSBS from the captured user PSTATE. */
-@@ -631,9 +554,6 @@
+-        "stp x16,x17,[x18,%c[spsr]]\n"
++        "stp x17,x16,[x18,%c[spsr]]\n"
++        "ldp x16,x17,[x18,%c[svc_esr]]\n"
++        "add x17,x17,#1\n"
++        "stp x17,x16,[x18,%c[entries]]\n"
+         "mov x16,sp\n"
+         ".if %c[anchor_sets_daif]\n"
+         "stp x16,x18,[x18,%c[sp_el0]]\n"
+@@ -626,14 +624,10 @@
+         "mov x16,#0x3c0\n"
+         "str x16,[x18,%c[daif]]\n"
+         ".endif\n"
+-        "ldp x16,x17,[x18,%c[sp_el1]]\n"
+-        "str x17,[x18,%c[esr]]\n"
++        "ldr x16,[x18,%c[sp_el1]]\n"
          "mov sp,x16\n"
          "ldp x16,x17,[x18,%c[saved16]]\n"
          "4: nop\n" /* Direct branch to the captured EL0 vector. */
@@ -199,17 +400,18 @@
          "2:\n"
          "9:\n"
          "adr %0,1b\n"
-@@ -643,30 +563,20 @@
+@@ -643,34 +637,25 @@
          : "=&r"(begin),"=&r"(end),"=&r"(ssbs),"=&r"(branch)
          : [anchor_sets_daif] "i"(anchor_sets_daif),
            [saved16] "i"(offsetof(struct lk_el0_native,fixed_saved_x16)),
 -          [event_end] "i"(offsetof(struct lk_el0_native,event_end)),
 -          [cursor] "i"(offsetof(struct lk_el0_native,event_cursor)),
 -          [event_size] "i"(sizeof(struct lk_el0_event)),
-+          [transition] "i"(offsetof(struct lk_el0_native,transition)),
-           [resume] "i"(offsetof(struct lk_el0_native,fixed_resume_pc)),
+-          [resume] "i"(offsetof(struct lk_el0_native,fixed_resume_pc)),
++          [svc_esr] "i"(offsetof(struct lk_el0_native,fixed_svc_esr)),
++          [entries] "i"(offsetof(struct lk_el0_native,direct_entries)),
            [spsr] "i"(offsetof(struct lk_el0_native,fixed_spsr)),
-           [esr] "i"(offsetof(struct lk_el0_native,shadow.esr)),
+-          [esr] "i"(offsetof(struct lk_el0_native,shadow.esr)),
            [sp_el0] "i"(offsetof(struct lk_el0_native,fixed_sp_el0)),
            [sp_el1] "i"(offsetof(struct lk_el0_native,fixed_sp_el1)),
            [daif] "i"(offsetof(struct lk_el0_native,fixed_daif)));
@@ -222,8 +424,12 @@
                         offsetof(struct lk_el0_native,fixed_spsr)+8 &&
                     offsetof(struct lk_el0_native,fixed_daif)==
                         offsetof(struct lk_el0_native,fixed_sp_el0)+8 &&
-                    offsetof(struct lk_el0_native,fixed_svc_esr)==
-                        offsetof(struct lk_el0_native,fixed_sp_el1)+8,
+-                   offsetof(struct lk_el0_native,fixed_svc_esr)==
+-                       offsetof(struct lk_el0_native,fixed_sp_el1)+8,
++                   offsetof(struct lk_el0_native,direct_entries)==
++                       offsetof(struct lk_el0_native,fixed_svc_esr)+8 &&
++                   offsetof(struct lk_el0_native,fixed_esr)==
++                       offsetof(struct lk_el0_native,direct_entries)+8,
                     "paired entry fields");
 -    _Static_assert(sizeof(struct lk_el0_event)==88 &&
 -                   offsetof(struct lk_el0_event,result)==64 &&
@@ -232,7 +438,12 @@
      size_t slots=(uintptr_t)end/4-(uintptr_t)begin/4;
      memcpy(out,begin,slots*sizeof *out);
      if(n->context->pstate&(1ull<<12))
-@@ -696,12 +606,11 @@
+-        out[((uintptr_t)ssbs-(uintptr_t)begin)/4]=0xb2740210u; /* orr x16,x16,#0x1000 */
++        out[((uintptr_t)ssbs-(uintptr_t)begin)/4]=0xb2740231u; /* orr x17,x17,#0x1000 */
+     uint32_t *jump=out+((uintptr_t)branch-(uintptr_t)begin)/4;
+     *jump=direct_branch((uintptr_t)jump,n->shadow.vbar+0x400);
+     return out+slots;
+@@ -696,13 +681,11 @@
          "cbnz x16,5f\n"
          "stp xzr,xzr,[x18,%c[daif]]\n"
          "msr nzcv,x17\n"
@@ -240,32 +451,218 @@
 -        "cbz x16,8f\n"
 -        "mov x17,#1\n"
 -        "stp x0,x17,[x16,%c[result]]\n"
-+        "6: ldr x16,[x18,%c[transition]]\n"
-+        "tbz x16,#0,8f\n"
-+        "and x17,x16,#0xfffffffffffffffe\n"
++        "6: ldr x17,[x18,%c[thunk]]\n"
++        "cbz x17,8f\n"
          "mov x16,sp\n"
 -        "stp xzr,x16,[x18,%c[pending_event]]\n" /* Clear the event and save SP_EL1. */
-+        "stp x17,x16,[x18,%c[transition]]\n" /* Complete the transition and save SP_EL1. */
-         "ldp x17,x16,[x18,%c[thunk]]\n"
+-        "ldp x17,x16,[x18,%c[thunk]]\n"
++        "stp xzr,x16,[x18,%c[thunk]]\n" /* Clear the thunk and save SP_EL1. */
++        "ldr x16,[x18,%c[sp_el0]]\n"
          "mov sp,x16\n"
          "br x17\n"
-@@ -728,13 +637,12 @@
+         "5: and x16,x16,#0xfffffffffffffc3f\n" /* Ignore DAIF. */
+@@ -728,17 +711,14 @@
          : "=&r"(without_ssbs),"=&r"(with_ssbs),"=&r"(templates_end)
          : [saved16] "i"(offsetof(struct lk_el0_native,fixed_saved_x16)),
            [elr] "i"(offsetof(struct lk_el0_native,fixed_elr)),
 -          [pending_event] "i"(offsetof(struct lk_el0_native,pending_event)),
 -          [result] "i"(offsetof(struct lk_el0_event,result)),
-+          [transition] "i"(offsetof(struct lk_el0_native,transition)),
            [spsr] "i"(offsetof(struct lk_el0_native,fixed_spsr)),
            [daif] "i"(offsetof(struct lk_el0_native,fixed_daif)),
++          [sp_el0] "i"(offsetof(struct lk_el0_native,fixed_sp_el0)),
            [thunk] "i"(offsetof(struct lk_el0_native,fixed_return_thunk)));
      _Static_assert(offsetof(struct lk_el0_native,fixed_sp_el1)==
 -                       offsetof(struct lk_el0_native,pending_event)+8 &&
-+                       offsetof(struct lk_el0_native,transition)+8 &&
++                       offsetof(struct lk_el0_native,fixed_return_thunk)+8 &&
                     offsetof(struct lk_el0_native,fixed_resume_pc)==
                         offsetof(struct lk_el0_native,fixed_elr)+8 &&
-                    offsetof(struct lk_el0_native,fixed_sp_el0)==
-@@ -927,7 +835,6 @@
+-                   offsetof(struct lk_el0_native,fixed_sp_el0)==
+-                       offsetof(struct lk_el0_native,fixed_return_thunk)+8 &&
+                    offsetof(struct lk_el0_native,fixed_pan)==
+                        offsetof(struct lk_el0_native,fixed_daif)+8,
+                    "paired return fields");
+@@ -759,30 +739,151 @@
+ {
+     const size_t saved=offsetof(struct lk_el0_native,fixed_saved_x16);
+     const size_t site=offsetof(struct lk_el0_native,fixed_resume_pc);
++    const size_t entry_offset=offsetof(struct lk_el0_native,fixed_entry);
++    const size_t gates=offsetof(struct lk_el0_native,fixed_gates);
+     _Static_assert(offsetof(struct lk_el0_native,fixed_saved_x16)<512 &&
+                    offsetof(struct lk_el0_native,fixed_resume_pc)<512 &&
++                   offsetof(struct lk_el0_native,fixed_gates[FIXED_GATE_SITES-1])<512 &&
++                   offsetof(struct fixed_gateway,return_thunk)==8 &&
++                   offsetof(struct lk_el0_native,fixed_entry)<32768 &&
+                    offsetof(struct lk_el0_native,fixed_saved_x17)==
+                        offsetof(struct lk_el0_native,fixed_saved_x16)+8 &&
+                    offsetof(struct lk_el0_native,fixed_return_thunk)==
+                        offsetof(struct lk_el0_native,fixed_resume_pc)+8,"paired gateway offsets");
++    n->fixed_entry=(uintptr_t)entry;
+     for(size_t i=0;i<n->app.count;i++) {
+         const struct application_site *a=n->app_sites+i;
+         uint32_t *slot=fixed_gateway_slot(n,i);
++        n->fixed_gates[i]=(struct fixed_gateway){a->pc+4,(uintptr_t)(slot+5)};
+         slot[0]=pair_q(16,17,saved,0);
+-        slot[1]=0x58000010u|(7u<<5); /* ldr x16, slot[8] */
+-        slot[2]=0x10000011u|(4u<<5); /* adr x17, slot[6] */
+-        slot[3]=pair_q(16,17,site,0);
+-        slot[4]=0x58000010u|(6u<<5); /* ldr x16, slot[10] */
+-        slot[5]=0xd61f0200u;         /* br x16 */
+-        slot[6]=pair_q(16,17,saved,1);
+-        slot[7]=direct_branch((uintptr_t)(slot+7),a->pc+4);
+-        uint64_t address=(uintptr_t)entry;
+-        uint64_t resume=a->pc+4;
+-        memcpy(slot+8,&resume,sizeof resume);
+-        memcpy(slot+10,&address,sizeof address);
++        slot[1]=pair_q(16,17,gates+i*sizeof n->fixed_gates[0],1);
++        slot[2]=pair_q(16,17,site,0);
++        slot[3]=load_q(17,SHADOW_BASE,entry_offset);
++        slot[4]=0xd61f0220u; /* br x17, preserving the resume PC in x16 */
++        slot[5]=pair_q(16,17,saved,1);
++        slot[6]=direct_branch((uintptr_t)(slot+6),a->pc+4);
++        slot[7]=0xd4200000u; /* brk: unused gateway padding */
+     }
+ }
+
++/* The pinned PL011 sites use strh w8,[x9] and ldrh w9,[x9].
++ * On a mismatch execute the original access with all registers restored.
++ * If it faults, the signal handler reports and checks it at its original PC. */
++static __attribute__((always_inline)) inline uint32_t *emit_fixed_uart(
++    struct lk_el0_native *n,uint32_t *out,const struct lk_el0_mmio *event,
++    uint32_t word,int write)
++{
++    const uint32_t *begin,*end,*advance,*fault,*retry,*pc,*address;
++    __asm__ volatile(
++        "b 9f\n"
++        ".balign 8\n"
++        "1: stp x16,x17,[x18,%c[saved16]]\n"
++        "str x15,[x18,%c[saved15]]\n"
++        "ldr x16,[x18,%c[thunk]]\n"
++        "cbz x16,2f\n"
++        "ldp x16,x17,[x18,%c[used]]\n"
++        "sub x17,x17,x16\n"
++        "cbz x17,2f\n"
++        "add x16,x16,x16,lsl #2\n" /* Five 64-bit fields per event. */
++        "ldr x17,[x18,%c[mmio]]\n"
++        "add x16,x17,x16,lsl #3\n"
++        "ldr x15,4f\n"
++        "ldr x17,[x16]\n"
++        "sub x17,x17,x15\n"
++        "cbnz x17,2f\n"
++        "ldr x15,5f\n"
++        "sub x17,x9,x15\n"
++        "cbnz x17,2f\n"
++        "ldr x17,[x16,#8]\n"
++        "sub x17,x17,x15\n"
++        "cbnz x17,2f\n"
++        "ldp x15,x17,[x16,#16]\n" /* Access width and direction. */
++        "eor x15,x15,#2\n"
++        "cbnz x15,2f\n"
++        ".if %c[write]\n"
++        "eor x17,x17,#1\n"
++        ".endif\n"
++        "cbnz x17,2f\n"
++        "ldr x17,[x16,#32]\n"
++        ".if %c[write]\n"
++        "uxth w15,w8\n"
++        "sub x17,x17,x15\n"
++        "cbnz x17,2f\n"
++        ".else\n"
++        "uxth w9,w17\n"
++        ".endif\n"
++        "ldr x16,[x18,%c[used]]\n"
++        "add x16,x16,#1\n"
++        "str x16,[x18,%c[used]]\n"
++        "ldr x15,[x18,%c[saved15]]\n"
++        "ldp x16,x17,[x18,%c[saved16]]\n"
++        "3: nop\n"
++        "2: ldr x15,[x18,%c[saved15]]\n"
++        "ldp x16,x17,[x18,%c[saved16]]\n"
++        "6: nop\n"
++        "7: nop\n"
++        ".balign 8\n"
++        "4: .quad 0\n"
++        "5: .quad 0\n"
++        "8:\n"
++        "9: adr %0,1b\n"
++        "adr %1,8b\n"
++        "adr %2,3b\n"
++        "adr %3,6b\n"
++        "adr %4,7b\n"
++        "adr %5,4b\n"
++        "adr %6,5b\n"
++        : "=&r"(begin),"=&r"(end),"=&r"(advance),"=&r"(fault),"=&r"(retry),"=&r"(pc),"=&r"(address)
++        : [saved16] "i"(offsetof(struct lk_el0_native,fixed_saved_x16)),
++          [saved15] "i"(offsetof(struct lk_el0_native,mmio_saved_x15)),
++          [thunk] "i"(offsetof(struct lk_el0_native,fixed_return_thunk)),
++          [used] "i"(offsetof(struct lk_el0_native,mmio_used)),
++          [mmio] "i"(offsetof(struct lk_el0_native,mmio)),
++          [write] "i"(write));
++    _Static_assert(offsetof(struct lk_el0_native,mmio_count)==
++                       offsetof(struct lk_el0_native,mmio_used)+8 &&
++                   sizeof(struct lk_el0_mmio)==40 &&
++                   offsetof(struct lk_el0_mmio,address)==8 &&
++                   offsetof(struct lk_el0_mmio,size)==16 &&
++                   offsetof(struct lk_el0_mmio,write)==24 &&
++                   offsetof(struct lk_el0_mmio,value)==32,"UART event layout");
++    size_t slots=(uintptr_t)end/4-(uintptr_t)begin/4;
++    if(slots>FIXED_UART_WORDS)stop(OSREC_STOP_RUNTIME,event->pc,slots,0);
++    memcpy(out,begin,slots*sizeof *out);
++    memcpy(out+((uintptr_t)pc-(uintptr_t)begin)/4,&event->pc,sizeof event->pc);
++    memcpy(out+((uintptr_t)address-(uintptr_t)begin)/4,&event->address,sizeof event->address);
++    uint32_t *next=out+((uintptr_t)advance-(uintptr_t)begin)/4;
++    uint32_t *original=out+((uintptr_t)fault-(uintptr_t)begin)/4;
++    uint32_t *resume=out+((uintptr_t)retry-(uintptr_t)begin)/4;
++    *next=direct_branch((uintptr_t)next,event->pc+4);
++    *original=word;
++    *resume=direct_branch((uintptr_t)resume,event->pc+4);
++    n->uart_sites[n->uart_count++]=(struct fixed_uart_site){event->pc,(uintptr_t)original,word};
++    patch_instruction(n,event->pc,direct_branch(event->pc,(uintptr_t)out));
++    return out+slots;
++}
++
++static size_t prepare_fixed_uart(struct lk_el0_native *n,size_t used)
++{
++    for(uint64_t i=0;i<n->mmio_count && n->uart_count<FIXED_UART_SITES;i++) {
++        const struct lk_el0_mmio *event=n->mmio+i;
++        uint64_t pc=event->pc,attrs=0;
++        if((pc&3) || !is_kernel(n,pc) || (event->address&1) || event->size!=2 ||
++           event->write>1 || !(translate(n,event->address,0,&attrs)&1))continue;
++        uint64_t pa=translate(n,pc,0,&attrs);
++        const uint32_t *word=pa&1?NULL:physical(n,pa+(pc&4095),4);
++        if(!word || !(protection(attrs,0)&PROT_EXEC) ||
++           *word!=(event->write?0x79000128u:0x79400129u))continue;
++        /* A duplicate PC already contains the branch to its UART code. */
++        used=(used+1)&~(size_t)1;
++        if(used>FIXED_CODE_SIZE/4-FIXED_UART_WORDS-128)break;
++        uint32_t *out=n->fixed_code+used;
++        out=event->write?emit_fixed_uart(n,out,event,*word,1):emit_fixed_uart(n,out,event,*word,0);
++        used=(size_t)(out-n->fixed_code);
++    }
++    return used;
++}
++
+ static void prepare_fixed_code(struct lk_el0_native *n)
+ {
+     /* The trusted IPC process and kernel share fixed mappings for this run. */
+@@ -799,7 +900,7 @@
+     n->fixed_tpidr_el1=n->shadow.value[0xc684];
+     n->fixed_dczid_el0=n->shadow.value[0xd807];
+     if(n->context->x[SHADOW_BASE] || n->context->pc!=0x201160ull ||
+-       n->app.count!=15 || n->app.hook!=0x8000812f584cull ||
++       n->app.count!=FIXED_GATE_SITES || n->app.hook!=0x8000812f584cull ||
+        n->app.target!=0x8000800190d8ull || n->fixed_return_pc!=0x80008001217cull)
+         stop(OSREC_STOP_UNSUPPORTED,n->context->pc,SHADOW_BASE,n->context->x[SHADOW_BASE]);
+     size_t used=(size_t)(prepare_fixed_x18(n,n->fixed_code)-n->fixed_code);
+@@ -912,6 +1013,8 @@
+         used=(size_t)(out+1-n->fixed_code);
+         patch_instruction(n,pc,direct_branch(pc,(uintptr_t)start));
+     }
++    inline_fixed_constants(n);
++    used=prepare_fixed_uart(n,used);
+     if(used>FIXED_CODE_SIZE/4-128 || !n->fixed_return_pc)
+         stop(OSREC_STOP_UNSUPPORTED,n->context->pc,n->fixed_return_pc,used);
+     uint32_t *entry=n->fixed_code+used;
+@@ -927,7 +1030,6 @@
  {
      if(n->prepared)return;
      if(!n->app_sites || !n->vma.magic)stop(OSREC_STOP_UNSUPPORTED,n->context->pc,0x415050,0);
@@ -273,16 +670,24 @@
      void *g=mmap((void *)(uintptr_t)n->app.base,n->app.size,PROT_READ|PROT_WRITE,
                   MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0);
      if(g==MAP_FAILED)stop(OSREC_STOP_UNSUPPORTED,n->context->pc,errno,n->app.base);
-@@ -981,7 +888,7 @@
+@@ -976,13 +1078,13 @@
+ /* Operate directly on the interrupted frame for a validated UART access.
+  * A rejected access leaves the frame unchanged and supplies the diagnostic
+  * detail for the general signal path. */
+-static int emulate_mmio(struct lk_el0_native *n,uint64_t far,ucontext_t *u,uint64_t *detail)
++static int emulate_mmio(struct lk_el0_native *n,uint64_t far,ucontext_t *u,uint32_t word,uint64_t *detail)
+ {
      if(n->mmio_used==n->mmio_count)return 0;
      struct lk_el0_mmio *e=n->mmio+n->mmio_used;
      uint64_t pc=u->uc_mcontext.pc;
 -    if(!n->record_mmio && (e->pc!=pc || e->address!=far))return 0;
+-    uint32_t word=*(uint32_t *)(uintptr_t)pc;
 +    if(e->pc!=pc || e->address!=far)return 0;
-     uint32_t word=*(uint32_t *)(uintptr_t)pc;
++    if(!word)word=*(uint32_t *)(uintptr_t)pc;
      if((word&0x3b000000)!=0x39000000 || word&(1u<<26) || (word>>22&3)>1) {
          *detail=word;
-@@ -991,12 +898,7 @@
+         return -1;
+@@ -991,12 +1093,7 @@
      uint64_t address=(rn==31?u->uc_mcontext.sp:u->uc_mcontext.regs[rn])+((word>>10&4095)*size);
      uint64_t mask=size==8?UINT64_MAX:(1ull<<(size*8))-1;
      uint64_t value=write && rt!=31?u->uc_mcontext.regs[rt]&mask:0;
@@ -296,18 +701,28 @@
          *detail=n->mmio_used;
          return -1;
      }
-@@ -1124,9 +1026,7 @@
+@@ -1122,12 +1219,16 @@
+     int user=n->shadow.mode==OSREC_USER;
+     if(sig==SIGSEGV || sig==SIGBUS) {
          int mmio=0;
++        uint32_t word=0;
          uint64_t detail=esr;
++        for(size_t i=0;i<n->uart_count;i++)if(u->uc_mcontext.pc==n->uart_sites[i].fault_pc) {
++            u->uc_mcontext.pc=n->uart_sites[i].pc;
++            word=n->uart_sites[i].word;
++            break;
++        }
          /* QEMU Linux-user supplies the fault address without an ESR record. */
 -        if(!esr && !user && n->record_mmio && n->uart_va &&
 -           (far-n->uart_va==0 || far-n->uart_va==0x18 || far-n->uart_va==0x38) &&
 -           far!=u->uc_mcontext.pc)
+-            mmio=emulate_mmio(n,far,u,&detail);
 +        if(!esr && !user && far!=u->uc_mcontext.pc)
-             mmio=emulate_mmio(n,far,u,&detail);
++            mmio=emulate_mmio(n,far,u,word,&detail);
          if(mmio>0) {
              u->uc_mcontext.pstate&=signal_pstate_mask;
-@@ -1153,20 +1053,10 @@
+             n->signal_fp=NULL;
+@@ -1153,18 +1254,15 @@
          far=n->shadow.far; /* BRK leaves the architectural FAR unchanged. */
          esr=(0x3cull<<26)|(1ull<<25)|((word>>5)&65535);
      } else {esr=0;far=n->shadow.far;} /* undefined instructions do not set FAR */
@@ -318,29 +733,33 @@
      osrec_lowered_exception(&n->shadow,c,esr,far);
      osrec_handle_exception(&n->shadow,c,n->sites,n->h.sites,esr,far);
  resume:
--    if(n->prepared) {
+     if(n->prepared) {
 -        /* An emulated return may bypass the direct result store. Its
 -         * incomplete record must survive a subsequent direct entry. */
 -        if(n->shadow.mode==OSREC_USER)
 -            initialize_incomplete_event(n->pending_event);
--        publish_fixed_state(n);
--    }
-+    if(n->prepared)publish_fixed_state(n);
-     if(n->shadow.mode==OSREC_USER && !n->application) {
-         capture_fp(n);n->status=LK_EL0_OK;siglongjmp(n->jump,1);
++        /* A direct syscall can finish through the C exception-return path. */
++        if(n->shadow.mode==OSREC_USER && n->fixed_return_thunk) {
++            n->fixed_return_thunk=0;
++            ++n->slow_returns;
++        }
+         publish_fixed_state(n);
      }
-@@ -1186,9 +1076,7 @@
+     if(n->shadow.mode==OSREC_USER && !n->application) {
+@@ -1186,9 +1284,9 @@
      __asm__ volatile(".arch_extension fp\n\tmrs %0,fpcr\n\tmrs %1,fpsr\n\t.arch_extension nofp":"=r"(host_fpcr),"=r"(host_fpsr));
      n->context=c;n->diagnostic=d;n->status=LK_EL0_FAULT;n->handling=0;n->starting=1;
      n->application=s->mode==OSREC_USER;
 -    const struct lk_el0_event *first_event=n->event_cursor;
 -    unsigned had_pending=n->pending_event!=NULL;
 -    n->slow_events=0;
-+    uint64_t first_transition=n->transition;
++    uint64_t first_entries=n->direct_entries;
++    unsigned first_pending=n->fixed_return_thunk!=0;
++    uint64_t first_slow_returns=n->slow_returns;
      running=n;
      lk_stop_handler old_stop=lk_backend_stop;lk_backend_stop=stop;
      if(!sigsetjmp(n->jump,1)) {
-@@ -1205,18 +1093,10 @@
+@@ -1205,18 +1303,11 @@
      }
      if(n->prepared) {
          load_fixed_state(n);
@@ -356,13 +775,14 @@
 -            s->emulated+=direct_returns;
 -        }
 -        initialize_incomplete_event(pending);
-+        uint64_t entries=(n->transition>>1)-(first_transition>>1);
++        uint64_t entries=n->direct_entries-first_entries;
++        uint64_t completed=entries+first_pending-(n->fixed_return_thunk!=0);
 +        s->entries+=entries;
-+        s->emulated+=entries+(first_transition&1)-(n->transition&1);
++        s->emulated+=completed-(n->slow_returns-first_slow_returns);
      }
      visibility(n,1);
      n->executing=0;n->application=0;lk_backend_stop=old_stop;running=NULL;
-@@ -1516,11 +1396,6 @@
+@@ -1516,11 +1607,6 @@
  enum lk_el0_status lk_el0_native_mmio(struct lk_el0_native *n,const struct lk_el0_mmio *e,uint64_t c)
  {(void)n;(void)e;(void)c;return LK_EL0_UNSUPPORTED;}
  uint64_t lk_el0_native_mmio_consumed(struct lk_el0_native *n){(void)n;return 0;}
@@ -374,7 +794,7 @@
  enum lk_el0_status lk_el0_native_execute(struct lk_el0_native *n,const struct osrec_context *c,struct lk_el0_result *r)
  {(void)n;(void)c;(void)r;return LK_EL0_UNSUPPORTED;}
  enum lk_el0_status lk_el0_native_open(const char *p,struct lk_el0_native **n,struct lk_el0_diagnostic *d)
-@@ -1533,9 +1408,6 @@
+@@ -1533,9 +1619,6 @@
  struct lk_el0_fp *lk_el0_native_fp(struct lk_el0_native *n){(void)n;return NULL;}
  enum lk_el0_status lk_el0_native_memory(struct lk_el0_native *n,uint64_t a,void *b,uint64_t s,int w,int k,struct lk_el0_diagnostic *d)
  {(void)n;(void)a;(void)b;(void)s;(void)w;(void)k;(void)d;return LK_EL0_UNSUPPORTED;}

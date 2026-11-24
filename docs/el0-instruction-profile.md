@@ -8,7 +8,7 @@ the metric and thresholds. The execution interval is the budgeted window;
 startup and final validation remain separately reported.
 
 A separate [fixed-mapping Linux-user IPC experiment](el0-linux-user-ipc.md)
-measures 0.0362 runtime instructions per kernel instruction in an
+measures 0.0311 runtime instructions per kernel instruction in an
 execution-only ELF, down from 0.0432 in the checked reader. Both use the
 10-million-kernel-instruction prefix of the prepared IPC capture.
 The [session handoff](el0-status.md) records the verified runs and open validation.
